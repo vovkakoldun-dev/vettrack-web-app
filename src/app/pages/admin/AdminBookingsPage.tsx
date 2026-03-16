@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useLocation } from 'react-router';
 import {
   Plus, Search, Clock, User, Calendar as CalendarIcon,
@@ -7,7 +7,7 @@ import {
   Pencil, Trash2, Bell, Stethoscope, UserCheck,
   Smartphone, ChevronDown, ChevronUp, Phone, MessageCircle, X,
 } from 'lucide-react';
-// MOCK_APPOINTMENTS removed
+import { useAppointments } from '../../hooks/useAppointments';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Textarea } from '../../components/ui/textarea';
@@ -82,7 +82,7 @@ function isToday(date: Date): boolean {
   return date.getDate() === now.getDate() && date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
 }
 
-function getDatesWithAppointments(appts: typeof MOCK_APPOINTMENTS): Date[] {
+function getDatesWithAppointments(appts: { date: string }[]): Date[] {
   const dateSet = new Set<string>();
   appts.forEach((a) => dateSet.add(a.date));
   return Array.from(dateSet).map((d) => new Date(d + 'T12:00:00'));
@@ -134,15 +134,76 @@ type FilterTab = typeof FILTER_TABS[number];
 
 export default function AdminBookingsPage() {
   const location = useLocation();
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date(2026, 2, 11));
+  const { appointments: supaAppts, loading: apptsLoading } = useAppointments();
+  const [selectedDate, setSelectedDate] = useState<Date>(() => new Date());
   const [activeFilter, setActiveFilter] = useState<FilterTab>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'schedule' | 'month'>('list');
-  const [monthViewDate, setMonthViewDate] = useState<Date>(new Date(2026, 2, 1));
+  const [monthViewDate, setMonthViewDate] = useState<Date>(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [newApptTime, setNewApptTime] = useState('09:00');
-  const [newApptDate, setNewApptDate] = useState('2026-03-11');
-  const [appointments, setAppointments] = useState([]);
+  const [newApptDate, setNewApptDate] = useState(() => {
+    const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  });
+
+  // Map Supabase AppointmentRow[] → the shape expected by existing UI
+  const mappedAppointments = useMemo(() =>
+    supaAppts.map((a) => {
+      const dt = new Date(a.scheduled_at);
+      const yyyy = dt.getFullYear();
+      const mm = String(dt.getMonth() + 1).padStart(2, '0');
+      const dd = String(dt.getDate()).padStart(2, '0');
+      const startH = dt.getHours();
+      const startM = dt.getMinutes();
+      const ampm = startH >= 12 ? 'PM' : 'AM';
+      const h12 = startH > 12 ? startH - 12 : startH === 0 ? 12 : startH;
+      const timeStart = `${h12}:${String(startM).padStart(2, '0')} ${ampm}`;
+      const dur = a.duration_minutes ?? 30;
+      const endDt = new Date(dt.getTime() + dur * 60000);
+      const endH = endDt.getHours();
+      const endM = endDt.getMinutes();
+      const endAmpm = endH >= 12 ? 'PM' : 'AM';
+      const endH12 = endH > 12 ? endH - 12 : endH === 0 ? 12 : endH;
+      const timeEnd = `${endH12}:${String(endM).padStart(2, '0')} ${endAmpm}`;
+      return {
+        id: a.id,
+        date: `${yyyy}-${mm}-${dd}`,
+        timeStart,
+        timeEnd,
+        petName: a.pets?.name ?? '—',
+        petImage: a.pets?.photo_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(a.pets?.name || 'P')}&background=74C69D&color=fff`,
+        ownerName: a.clients ? `${a.clients.first_name} ${a.clients.last_name}` : '—',
+        species: a.pets?.species ?? '—',
+        service: a.services?.name ?? a.reason ?? '—',
+        vet: a.staff ? `Dr. ${a.staff.last_name}` : '—',
+        status: a.status as string,
+        notes: a.notes ?? '',
+      };
+    }),
+    [supaAppts],
+  );
+
+  const [localOverrides, setLocalOverrides] = useState<Record<string, Record<string, unknown>>>({});
+  const appointments = useMemo(() =>
+    mappedAppointments.map((a) => ({ ...a, ...(localOverrides[a.id] || {}) })),
+    [mappedAppointments, localOverrides],
+  );
+  const setAppointments = (fn: (prev: typeof appointments) => typeof appointments) => {
+    // Capture overrides from the function result
+    const updated = fn(appointments);
+    const newOverrides: Record<string, Record<string, unknown>> = { ...localOverrides };
+    updated.forEach((u) => {
+      const orig = mappedAppointments.find((a) => a.id === u.id);
+      if (orig) {
+        const diff: Record<string, unknown> = {};
+        for (const key of Object.keys(u) as (keyof typeof u)[]) {
+          if (u[key] !== orig[key]) diff[key as string] = u[key];
+        }
+        if (Object.keys(diff).length > 0) newOverrides[u.id] = diff;
+      }
+    });
+    setLocalOverrides(newOverrides);
+  };
   const [detailOpen, setDetailOpen] = useState(false);
   const [arrivedToast, setArrivedToast] = useState<string | null>(null);
   const [detailMode, setDetailMode] = useState<'view' | 'edit'>('view');
@@ -235,7 +296,7 @@ export default function AdminBookingsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const datesWithAppointments = [];
+  const datesWithAppointments = getDatesWithAppointments(appointments);
 
   const dayAppointments = appointments.filter((a) => isSameDay(a.date, selectedDate));
 
@@ -273,11 +334,11 @@ export default function AdminBookingsPage() {
     next.setDate(next.getDate() + 1);
     setSelectedDate(next);
   };
-  const goToToday = () => setSelectedDate(new Date(2026, 2, 11));
+  const goToToday = () => setSelectedDate(new Date());
 
   const goToPrevMonth = () => setMonthViewDate((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
   const goToNextMonth = () => setMonthViewDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
-  const goToCurrentMonth = () => setMonthViewDate(new Date(2026, 2, 1));
+  const goToCurrentMonth = () => { const n = new Date(); setMonthViewDate(new Date(n.getFullYear(), n.getMonth(), 1)); };
 
   const mvYear = monthViewDate.getFullYear();
   const mvMonth = monthViewDate.getMonth();
@@ -291,7 +352,7 @@ export default function AdminBookingsPage() {
     (acc[appt.date] = acc[appt.date] || []).push(appt);
     return acc;
   }, {});
-  const isCurrentMonthView = monthViewDate.getMonth() === new Date(2026, 2, 1).getMonth() && monthViewDate.getFullYear() === new Date(2026, 2, 1).getFullYear();
+  const isCurrentMonthView = monthViewDate.getMonth() === new Date().getMonth() && monthViewDate.getFullYear() === new Date().getFullYear();
   const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
   const openNewApptDialog = () => {

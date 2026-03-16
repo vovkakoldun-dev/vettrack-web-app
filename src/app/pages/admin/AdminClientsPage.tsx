@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import { Search, Plus, Mail, Phone, ChevronDown, CheckCircle2, AlertCircle, AlertTriangle } from 'lucide-react';
 import { AddClientDialog } from '../../components/AddClientDialog';
 import { Input } from '../../components/ui/input';
 import { Button } from '../../components/ui/button';
+import { useClients } from '../../hooks/useClients';
 import {
   Table,
   TableHeader,
@@ -72,22 +73,43 @@ const STATUS_OPTIONS: {
   },
 ];
 
-// ─── Mock Data ────────────────────────────────────────────────
-
-const INITIAL_CLIENTS: Client[] = []
-
 // ─── Page ─────────────────────────────────────────────────────
 
 export default function AdminClientsPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
-  const [clientList, setClientList] = useState<Client[]>(INITIAL_CLIENTS);
+  const { clients: supabaseClients, loading } = useClients();
   const [addClientOpen, setAddClientOpen] = useState(false);
+  const [statusOverrides, setStatusOverrides] = useState<Record<string, Status>>({});
+
+  // Map Supabase ClientRow[] → Client[] for the existing UI
+  const clientList: Client[] = useMemo(() =>
+    supabaseClients.map((c, idx) => {
+      const pet = c.pets?.[0];
+      return {
+        id: idx + 1,
+        petImage: pet?.photo_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(pet?.name || 'Pet')}&background=74C69D&color=fff`,
+        petName: pet?.name || '—',
+        species: pet?.species || '—',
+        breed: pet?.breed || '—',
+        ownerName: `${c.first_name} ${c.last_name}`,
+        ownerEmail: c.email || '—',
+        ownerPhone: c.phone || '—',
+        lastVisit: new Date(c.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        nextAppointment: '—',
+        balance: 0,
+        status: (statusOverrides[c.id] || 'Healthy') as Status,
+        _supaId: c.id,
+      };
+    }),
+    [supabaseClients, statusOverrides],
+  ) as (Client & { _supaId: string })[];
 
   const updateStatus = (id: number, newStatus: Status) => {
-    setClientList((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, status: newStatus } : c))
-    );
+    const entry = clientList.find((c) => c.id === id);
+    if (entry) {
+      setStatusOverrides((prev) => ({ ...prev, [(entry as Client & { _supaId: string })._supaId]: newStatus }));
+    }
   };
 
   const filtered = clientList.filter((c) => {

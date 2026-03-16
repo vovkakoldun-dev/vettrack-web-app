@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router';
 import {
   CalendarDays, CheckCircle2, DollarSign, MessageSquare,
@@ -10,19 +10,20 @@ import { SERVICE_PRICE_LIST } from '../../data/mockAppointments';
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '../../components/ui/select';
+import { useDashboardStats } from '../../hooks/useDashboardStats';
+import { useAppointments } from '../../hooks/useAppointments';
+import { useClients } from '../../hooks/useClients';
 
 // ─── Types ────────────────────────────────────────────────────
 
 type ApptStatus = 'Confirmed' | 'Patient Arrived' | 'Waiting for Doctor' | 'In Progress' | 'Ready for Billing' | 'Completed' | 'Cancelled' | 'Pending' | 'Late';
 type PaymentStatus = 'Paid' | 'Pending' | 'Overdue';
 
-// ─── Mock Data ────────────────────────────────────────────────
+// ─── Static fallbacks (payments & messages not yet backed by Supabase) ──
 
-const TODAY_SCHEDULE = []
+const RECENT_PAYMENTS: { id: number; pet: string; owner: string; amount: string; method: string; status: PaymentStatus }[] = []
 
-const RECENT_PAYMENTS = []
-
-const UNREAD_MESSAGES = []
+const UNREAD_MESSAGES: { id: number; from: string; subject: string; preview: string; time: string }[] = []
 
 // ─── Status Badge ─────────────────────────────────────────────
 
@@ -58,78 +59,13 @@ function StatusBadge({ status }: { status: ApptStatus }) {
   );
 }
 
-// ─── Glow Card Data ───────────────────────────────────────────
-
-const ADMIN_GLOW_CARDS = [
-  {
-    title: "Today's Appts",
-    subtitle: 'Today',
-    metricLabel: 'Daily Volume',
-    value: '0',
-    trendLabel: '+8% this week',
-    trendPositive: true,
-    color: '#4ADE80',
-    shadowColor: 'rgba(74,222,128,0.35)',
-    icon: CalendarDays,
-    data: [18, 21, 19, 23, 22, 20, 25, 24],
-    labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Mon', 'Tue', 'Today'],
-    unit: 'appts',
-    annotationStart: '18',
-    annotationEnd: '24',
-    path: '/admin/bookings',
-  },
-  {
-    title: 'Patients Arrived',
-    subtitle: 'Arrived',
-    metricLabel: 'Check-in Rate',
-    value: '0',
-    trendLabel: 'of 24 arrived',
-    trendPositive: true,
-    color: '#38BDF8',
-    shadowColor: 'rgba(56,189,248,0.35)',
-    icon: CheckCircle2,
-    data: [0, 2, 3, 5, 6, 7, 8, 8],
-    labels: ['8AM', '9AM', '10AM', '11AM', '12PM', '1PM', '2PM', 'Now'],
-    unit: 'clients',
-    annotationStart: '0',
-    annotationEnd: '8',
-    path: '/admin/bookings',
-  },
-  {
-    title: 'Pending Payments',
-    subtitle: 'Outstanding',
-    metricLabel: 'Balance Due',
-    value: '$1,240',
-    trendLabel: '6 outstanding',
-    trendPositive: false,
-    color: '#F4A261',
-    shadowColor: 'rgba(244,162,97,0.35)',
-    icon: DollarSign,
-    data: [800, 950, 1100, 850, 1200, 1050, 1300, 1240],
-    labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Mon', 'Tue', 'Today'],
-    unit: 'USD',
-    annotationStart: '$800',
-    annotationEnd: '$1,240',
-    path: '/admin/payments',
-  },
-  {
-    title: 'New Messages',
-    subtitle: 'Unread',
-    metricLabel: 'Inbox Volume',
-    value: '0',
-    trendLabel: '2 need reply',
-    trendPositive: false,
-    color: '#818CF8',
-    shadowColor: 'rgba(129,140,248,0.35)',
-    icon: MessageSquare,
-    data: [3, 7, 4, 8, 5, 6, 9, 5],
-    labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Mon', 'Tue', 'Today'],
-    unit: 'msgs',
-    annotationStart: '3',
-    annotationEnd: '5',
-    path: '/admin/communications',
-  },
-];
+// ─── Glow Card type (for GlowStatCard) ───────────────────────
+type GlowCardData = {
+  title: string; subtitle: string; metricLabel: string; value: string;
+  trendLabel: string; trendPositive: boolean; color: string; shadowColor: string;
+  icon: React.ElementType; data: number[]; labels: string[]; unit: string;
+  annotationStart: string; annotationEnd: string; path: string;
+};
 
 // ─── Helpers ──────────────────────────────────────────────────
 
@@ -165,7 +101,7 @@ function GlowStatCard({
   title, subtitle, metricLabel, value, trendLabel, trendPositive,
   color, shadowColor, icon: Icon, data, labels, unit,
   annotationStart, annotationEnd, path,
-}: (typeof ADMIN_GLOW_CARDS)[0]) {
+}: GlowCardData) {
   const dark = useDarkMode();
   const navigate = useNavigate();
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
@@ -463,28 +399,136 @@ function GlowStatCard({
 
 // ─── Search-matched types ─────────────────────────────────────
 
-const ALL_CLIENTS = [
-  { id: 1, name: 'John Smith',      pet: 'Max',     petType: 'Golden Retriever', phone: '(555) 234-5678', balance: '$0'    },
-  { id: 2, name: 'Emily Johnson',   pet: 'Luna',    petType: 'Tabby Cat',        phone: '(555) 345-6789', balance: '$85'   },
-  { id: 3, name: 'Michael Brown',   pet: 'Cooper',  petType: 'Beagle',           phone: '(555) 456-7890', balance: '$0'    },
-  { id: 4, name: 'Sarah Williams',  pet: 'Bella',   petType: 'Siamese Cat',      phone: '(555) 567-8901', balance: '$250'  },
-  { id: 5, name: 'David Miller',    pet: 'Charlie', petType: 'Corgi',            phone: '(555) 678-9012', balance: '$0'    },
-  { id: 6, name: 'James Wilson',    pet: 'Rocky',   petType: 'Labrador',         phone: '(555) 789-0123', balance: '$120'  },
-  { id: 7, name: 'Jessica Taylor',  pet: 'Milo',    petType: 'Poodle',           phone: '(555) 890-1234', balance: '$0'    },
-  { id: 8, name: 'Robert Anderson', pet: 'Daisy',   petType: 'Border Collie',    phone: '(555) 901-2345', balance: '$320'  },
-];
-
-const ALL_BOOKINGS = TODAY_SCHEDULE.map((a) => ({
-  ...a,
-  phone: '(555) 100-0000',
-  date: 'Today',
-}));
-
 // ─── Page ─────────────────────────────────────────────────────
 
 export default function AdminDashboardPage() {
   const navigate = useNavigate();
   const { overrides, setApptStatus } = useAppointmentStatus();
+
+  // ── Supabase hooks ──────────────────────────────────────────
+  const dashStats = useDashboardStats();
+  const todayStr = useMemo(() => {
+    const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }, []);
+  const { appointments: supaApptsToday } = useAppointments(todayStr);
+  const { clients: supaClients } = useClients();
+
+  // Map Supabase appointments → TODAY_SCHEDULE shape
+  const TODAY_SCHEDULE = useMemo(() =>
+    supaApptsToday.map((a, idx) => {
+      const dt = new Date(a.scheduled_at);
+      const h = dt.getHours();
+      const m = dt.getMinutes();
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
+      const time = `${h12}:${String(m).padStart(2, '0')} ${ampm}`;
+      return {
+        id: idx + 1,
+        time,
+        pet: a.pets?.name ?? '—',
+        owner: a.clients ? `${a.clients.first_name} ${a.clients.last_name}` : '—',
+        phone: a.clients?.phone ?? '—',
+        service: a.services?.name ?? a.reason ?? '—',
+        vet: a.staff ? `Dr. ${a.staff.last_name}` : '—',
+        status: (a.status as ApptStatus) || 'Pending',
+      };
+    }),
+    [supaApptsToday],
+  );
+
+  // Map Supabase clients → ALL_CLIENTS shape for search
+  const ALL_CLIENTS = useMemo(() =>
+    supaClients.map((c, idx) => {
+      const pet = c.pets?.[0];
+      return {
+        id: idx + 1,
+        name: `${c.first_name} ${c.last_name}`,
+        pet: pet?.name ?? '—',
+        petType: pet?.breed ?? pet?.species ?? '—',
+        phone: c.phone ?? '—',
+        balance: '$0',
+      };
+    }),
+    [supaClients],
+  );
+
+  const ALL_BOOKINGS = useMemo(() =>
+    TODAY_SCHEDULE.map((a) => ({ ...a, phone: a.phone, date: 'Today' })),
+    [TODAY_SCHEDULE],
+  );
+
+  // Build dynamic glow cards
+  const glowCards = useMemo(() => [
+    {
+      title: "Today's Appts",
+      subtitle: 'Today',
+      metricLabel: 'Daily Volume',
+      value: String(dashStats.appointmentsToday),
+      trendLabel: `${dashStats.appointmentsToday} today`,
+      trendPositive: true,
+      color: '#4ADE80',
+      shadowColor: 'rgba(74,222,128,0.35)',
+      icon: CalendarDays,
+      data: [18, 21, 19, 23, 22, 20, 25, dashStats.appointmentsToday || 0],
+      labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Mon', 'Tue', 'Today'],
+      unit: 'appts',
+      annotationStart: '18',
+      annotationEnd: String(dashStats.appointmentsToday),
+      path: '/admin/bookings',
+    },
+    {
+      title: 'Total Clients',
+      subtitle: 'Clients',
+      metricLabel: 'Client Count',
+      value: String(dashStats.totalClients),
+      trendLabel: `${dashStats.totalClients} total`,
+      trendPositive: true,
+      color: '#38BDF8',
+      shadowColor: 'rgba(56,189,248,0.35)',
+      icon: CheckCircle2,
+      data: [0, 2, 3, 5, 6, 7, 8, dashStats.totalClients || 0],
+      labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Mon', 'Tue', 'Now'],
+      unit: 'clients',
+      annotationStart: '0',
+      annotationEnd: String(dashStats.totalClients),
+      path: '/admin/clients',
+    },
+    {
+      title: 'Active Pets',
+      subtitle: 'Pets',
+      metricLabel: 'Pet Count',
+      value: String(dashStats.activePets),
+      trendLabel: `${dashStats.activePets} active`,
+      trendPositive: true,
+      color: '#F4A261',
+      shadowColor: 'rgba(244,162,97,0.35)',
+      icon: DollarSign,
+      data: [3, 5, 7, 8, 9, 10, 11, dashStats.activePets || 0],
+      labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Mon', 'Tue', 'Today'],
+      unit: 'pets',
+      annotationStart: '3',
+      annotationEnd: String(dashStats.activePets),
+      path: '/admin/clients',
+    },
+    {
+      title: 'Vaccines Due',
+      subtitle: 'This Week',
+      metricLabel: 'Due This Week',
+      value: String(dashStats.vaccinesDueThisWeek),
+      trendLabel: `${dashStats.vaccinesDueThisWeek} due`,
+      trendPositive: false,
+      color: '#818CF8',
+      shadowColor: 'rgba(129,140,248,0.35)',
+      icon: MessageSquare,
+      data: [3, 7, 4, 8, 5, 6, 9, dashStats.vaccinesDueThisWeek || 0],
+      labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Mon', 'Tue', 'Today'],
+      unit: 'vaccines',
+      annotationStart: '3',
+      annotationEnd: String(dashStats.vaccinesDueThisWeek),
+      path: '/admin/bookings',
+    },
+  ], [dashStats]);
+
   const [checkedIn, setCheckedIn] = useState<Set<number>>(new Set());
   const [now, setNow] = useState(() => new Date());
   const [searchQuery, setSearchQuery] = useState('');
@@ -758,7 +802,7 @@ export default function AdminDashboardPage() {
 
       {/* Glow Stat Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '20px', marginBottom: '28px' }}>
-        {ADMIN_GLOW_CARDS.map(card => (
+        {glowCards.map(card => (
           <GlowStatCard key={card.title} {...card} />
         ))}
       </div>

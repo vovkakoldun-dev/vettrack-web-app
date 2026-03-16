@@ -199,6 +199,7 @@ export default function AppointmentsPage() {
   const [confirmMethod, setConfirmMethod] = useState('Email');
   const [reminderMethod, setReminderMethod] = useState('Email');
   const [reminderTiming, setReminderTiming] = useState('1 day');
+  const [savingAppt, setSavingAppt] = useState(false);
 
   // ── New Patient (first-visit) form state ───────────────────
   const [visitType, setVisitType] = useState<'returning' | 'new'>('returning');
@@ -1400,69 +1401,76 @@ export default function AppointmentsPage() {
 
           {/* ── Footer ── */}
           <div style={{ borderTop: '1px solid var(--border-color)', padding: '14px 24px', display: 'flex', justifyContent: 'flex-end', gap: '10px', flexShrink: 0, backgroundColor: 'var(--surface-white)' }}>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={savingAppt}>Cancel</Button>
             <Button
+              disabled={savingAppt}
               onClick={async () => {
-                const scheduled_at = `${newApptDate}T${newApptTime}:00`;
-                const durationMin = parseInt(newApptDuration) || 30;
+                if (savingAppt) return;
+                setSavingAppt(true);
+                try {
+                  const scheduled_at = `${newApptDate}T${newApptTime}:00`;
+                  const durationMin = parseInt(newApptDuration) || 30;
 
-                let finalClientId = newApptClientId;
-                let finalPetId = newApptPetId;
+                  let finalClientId = newApptClientId;
+                  let finalPetId = newApptPetId;
 
-                // ── New patient: create client + pet first ──────────
-                if (visitType === 'new') {
-                  if (!npOwnerName.trim() || !npPetName.trim() || !npSpecies) return;
-                  const nameParts = npOwnerName.trim().split(' ');
-                  const { data: newClient, error: cErr } = await supabase
-                    .from('clients')
-                    .insert([{
-                      organization_id: DEFAULT_ORG_ID,
-                      first_name: nameParts[0] ?? '',
-                      last_name: nameParts.slice(1).join(' ') || '',
-                      email: npOwnerEmail || undefined,
-                      phone: npOwnerPhone || undefined,
-                    }])
-                    .select('id')
-                    .single();
-                  if (cErr || !newClient) return;
-                  finalClientId = newClient.id;
+                  // ── New patient: create client + pet first ──────────
+                  if (visitType === 'new') {
+                    if (!npOwnerName.trim() || !npPetName.trim() || !npSpecies) { setSavingAppt(false); return; }
+                    const nameParts = npOwnerName.trim().split(' ');
+                    const { data: newClient, error: cErr } = await supabase
+                      .from('clients')
+                      .insert([{
+                        organization_id: DEFAULT_ORG_ID,
+                        first_name: nameParts[0] ?? '',
+                        last_name: nameParts.slice(1).join(' ') || '',
+                        email: npOwnerEmail || undefined,
+                        phone: npOwnerPhone || undefined,
+                      }])
+                      .select('id')
+                      .single();
+                    if (cErr || !newClient) { setSavingAppt(false); return; }
+                    finalClientId = newClient.id;
 
-                  const weightKg = npWeight ? parseFloat(npWeight) : undefined;
-                  const { data: newPet, error: pErr } = await supabase
-                    .from('pets')
-                    .insert([{
-                      client_id: finalClientId,
-                      name: npPetName,
-                      species: npSpecies,
-                      breed: npBreed || undefined,
-                      date_of_birth: npDob || undefined,
-                      sex: npSex || undefined,
-                      weight_kg: weightKg && !isNaN(weightKg) ? weightKg : undefined,
-                      is_active: true,
-                    }])
-                    .select('id')
-                    .single();
-                  if (pErr || !newPet) return;
-                  finalPetId = newPet.id;
+                    const weightKg = npWeight ? parseFloat(npWeight) : undefined;
+                    const { data: newPet, error: pErr } = await supabase
+                      .from('pets')
+                      .insert([{
+                        client_id: finalClientId,
+                        name: npPetName,
+                        species: npSpecies,
+                        breed: npBreed || undefined,
+                        date_of_birth: npDob || undefined,
+                        sex: npSex || undefined,
+                        weight_kg: weightKg && !isNaN(weightKg) ? weightKg : undefined,
+                        is_active: true,
+                      }])
+                      .select('id')
+                      .single();
+                    if (pErr || !newPet) { setSavingAppt(false); return; }
+                    finalPetId = newPet.id;
+                  }
+
+                  if (!finalClientId || !finalPetId) { setSavingAppt(false); return; }
+
+                  await addAppointment({
+                    pet_id: finalPetId,
+                    client_id: finalClientId,
+                    scheduled_at,
+                    duration_minutes: durationMin,
+                    reason: newApptService || undefined,
+                    notes: newApptNotes || undefined,
+                    status: newApptStatus,
+                  });
+                  setDialogOpen(false);
+                } finally {
+                  setSavingAppt(false);
                 }
-
-                if (!finalClientId || !finalPetId) return;
-
-                await addAppointment({
-                  pet_id: finalPetId,
-                  client_id: finalClientId,
-                  scheduled_at,
-                  duration_minutes: durationMin,
-                  reason: newApptService || undefined,
-                  notes: newApptNotes || undefined,
-                  status: newApptStatus,
-                });
-                setDialogOpen(false);
               }}
               style={{ backgroundColor: '#2D6A4F', color: '#fff' }}
             >
               <CalendarIcon className="w-4 h-4 mr-1.5" />
-              Schedule Appointment
+              {savingAppt ? 'Saving…' : 'Schedule Appointment'}
             </Button>
           </div>
         </DialogContent>

@@ -65,7 +65,7 @@ export function useAppointments(dateFilter?: string) {
       .insert([{
         organization_id: '00000000-0000-0000-0000-000000000001',
         clinic_id: '00000000-0000-0000-0000-000000000002',
-        status: 'Pending',
+        status: 'Scheduled',
         ...values,
       }])
       .select('id, scheduled_at, duration_minutes, status, reason, notes, created_at, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name, phone), staff(id, first_name, last_name), services(id, name, price)')
