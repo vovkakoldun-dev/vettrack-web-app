@@ -1,0 +1,48 @@
+@media print {
+  /* Hide non-printable elements */
+  nav,
+  .no-print,
+  button,
+  [data-no-print] {
+    display: none !important;
+  }
+
+  /* Reset layout — remove sidebar offset */
+  body {
+    background: white !important;
+  }
+
+  main {
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  /* Cards — clean borders for print */
+  .bg-white {
+    box-shadow: none !important;
+    border: 1px solid #E5E7EB !important;
+  }
+
+  /* Page break control */
+  .print-section {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* Page settings */
+  @page {
+    margin: 1.5cm;
+  }
+}
+
+/* Print-only elements — hidden on screen */
+.print-only {
+  display: none;
+}
+
+@media print {
+  .print-only {
+    display: block !important;
+  }
+}
