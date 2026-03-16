@@ -16,7 +16,7 @@ export function ClientRow({ petImage, petName, ownerName, breed, lastVisit, stat
     Critical: { bg: '#d4183d20', text: '#d4183d' },
   };
 
-  const statusStyle = statusColors[status];
+  const statusStyle = statusColors[status] ?? statusColors.Healthy;
 
   return (
     <tr

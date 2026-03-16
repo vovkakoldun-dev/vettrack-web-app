@@ -528,7 +528,7 @@ export default function OwnerDashboardPage() {
                     </div>
                   </div>
                   <p style={{ fontSize: '14px', color: 'var(--text-primary)', lineHeight: 1.6 }}>
-                    {mockPets[0].clientNotes}
+                    {mockPets[0]?.clientNotes ?? ''}
                   </p>
                 </div>
               </div>
