@@ -64,7 +64,7 @@ export function useClients() {
   const addClient = useCallback(async (values: AddClientValues) => {
     const { data, error: err } = await supabase
       .from('clients')
-      .insert([values])
+      .insert([{ organization_id: '00000000-0000-0000-0000-000000000001', ...values }])
       .select('id, first_name, last_name, email, phone, address, city, state, zip, notes, portal_status, created_at, pets(id, name, species, breed, photo_url)')
       .single()
     if (!err && data) {

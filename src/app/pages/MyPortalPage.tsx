@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router';
+import { supabase } from '../../lib/supabase';
 import {
   Users, Calendar as CalendarIcon, ClipboardCheck, Clock,
   ChevronRight, ChevronLeft, Plus, Play,
@@ -640,7 +641,7 @@ export default function MyPortalPage() {
     setBlockDialogOpen(true);
   };
 
-  const handleSaveBlock = () => {
+  const handleSaveBlock = async () => {
     const from12 = (t24: string) => {
       let [h, m] = t24.split(':').map(Number);
       const ap = h >= 12 ? 'PM' : 'AM';
@@ -653,20 +654,36 @@ export default function MyPortalPage() {
     const start = new Date(blockDateFrom + 'T12:00:00');
     const end = new Date(blockDateTo + 'T12:00:00');
     const newBlocks: TimeBlock[] = [];
+    const dbRows: object[] = [];
     let idCounter = nextBlockId;
     const cursor = new Date(start);
     while (cursor <= end) {
+      const dateStr = dateToStr(cursor);
       newBlocks.push({
         id: idCounter++,
         type: blockType,
-        date: dateToStr(cursor),
+        date: dateStr,
         timeStart: from12(blockTimeStart),
         timeEnd: from12(blockTimeEnd),
         notes: blockNotes,
         status: isRequest ? 'Pending' : 'Confirmed',
       });
+      dbRows.push({
+        organization_id: '00000000-0000-0000-0000-000000000001',
+        clinic_id: '00000000-0000-0000-0000-000000000002',
+        type: blockType,
+        date: dateStr,
+        time_start: blockTimeStart || null,
+        time_end: blockTimeEnd || null,
+        notes: blockNotes || null,
+        status: isRequest ? 'Pending' : 'Confirmed',
+      });
       cursor.setDate(cursor.getDate() + 1);
     }
+    // Save to Supabase (fire-and-forget — UI updates optimistically)
+    supabase.from('staff_time_blocks').insert(dbRows).then(({ error }) => {
+      if (error) console.warn('Block save error:', error.message);
+    });
     setTimeBlocks((prev) => [...prev, ...newBlocks]);
     setNextBlockId(idCounter);
     setBlockDialogOpen(false);

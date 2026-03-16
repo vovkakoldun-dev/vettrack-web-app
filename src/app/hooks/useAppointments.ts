@@ -18,7 +18,7 @@ export interface AppointmentRow {
 export interface AddAppointmentValues {
   pet_id: string
   client_id: string
-  staff_id?: string
+  vet_id?: string
   service_id?: string
   scheduled_at: string
   duration_minutes?: number
@@ -62,7 +62,12 @@ export function useAppointments(dateFilter?: string) {
   const addAppointment = useCallback(async (values: AddAppointmentValues) => {
     const { data, error: err } = await supabase
       .from('appointments')
-      .insert([{ status: 'Pending', ...values }])
+      .insert([{
+        organization_id: '00000000-0000-0000-0000-000000000001',
+        clinic_id: '00000000-0000-0000-0000-000000000002',
+        status: 'Pending',
+        ...values,
+      }])
       .select('id, scheduled_at, duration_minutes, status, reason, notes, created_at, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name, phone), staff(id, first_name, last_name), services(id, name, price)')
       .single()
     if (!err) {

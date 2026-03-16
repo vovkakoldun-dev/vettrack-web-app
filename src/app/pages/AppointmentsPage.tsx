@@ -11,6 +11,11 @@ import {
 } from 'lucide-react';
 import { useAppointments } from '../hooks/useAppointments';
 import type { AppointmentRow } from '../hooks/useAppointments';
+import { useClients } from '../hooks/useClients';
+import { usePets } from '../hooks/usePets';
+import { supabase } from '../../lib/supabase';
+
+const DEFAULT_ORG_ID = '00000000-0000-0000-0000-000000000001';
 
 // ─── Adapter: Supabase row → legacy display shape ─────────────
 
@@ -103,7 +108,7 @@ function isToday(date: Date): boolean {
 }
 
 // Dates that have appointments (for calendar highlighting)
-function getDatesWithAppointments(appts: typeof MOCK_APPOINTMENTS): Date[] {
+function getDatesWithAppointments(appts: DisplayAppt[]): Date[] {
   const dateSet = new Set<string>();
   appts.forEach((a) => dateSet.add(a.date));
   return Array.from(dateSet).map((d) => new Date(d + 'T12:00:00'));
@@ -168,6 +173,8 @@ export default function AppointmentsPage() {
   const today = new Date().toISOString().split('T')[0];
   const [newApptDate, setNewApptDate] = useState(today);
   const { appointments: dbAppts, loading: apptLoading, updateStatus: updateApptStatus, addAppointment } = useAppointments();
+  const { clients: allClients } = useClients();
+  const { pets: allPets } = usePets();
   const appointments = dbAppts.map(adaptAppt);
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailMode, setDetailMode] = useState<'view' | 'edit'>('view');
@@ -179,6 +186,8 @@ export default function AppointmentsPage() {
   const [editNotes, setEditNotes] = useState('');
 
   // ── New Appointment form state ──────────────────────────────
+  const [newApptClientId, setNewApptClientId] = useState('');
+  const [newApptPetId, setNewApptPetId] = useState('');
   const [newApptPet, setNewApptPet] = useState('');
   const [newApptService, setNewApptService] = useState('');
   const [newApptVetName, setNewApptVetName] = useState('Dr. Chen');
@@ -283,6 +292,12 @@ export default function AppointmentsPage() {
     const d = selectedDate.getDate().toString().padStart(2, '0');
     setNewApptDate(`${y}-${m}-${d}`);
     setNewApptTime('09:00');
+    setNewApptClientId('');
+    setNewApptPetId('');
+    setNewApptPet('');
+    setNewApptService('');
+    setNewApptNotes('');
+    setVisitType('returning');
     setDialogOpen(true);
   };
 
@@ -295,7 +310,7 @@ export default function AppointmentsPage() {
     setDialogOpen(true);
   };
 
-  const openApptDetail = (appt: (typeof MOCK_APPOINTMENTS)[0]) => {
+  const openApptDetail = (appt: DisplayAppt) => {
     setSelectedAppt(appt);
     setEditDate(appt.date);
     setEditTime(to24Hour(appt.timeStart));
@@ -974,17 +989,38 @@ export default function AppointmentsPage() {
 
               {/* Patient — Returning */}
               {visitType === 'returning' && (
-                <div>
-                  <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Patient</p>
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-secondary)]" />
-                    <Input
-                      placeholder="Search by pet name or owner…"
-                      className="pl-9"
-                      value={newApptPet}
-                      onChange={e => setNewApptPet(e.target.value)}
-                    />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Patient</p>
+                  {/* Client dropdown */}
+                  <div>
+                    <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Owner</p>
+                    <Select value={newApptClientId} onValueChange={(val) => { setNewApptClientId(val); setNewApptPetId(''); }}>
+                      <SelectTrigger><SelectValue placeholder="Select owner…" /></SelectTrigger>
+                      <SelectContent>
+                        {allClients.map(c => (
+                          <SelectItem key={c.id} value={c.id}>{c.first_name} {c.last_name}{c.phone ? ` · ${c.phone}` : ''}</SelectItem>
+                        ))}
+                        {allClients.length === 0 && <SelectItem value="__none" disabled>No clients yet</SelectItem>}
+                      </SelectContent>
+                    </Select>
                   </div>
+                  {/* Pet dropdown — filtered by selected client */}
+                  {newApptClientId && (
+                    <div>
+                      <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Pet</p>
+                      <Select value={newApptPetId} onValueChange={setNewApptPetId}>
+                        <SelectTrigger><SelectValue placeholder="Select pet…" /></SelectTrigger>
+                        <SelectContent>
+                          {allPets.filter(p => p.client_id === newApptClientId).map(p => (
+                            <SelectItem key={p.id} value={p.id}>{p.name} ({p.species}{p.breed ? `, ${p.breed}` : ''})</SelectItem>
+                          ))}
+                          {allPets.filter(p => p.client_id === newApptClientId).length === 0 && (
+                            <SelectItem value="__none" disabled>No pets for this client</SelectItem>
+                          )}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1367,19 +1403,60 @@ export default function AppointmentsPage() {
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
             <Button
               onClick={async () => {
-                // Save to Supabase: requires at least scheduled_at
-                // pet_id and client_id are optional for now (UX improvement later)
                 const scheduled_at = `${newApptDate}T${newApptTime}:00`;
                 const durationMin = parseInt(newApptDuration) || 30;
+
+                let finalClientId = newApptClientId;
+                let finalPetId = newApptPetId;
+
+                // ── New patient: create client + pet first ──────────
+                if (visitType === 'new') {
+                  if (!npOwnerName.trim() || !npPetName.trim() || !npSpecies) return;
+                  const nameParts = npOwnerName.trim().split(' ');
+                  const { data: newClient, error: cErr } = await supabase
+                    .from('clients')
+                    .insert([{
+                      organization_id: DEFAULT_ORG_ID,
+                      first_name: nameParts[0] ?? '',
+                      last_name: nameParts.slice(1).join(' ') || '',
+                      email: npOwnerEmail || undefined,
+                      phone: npOwnerPhone || undefined,
+                    }])
+                    .select('id')
+                    .single();
+                  if (cErr || !newClient) return;
+                  finalClientId = newClient.id;
+
+                  const weightKg = npWeight ? parseFloat(npWeight) : undefined;
+                  const { data: newPet, error: pErr } = await supabase
+                    .from('pets')
+                    .insert([{
+                      client_id: finalClientId,
+                      name: npPetName,
+                      species: npSpecies,
+                      breed: npBreed || undefined,
+                      date_of_birth: npDob || undefined,
+                      sex: npSex || undefined,
+                      weight_kg: weightKg && !isNaN(weightKg) ? weightKg : undefined,
+                      is_active: true,
+                    }])
+                    .select('id')
+                    .single();
+                  if (pErr || !newPet) return;
+                  finalPetId = newPet.id;
+                }
+
+                if (!finalClientId || !finalPetId) return;
+
                 await addAppointment({
-                  pet_id: '',
-                  client_id: '',
+                  pet_id: finalPetId,
+                  client_id: finalClientId,
                   scheduled_at,
                   duration_minutes: durationMin,
-                  reason: newApptService || newApptPet || undefined,
+                  reason: newApptService || undefined,
                   notes: newApptNotes || undefined,
                   status: newApptStatus,
-                }).catch(() => {/* ignore pet_id FK error for now */});
+                });
                 setDialogOpen(false);
               }}
               style={{ backgroundColor: '#2D6A4F', color: '#fff' }}

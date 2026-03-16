@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { useMessages } from '../hooks/useMessages';
 import {
   MessageSquare,
   Search,
@@ -309,6 +310,10 @@ export default function ChatPage() {
 
   const selectedConv = conversations.find((c) => c.id === selectedId) ?? null;
 
+  // ── Supabase message persistence ───────────────────────────
+  const convKey = selectedConv?.name ?? 'general';
+  const { sendMessage: persistMessage } = useMessages(convKey);
+
   // Auto-scroll to bottom when conversation changes or new message sent
   useEffect(() => {
     if (messagesEndRef.current) {
@@ -372,10 +377,11 @@ export default function ChatPage() {
 
   function handleSend() {
     if (!inputValue.trim() || !selectedId) return;
+    const text = inputValue.trim();
     const newMsg: Message = {
       id: `msg-${Date.now()}`,
       from: 'me',
-      text: inputValue.trim(),
+      text,
       timestamp: new Date(),
     };
     setConversations((prev) =>
@@ -384,6 +390,8 @@ export default function ChatPage() {
       )
     );
     setInputValue('');
+    // Persist to Supabase (fire-and-forget)
+    persistMessage(text);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {

@@ -10,7 +10,7 @@ export interface PetRow {
   sex: string | null
   weight_kg: number | null
   photo_url: string | null
-  microchip_id: string | null
+  microchip_no: string | null
   is_active: boolean
   created_at: string
   client_id: string | null
@@ -25,7 +25,7 @@ export interface AddPetValues {
   date_of_birth?: string
   sex?: string
   weight_kg?: number
-  microchip_id?: string
+  microchip_no?: string
   photo_url?: string
 }
 
@@ -39,7 +39,7 @@ export function usePets() {
     setError(null)
     const { data, error: err } = await supabase
       .from('pets')
-      .select('id, name, species, breed, date_of_birth, sex, weight_kg, photo_url, microchip_id, is_active, created_at, client_id, clients(id, first_name, last_name, phone)')
+      .select('id, name, species, breed, date_of_birth, sex, weight_kg, photo_url, microchip_no, is_active, created_at, client_id, clients(id, first_name, last_name, phone)')
       .eq('is_active', true)
       .order('created_at', { ascending: false })
     if (err) {
@@ -58,7 +58,7 @@ export function usePets() {
     const { data, error: err } = await supabase
       .from('pets')
       .insert([{ is_active: true, ...values }])
-      .select('id, name, species, breed, date_of_birth, sex, weight_kg, photo_url, microchip_id, is_active, created_at, client_id, clients(id, first_name, last_name, phone)')
+      .select('id, name, species, breed, date_of_birth, sex, weight_kg, photo_url, microchip_no, is_active, created_at, client_id, clients(id, first_name, last_name, phone)')
       .single()
     if (!err) {
       await fetchPets()
