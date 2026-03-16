@@ -18,6 +18,7 @@ import VaccinesPage from './pages/VaccinesPage';
 import PetsPage from './pages/PetsPage';
 import ChatPage from './pages/ChatPage';
 import LoginPage from './pages/LoginPage';
+import SupabaseTestPage from './pages/SupabaseTestPage';
 import VisitPage from './pages/VisitPage';
 import CheckoutPage from './pages/CheckoutPage';
 import OwnerDashboardPage from './pages/owner/OwnerDashboardPage';
@@ -220,6 +221,7 @@ function MainApp() {
           <Route path="/vaccines" element={<VaccinesPage />} />
           <Route path="/pets" element={<PetsPage />} />
           <Route path="/chat" element={<ChatPage />} />
+          <Route path="/supabase-test" element={<SupabaseTestPage />} />
         </Routes>
       </main>
       {/* Floating active-visit widget — renders above everything */}
