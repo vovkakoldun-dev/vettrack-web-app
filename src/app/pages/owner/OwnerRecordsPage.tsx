@@ -65,56 +65,7 @@ const STATUS_CONFIG: Record<RecordStatus, {
 const MAX_IMAGE = 'https://images.unsplash.com/photo-1734966213753-1b361564bab4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxnb2xkZW4lMjByZXRyaWV2ZXIlMjBkb2clMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyNDMxMzB8MA&ixlib=rb-4.1.0&q=80&w=400';
 const HUGO_IMAGE = 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=400';
 
-const OWNER_RECORDS: OwnerMedicalRecord[] = [
-  {
-    id: 1, petName: 'Max', breed: 'Golden Retriever', petImage: MAX_IMAGE,
-    recordType: 'Visit', date: 'Mar 11, 2026', dateISO: '2026-03-11',
-    vet: 'Dr. Sarah Chen', summary: 'Annual wellness exam — all vitals normal, weight stable',
-    status: 'Final',
-  },
-  {
-    id: 2, petName: 'Max', breed: 'Golden Retriever', petImage: MAX_IMAGE,
-    recordType: 'Lab Result', date: 'Mar 11, 2026', dateISO: '2026-03-11',
-    vet: 'Dr. Sarah Chen', summary: 'CBC & comprehensive metabolic panel',
-    status: 'In Progress',
-  },
-  {
-    id: 3, petName: 'Max', breed: 'Golden Retriever', petImage: MAX_IMAGE,
-    recordType: 'Vaccination', date: 'Mar 11, 2026', dateISO: '2026-03-11',
-    vet: 'Dr. Sarah Chen', summary: 'DHPP booster & Bordetella nasal — due for rabies in 6 months',
-    status: 'Final',
-  },
-  {
-    id: 4, petName: 'Max', breed: 'Golden Retriever', petImage: MAX_IMAGE,
-    recordType: 'Prescription', date: 'Feb 20, 2026', dateISO: '2026-02-20',
-    vet: 'Dr. Sarah Chen', summary: 'Dasuquin Advanced for hip dysplasia — ongoing joint support',
-    status: 'Final',
-  },
-  {
-    id: 5, petName: 'Hugo', breed: 'Persian Cat', petImage: HUGO_IMAGE,
-    recordType: 'Visit', date: 'Feb 1, 2026', dateISO: '2026-02-01',
-    vet: 'Dr. Sarah Chen', summary: 'Dental recheck — notes being reviewed by vet',
-    status: 'Pending Vet Review',
-  },
-  {
-    id: 6, petName: 'Hugo', breed: 'Persian Cat', petImage: HUGO_IMAGE,
-    recordType: 'Lab Result', date: 'Feb 1, 2026', dateISO: '2026-02-01',
-    vet: 'Dr. Sarah Chen', summary: 'Urinalysis — results under vet review',
-    status: 'Pending Vet Review',
-  },
-  {
-    id: 7, petName: 'Hugo', breed: 'Persian Cat', petImage: HUGO_IMAGE,
-    recordType: 'Dental', date: 'Jan 15, 2026', dateISO: '2026-01-15',
-    vet: 'Dr. Sarah Chen', summary: 'Full dental cleaning — Grade 2 periodontal disease, 1 extraction',
-    status: 'Final',
-  },
-  {
-    id: 8, petName: 'Hugo', breed: 'Persian Cat', petImage: HUGO_IMAGE,
-    recordType: 'Vaccination', date: 'Dec 10, 2025', dateISO: '2025-12-10',
-    vet: 'Dr. Raj Patel', summary: 'FeLV & FVRCP boosters administered — no adverse reaction',
-    status: 'Final',
-  },
-];
+const OWNER_RECORDS: OwnerMedicalRecord[] = []
 
 // ─── Component ───────────────────────────────────────────────
 

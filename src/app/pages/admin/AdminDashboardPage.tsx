@@ -18,30 +18,11 @@ type PaymentStatus = 'Paid' | 'Pending' | 'Overdue';
 
 // ─── Mock Data ────────────────────────────────────────────────
 
-const TODAY_SCHEDULE = [
-  { id: 1,  time: '8:00 AM',  pet: 'Max',      owner: 'John Smith',      phone: '(555) 234-5678', service: 'Annual Checkup',   vet: 'Dr. Chen',   status: 'Patient Arrived'  as ApptStatus },
-  { id: 2,  time: '8:30 AM',  pet: 'Luna',     owner: 'Emily Johnson',   phone: '(555) 345-6789', service: 'Vaccination',      vet: 'Dr. Patel',  status: 'Completed'   as ApptStatus },
-  { id: 3,  time: '9:00 AM',  pet: 'Cooper',   owner: 'Michael Brown',   phone: '(555) 456-7890', service: 'Dental Cleaning',  vet: 'Dr. Chen',   status: 'Confirmed'   as ApptStatus },
-  { id: 4,  time: '9:30 AM',  pet: 'Bella',    owner: 'Sarah Williams',  phone: '(555) 567-8901', service: 'Follow-up',        vet: 'Dr. Garcia', status: 'Patient Arrived'  as ApptStatus },
-  { id: 5,  time: '10:00 AM', pet: 'Charlie',  owner: 'David Miller',    phone: '(555) 678-9012', service: 'Emergency',        vet: 'Dr. Chen',   status: 'Confirmed'   as ApptStatus },
-  { id: 6,  time: '10:30 AM', pet: 'Rocky',    owner: 'James Wilson',    phone: '(555) 789-0123', service: 'Vaccination',      vet: 'Dr. Patel',  status: 'Confirmed'   as ApptStatus },
-  { id: 7,  time: '11:00 AM', pet: 'Milo',     owner: 'Jessica Taylor',  phone: '(555) 890-1234', service: 'Checkup',          vet: 'Dr. Garcia', status: 'Cancelled'   as ApptStatus },
-  { id: 8,  time: '11:30 AM', pet: 'Daisy',    owner: 'Robert Anderson', phone: '(555) 901-2345', service: 'Surgery Consult',  vet: 'Dr. Chen',   status: 'Confirmed'   as ApptStatus },
-];
+const TODAY_SCHEDULE = []
 
-const RECENT_PAYMENTS = [
-  { id: 1, pet: 'Max',    owner: 'John Smith',      amount: '$145.00', status: 'Paid'    as PaymentStatus },
-  { id: 2, pet: 'Luna',   owner: 'Emily Johnson',   amount: '$85.00',  status: 'Pending' as PaymentStatus },
-  { id: 3, pet: 'Daisy',  owner: 'Robert Anderson', amount: '$320.00', status: 'Paid'    as PaymentStatus },
-  { id: 4, pet: 'Cooper', owner: 'Michael Brown',   amount: '$250.00', status: 'Overdue' as PaymentStatus },
-];
+const RECENT_PAYMENTS = []
 
-const UNREAD_MESSAGES = [
-  { id: 1, initials: 'JS', name: 'John Smith',      pet: 'Max',     preview: 'Hi, can we reschedule Friday\'s appointment?',    time: '9:42 AM'  },
-  { id: 2, initials: 'EJ', name: 'Emily Johnson',   pet: 'Luna',    preview: 'Luna has been sneezing a lot. Should I be concerned?', time: '8:15 AM'  },
-  { id: 3, initials: 'DB', name: 'David Brown',     pet: 'Bruno',   preview: 'When will the lab results be ready?',              time: 'Yesterday' },
-  { id: 4, initials: 'SW', name: 'Sarah Williams',  pet: 'Bella',   preview: 'Thank you for the follow-up care instructions!',   time: 'Yesterday' },
-];
+const UNREAD_MESSAGES = []
 
 // ─── Status Badge ─────────────────────────────────────────────
 
@@ -84,7 +65,7 @@ const ADMIN_GLOW_CARDS = [
     title: "Today's Appts",
     subtitle: 'Today',
     metricLabel: 'Daily Volume',
-    value: '24',
+    value: '0',
     trendLabel: '+8% this week',
     trendPositive: true,
     color: '#4ADE80',
@@ -101,7 +82,7 @@ const ADMIN_GLOW_CARDS = [
     title: 'Patients Arrived',
     subtitle: 'Arrived',
     metricLabel: 'Check-in Rate',
-    value: '8',
+    value: '0',
     trendLabel: 'of 24 arrived',
     trendPositive: true,
     color: '#38BDF8',
@@ -135,7 +116,7 @@ const ADMIN_GLOW_CARDS = [
     title: 'New Messages',
     subtitle: 'Unread',
     metricLabel: 'Inbox Volume',
-    value: '5',
+    value: '0',
     trendLabel: '2 need reply',
     trendPositive: false,
     color: '#818CF8',

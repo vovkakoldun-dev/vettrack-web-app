@@ -68,40 +68,7 @@ function lastLoginLabel(iso: string) {
 }
 
 // ─── Mock Data ────────────────────────────────────────────────
-const INITIAL_USERS: PortalUser[] = [
-  // Active — recent logins
-  { id: 'P001', name: 'John Smith',       email: 'john.smith@email.com',       phone: '(555) 100-0001', initials: 'JS', avatarColor: '#3B82F6', pets: ['Max', 'Bella'],        clinic: 'Downtown Hugory Vet',    accountCreated: '2023-02-10', lastLogin: '2026-03-14', status: 'Active' },
-  { id: 'P002', name: 'Emily Johnson',    email: 'emily.j@email.com',          phone: '(555) 100-0002', initials: 'EJ', avatarColor: '#8B5CF6', pets: ['Luna'],               clinic: 'Downtown Hugory Vet',    accountCreated: '2022-11-05', lastLogin: '2026-03-12', status: 'Active' },
-  { id: 'P003', name: 'Michael Brown',    email: 'mbrown@email.com',           phone: '(555) 100-0003', initials: 'MB', avatarColor: '#059669', pets: ['Cooper'],             clinic: 'Westside Animal Care',   accountCreated: '2023-06-18', lastLogin: '2026-03-10', status: 'Active' },
-  { id: 'P004', name: 'Sarah Williams',   email: 'swilliams@email.com',        phone: '(555) 100-0004', initials: 'SW', avatarColor: '#EC4899', pets: ['Bella', 'Mochi'],     clinic: 'Downtown Hugory Vet',    accountCreated: '2022-08-22', lastLogin: '2026-03-08', status: 'Active' },
-  { id: 'P005', name: 'James Wilson',     email: 'jwilson@email.com',          phone: '(555) 100-0005', initials: 'JW', avatarColor: '#F59E0B', pets: ['Rocky'],              clinic: 'Northpark Pet Hospital', accountCreated: '2023-01-15', lastLogin: '2026-03-05', status: 'Active' },
-  { id: 'P006', name: 'Jessica Taylor',   email: 'jtaylor@email.com',          phone: '(555) 100-0006', initials: 'JT', avatarColor: '#6366F1', pets: ['Milo'],               clinic: 'Westside Animal Care',   accountCreated: '2023-04-30', lastLogin: '2026-02-28', status: 'Active' },
-  { id: 'P007', name: 'Robert Anderson',  email: 'randerson@email.com',        phone: '(555) 100-0007', initials: 'RA', avatarColor: '#0EA5E9', pets: ['Daisy'],              clinic: 'Downtown Hugory Vet',    accountCreated: '2022-07-14', lastLogin: '2026-02-20', status: 'Active' },
-  { id: 'P008', name: 'David Miller',     email: 'dmiller@email.com',          phone: '(555) 100-0008', initials: 'DM', avatarColor: '#10B981', pets: ['Charlie', 'Peanut'],  clinic: 'Northpark Pet Hospital', accountCreated: '2023-09-03', lastLogin: '2026-02-15', status: 'Active' },
-  { id: 'P009', name: 'Karen Thomas',     email: 'kthomas@email.com',          phone: '(555) 100-0009', initials: 'KT', avatarColor: '#F472B6', pets: ['Buddy'],              clinic: 'Westside Animal Care',   accountCreated: '2023-03-20', lastLogin: '2026-01-30', status: 'Active' },
-  { id: 'P010', name: 'Lisa Martinez',    email: 'lmartinez@email.com',        phone: '(555) 100-0010', initials: 'LM', avatarColor: '#A78BFA', pets: ['Simba', 'Nala'],      clinic: 'Downtown Hugory Vet',    accountCreated: '2022-12-01', lastLogin: '2026-01-18', status: 'Active' },
-  { id: 'P011', name: 'Amanda White',     email: 'awhite@email.com',           phone: '(555) 100-0011', initials: 'AW', avatarColor: '#34D399', pets: ['Coco'],               clinic: 'Northpark Pet Hospital', accountCreated: '2023-05-11', lastLogin: '2026-01-05', status: 'Active' },
-  { id: 'P012', name: 'Chris Davis',      email: 'cdavis@email.com',           phone: '(555) 100-0012', initials: 'CD', avatarColor: '#FB923C', pets: ['Zeus'],               clinic: 'Westside Animal Care',   accountCreated: '2022-10-28', lastLogin: '2025-12-22', status: 'Active' },
-  { id: 'P013', name: 'Patricia Garcia',  email: 'pgarcia@email.com',          phone: '(555) 100-0013', initials: 'PG', avatarColor: '#C084FC', pets: ['Lola', 'Pepper'],     clinic: 'Downtown Hugory Vet',    accountCreated: '2023-07-07', lastLogin: '2025-12-10', status: 'Active' },
-  { id: 'P014', name: 'Thomas Lee',       email: 'tlee@email.com',             phone: '(555) 100-0014', initials: 'TL', avatarColor: '#2DD4BF', pets: ['Shadow'],             clinic: 'Northpark Pet Hospital', accountCreated: '2023-08-19', lastLogin: '2025-11-28', status: 'Active' },
-  { id: 'P015', name: 'Sandra Robinson',  email: 'srobinson@email.com',        phone: '(555) 100-0015', initials: 'SR', avatarColor: '#F97316', pets: ['Princess'],           clinic: 'Westside Animal Care',   accountCreated: '2022-06-30', lastLogin: '2025-10-15', status: 'Active' },
-
-  // Inactive — last login > 1 year ago (before 2025-03-15)
-  { id: 'P016', name: 'Margaret Hall',    email: 'mhall@email.com',            phone: '(555) 200-0001', initials: 'MH', avatarColor: '#9CA3AF', pets: ['Ginger'],             clinic: 'Downtown Hugory Vet',    accountCreated: '2022-04-05', lastLogin: '2025-03-01', status: 'Inactive' },
-  { id: 'P017', name: 'George Harris',    email: 'gharris@email.com',          phone: '(555) 200-0002', initials: 'GH', avatarColor: '#6B7280', pets: ['Bruno', 'Fluffy'],    clinic: 'Westside Animal Care',   accountCreated: '2021-11-20', lastLogin: '2025-02-14', status: 'Inactive' },
-  { id: 'P018', name: 'Dorothy Clark',    email: 'dclark@email.com',           phone: '(555) 200-0003', initials: 'DC', avatarColor: '#9CA3AF', pets: ['Whiskers'],           clinic: 'Northpark Pet Hospital', accountCreated: '2022-01-08', lastLogin: '2025-01-30', status: 'Inactive' },
-  { id: 'P019', name: 'Edward Lewis',     email: 'elewis@email.com',           phone: '(555) 200-0004', initials: 'EL', avatarColor: '#6B7280', pets: ['Oreo'],               clinic: 'Downtown Hugory Vet',    accountCreated: '2021-09-14', lastLogin: '2024-12-05', status: 'Inactive' },
-  { id: 'P020', name: 'Helen Walker',     email: 'hwalker@email.com',          phone: '(555) 200-0005', initials: 'HW', avatarColor: '#9CA3AF', pets: ['Snowball'],           clinic: 'Westside Animal Care',   accountCreated: '2022-03-22', lastLogin: '2024-10-18', status: 'Inactive' },
-  { id: 'P021', name: 'Charles Young',    email: 'cyoung@email.com',           phone: '(555) 200-0006', initials: 'CY', avatarColor: '#6B7280', pets: ['Biscuit', 'Caramel'], clinic: 'Northpark Pet Hospital', accountCreated: '2021-07-03', lastLogin: '2024-08-22', status: 'Inactive' },
-  { id: 'P022', name: 'Ruth King',        email: 'rking@email.com',            phone: '(555) 200-0007', initials: 'RK', avatarColor: '#9CA3AF', pets: ['Tiger'],              clinic: 'Downtown Hugory Vet',    accountCreated: '2022-05-17', lastLogin: '2024-06-10', status: 'Inactive' },
-
-  // Warned — reminder already sent
-  { id: 'P023', name: 'Frank Scott',      email: 'fscott@email.com',           phone: '(555) 300-0001', initials: 'FS', avatarColor: '#D97706', pets: ['Nugget'],             clinic: 'Westside Animal Care',   accountCreated: '2021-12-12', lastLogin: '2025-01-10', status: 'Warned', reminderSentAt: '2026-03-10' },
-  { id: 'P024', name: 'Betty Green',      email: 'bgreen@email.com',           phone: '(555) 300-0002', initials: 'BG', avatarColor: '#D97706', pets: ['Maple'],              clinic: 'Northpark Pet Hospital', accountCreated: '2022-02-28', lastLogin: '2024-11-20', status: 'Warned', reminderSentAt: '2026-03-08' },
-
-  // Suspended
-  { id: 'P025', name: 'Howard Allen',     email: 'hallen@email.com',           phone: '(555) 400-0001', initials: 'HA', avatarColor: '#DC2626', pets: [],                     clinic: 'Downtown Hugory Vet',    accountCreated: '2021-05-19', lastLogin: '2024-03-01', status: 'Suspended' },
-];
+const INITIAL_USERS: PortalUser[] = []
 
 // ─── Status config ────────────────────────────────────────────
 const STATUS_CFG: Record<AccountStatus, { color: string; bg: string; dot: string; label: string }> = {

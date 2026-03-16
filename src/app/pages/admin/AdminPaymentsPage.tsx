@@ -20,31 +20,9 @@ interface Invoice {
 
 // ─── Mock Data ────────────────────────────────────────────────
 
-const INVOICES: Invoice[] = [
-  { id: 'INV-2026-001', client: 'John Smith',       pet: 'Max',     service: 'Annual Checkup',   date: 'Mar 14, 2026', amount: '$145.00', status: 'Paid'    },
-  { id: 'INV-2026-002', client: 'Emily Johnson',    pet: 'Luna',    service: 'Vaccination',      date: 'Mar 14, 2026', amount: '$85.00',  status: 'Pending' },
-  { id: 'INV-2026-003', client: 'Michael Brown',    pet: 'Cooper',  service: 'Dental Cleaning',  date: 'Mar 13, 2026', amount: '$250.00', status: 'Overdue' },
-  { id: 'INV-2026-004', client: 'Sarah Williams',   pet: 'Bella',   service: 'Follow-up',        date: 'Mar 13, 2026', amount: '$65.00',  status: 'Paid'    },
-  { id: 'INV-2026-005', client: 'David Miller',     pet: 'Charlie', service: 'Emergency',        date: 'Mar 12, 2026', amount: '$215.00', status: 'Paid'    },
-  { id: 'INV-2026-006', client: 'James Wilson',     pet: 'Rocky',   service: 'Vaccination',      date: 'Mar 12, 2026', amount: '$70.00',  status: 'Pending' },
-  { id: 'INV-2026-007', client: 'Robert Anderson',  pet: 'Daisy',   service: 'Spay Procedure',   date: 'Mar 11, 2026', amount: '$320.00', status: 'Partial' },
-  { id: 'INV-2026-008', client: 'Lisa Martinez',    pet: 'Oliver',  service: 'Dental Cleaning',  date: 'Mar 11, 2026', amount: '$250.00', status: 'Overdue' },
-  { id: 'INV-2026-009', client: 'Kevin Lee',        pet: 'Buddy',   service: 'Hip Consult',      date: 'Mar 10, 2026', amount: '$95.00',  status: 'Paid'    },
-  { id: 'INV-2026-010', client: 'Amanda White',     pet: 'Coco',    service: 'Vaccination',      date: 'Mar 10, 2026', amount: '$70.00',  status: 'Pending' },
-  { id: 'INV-2026-011', client: 'Chris Davis',      pet: 'Simba',   service: 'Neuter Procedure', date: 'Mar 9, 2026',  amount: '$320.00', status: 'Paid'    },
-  { id: 'INV-2026-012', client: 'Patricia Moore',   pet: 'Nala',    service: 'Annual Checkup',   date: 'Mar 9, 2026',  amount: '$85.00',  status: 'Pending' },
-  { id: 'INV-2026-013', client: 'Thomas Jackson',   pet: 'Zeus',    service: 'X-Ray',            date: 'Mar 8, 2026',  amount: '$175.00', status: 'Paid'    },
-  { id: 'INV-2026-014', client: 'Karen Harris',     pet: 'Lola',    service: 'Skin Consult',     date: 'Mar 8, 2026',  amount: '$130.00', status: 'Overdue' },
-  { id: 'INV-2026-015', client: 'Mark Thompson',    pet: 'Bear',    service: 'Surgery (Minor)',  date: 'Mar 7, 2026',  amount: '$380.00', status: 'Partial' },
-];
+const INVOICES: Invoice[] = []
 
-const ACTIVITY = [
-  { id: 1, icon: CheckCircle2, color: '#2D6A4F', bg: '#2D6A4F15', text: 'John Smith paid invoice INV-2026-001',        time: '9:42 AM',   label: 'Payment Received' },
-  { id: 2, icon: FileText,     color: '#3B82F6', bg: '#3B82F615', text: 'Invoice INV-2026-002 sent to Emily Johnson',   time: '9:15 AM',   label: 'Invoice Sent'     },
-  { id: 3, icon: Bell,         color: '#F4A261', bg: '#F4A26115', text: 'Reminder sent to Michael Brown (overdue)',     time: '8:30 AM',   label: 'Reminder Sent'    },
-  { id: 4, icon: CheckCircle2, color: '#2D6A4F', bg: '#2D6A4F15', text: 'Chris Davis paid INV-2026-011 ($320.00)',      time: 'Yesterday', label: 'Payment Received' },
-  { id: 5, icon: AlertCircle,  color: '#d4183d', bg: '#d4183d15', text: 'Lisa Martinez invoice marked overdue',         time: 'Yesterday', label: 'Marked Overdue'   },
-];
+const ACTIVITY = []
 
 // ─── Status Badge ─────────────────────────────────────────────
 

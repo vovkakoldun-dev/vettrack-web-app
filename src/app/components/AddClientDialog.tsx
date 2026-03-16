@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Users } from 'lucide-react';
+import { Users, Loader2 } from 'lucide-react';
+import type { AddClientValues } from '../hooks/useClients';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from './ui/dialog';
@@ -12,6 +13,7 @@ import {
 interface AddClientDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onSave?: (values: AddClientValues) => Promise<void>;
 }
 
 const EMPTY = {
@@ -19,17 +21,39 @@ const EMPTY = {
   ownerName: '', email: '', phone: '', address: '',
 };
 
-export function AddClientDialog({ open, onOpenChange }: AddClientDialogProps) {
+export function AddClientDialog({ open, onOpenChange, onSave }: AddClientDialogProps) {
   const [form, setForm] = useState(EMPTY);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const set = (field: keyof typeof EMPTY) => (val: string) =>
     setForm(prev => ({ ...prev, [field]: val }));
 
-  const handleClose = () => { setForm(EMPTY); onOpenChange(false); };
+  const handleClose = () => { setForm(EMPTY); setError(null); onOpenChange(false); };
 
-  const handleSave = () => {
-    // In a real app: persist new client. For now just close.
-    handleClose();
+  const handleSave = async () => {
+    if (!form.ownerName.trim()) { setError('Owner name is required'); return; }
+    setSaving(true);
+    setError(null);
+    // Split ownerName into first + last
+    const parts = form.ownerName.trim().split(' ');
+    const first_name = parts[0] ?? '';
+    const last_name = parts.slice(1).join(' ') || '';
+    const values: AddClientValues = {
+      first_name,
+      last_name,
+      email: form.email || undefined,
+      phone: form.phone || undefined,
+      address: form.address || undefined,
+      notes: form.petName ? `Pet: ${form.petName}${form.species ? ` (${form.species}${form.breed ? ', ' + form.breed : ''})` : ''}` : undefined,
+    };
+    try {
+      if (onSave) await onSave(values);
+      handleClose();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to save');
+    }
+    setSaving(false);
   };
 
   return (
@@ -129,11 +153,14 @@ export function AddClientDialog({ open, onOpenChange }: AddClientDialogProps) {
         </div>
 
         {/* Footer */}
-        <div className="border-t border-[var(--border-color)]" style={{ padding: '14px 24px', display: 'flex', justifyContent: 'flex-end', gap: '10px', flexShrink: 0 }}>
-          <Button variant="outline" onClick={handleClose}>Cancel</Button>
-          <Button onClick={handleSave} style={{ backgroundColor: '#2D6A4F', color: '#fff' }}>
-            Add Client
-          </Button>
+        <div className="border-t border-[var(--border-color)]" style={{ padding: '14px 24px', display: 'flex', flexDirection: 'column', gap: '8px', flexShrink: 0 }}>
+          {error && <p style={{ fontSize: '13px', color: '#d4183d', marginBottom: '4px' }}>{error}</p>}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+            <Button variant="outline" onClick={handleClose} disabled={saving}>Cancel</Button>
+            <Button onClick={handleSave} disabled={saving} style={{ backgroundColor: '#2D6A4F', color: '#fff', minWidth: '110px' }}>
+              {saving ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Saving…</> : 'Add Client'}
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

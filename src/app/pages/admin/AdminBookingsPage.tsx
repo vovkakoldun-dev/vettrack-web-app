@@ -7,7 +7,7 @@ import {
   Pencil, Trash2, Bell, Stethoscope, UserCheck,
   Smartphone, ChevronDown, ChevronUp, Phone, MessageCircle, X,
 } from 'lucide-react';
-import { MOCK_APPOINTMENTS } from '../../data/mockAppointments';
+// MOCK_APPOINTMENTS removed
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Textarea } from '../../components/ui/textarea';
@@ -60,28 +60,7 @@ interface PortalRequest {
   submittedAgo: string;
 }
 
-const PORTAL_REQUEST_MOCK: PortalRequest[] = [
-  {
-    id: 1,
-    owner: 'John Smith', ownerEmail: 'john.smith@email.com', ownerPhone: '(555) 123-4567',
-    ownerInitials: 'JS', ownerColor: '#3B82F6',
-    pet: 'Max', petType: 'Golden Retriever',
-    petImage: 'https://images.unsplash.com/photo-1734966213753-1b361564bab4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxnb2xkZW4lMjByZXRyaWV2ZXIlMjBkb2clMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyNDMxMzB8MA&ixlib=rb-4.1.0&q=80&w=400',
-    service: 'Dental Cleaning', requestedDate: 'Mar 18, 2026', requestedTime: '10:00 AM',
-    vet: 'Dr. Chen', notes: 'Max has been having trouble eating. Noticed some bad breath recently.',
-    submittedAgo: '12 min ago',
-  },
-  {
-    id: 2,
-    owner: 'John Smith', ownerEmail: 'john.smith@email.com', ownerPhone: '(555) 123-4567',
-    ownerInitials: 'JS', ownerColor: '#3B82F6',
-    pet: 'Hugo', petType: 'Persian Cat',
-    petImage: 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=400',
-    service: 'Vaccination', requestedDate: 'Mar 22, 2026', requestedTime: '2:30 PM',
-    vet: 'Dr. Patel', notes: 'FeLV booster overdue. Owner requested Dr. Patel specifically.',
-    submittedAgo: '1 hr ago',
-  },
-];
+const PORTAL_REQUEST_MOCK: PortalRequest[] = []
 
 // ─── Helpers ─────────────────────────────────────────────────
 
@@ -163,11 +142,11 @@ export default function AdminBookingsPage() {
   const [monthViewDate, setMonthViewDate] = useState<Date>(new Date(2026, 2, 1));
   const [newApptTime, setNewApptTime] = useState('09:00');
   const [newApptDate, setNewApptDate] = useState('2026-03-11');
-  const [appointments, setAppointments] = useState(MOCK_APPOINTMENTS);
+  const [appointments, setAppointments] = useState([]);
   const [detailOpen, setDetailOpen] = useState(false);
   const [arrivedToast, setArrivedToast] = useState<string | null>(null);
   const [detailMode, setDetailMode] = useState<'view' | 'edit'>('view');
-  const [selectedAppt, setSelectedAppt] = useState<(typeof MOCK_APPOINTMENTS)[0] | null>(null);
+  const [selectedAppt, setSelectedAppt] = useState<Record<string, unknown> | null>(null);
   const [editDate, setEditDate] = useState('');
   const [editTime, setEditTime] = useState('');
   const [editService, setEditService] = useState('');
@@ -200,7 +179,7 @@ export default function AdminBookingsPage() {
   const [npOwnerPhone, setNpOwnerPhone] = useState('');
 
   // ── Portal requests ──────────────────────────────
-  const [portalRequests, setPortalRequests] = useState<PortalRequest[]>(PORTAL_REQUEST_MOCK);
+  const [portalRequests, setPortalRequests] = useState<PortalRequest[]>([]);
   const [portalPanelOpen, setPortalPanelOpen] = useState(true);
   const [changeTimeReq, setChangeTimeReq] = useState<PortalRequest | null>(null);
   const [changeTimeDate, setChangeTimeDate] = useState('');
@@ -256,7 +235,7 @@ export default function AdminBookingsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const datesWithAppointments = getDatesWithAppointments(appointments);
+  const datesWithAppointments = [];
 
   const dayAppointments = appointments.filter((a) => isSameDay(a.date, selectedDate));
 
@@ -333,7 +312,7 @@ export default function AdminBookingsPage() {
     setDialogOpen(true);
   };
 
-  const openApptDetail = (appt: (typeof MOCK_APPOINTMENTS)[0]) => {
+  const openApptDetail = (appt: Record<string, unknown>) => {
     setSelectedAppt(appt);
     setEditDate(appt.date);
     setEditTime(to24Hour(appt.timeStart));

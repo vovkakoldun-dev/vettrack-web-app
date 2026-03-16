@@ -32,222 +32,7 @@ interface LabResult {
 
 // ─── Mock Data ─────────────────────────────────────────────────
 
-const LAB_RESULTS: LabResult[] = [
-  // Max — Wellness Visit (Record VT-2026-001542)
-  {
-    id: 1, testName: 'WBC Count', category: 'Hematology',
-    petName: 'Max', petImage: 'https://images.unsplash.com/photo-1734966213753-1b361564bab4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxnb2xkZW4lMjByZXRyaWV2ZXIlMjBkb2clMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyNDMxMzB8MA&ixlib=rb-4.1.0&q=80&w=400',
-    ownerName: 'John Smith', date: '2026-03-10', result: '6.8', unit: '10³/µL',
-    referenceRange: '5.0–11.0', flag: 'Normal', vet: 'Dr. Chen', recordId: 1,
-    notes: 'Within normal limits',
-  },
-  {
-    id: 2, testName: 'RBC Count', category: 'Hematology',
-    petName: 'Max', petImage: 'https://images.unsplash.com/photo-1734966213753-1b361564bab4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxnb2xkZW4lMjByZXRyaWV2ZXIlMjBkb2clMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyNDMxMzB8MA&ixlib=rb-4.1.0&q=80&w=400',
-    ownerName: 'John Smith', date: '2026-03-10', result: '6.2', unit: '10⁶/µL',
-    referenceRange: '5.5–8.5', flag: 'Normal', vet: 'Dr. Chen', recordId: 1,
-  },
-  {
-    id: 3, testName: 'Hemoglobin', category: 'Hematology',
-    petName: 'Max', petImage: 'https://images.unsplash.com/photo-1734966213753-1b361564bab4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxnb2xkZW4lMjByZXRyaWV2ZXIlMjBkb2clMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyNDMxMzB8MA&ixlib=rb-4.1.0&q=80&w=400',
-    ownerName: 'John Smith', date: '2026-03-10', result: '14.8', unit: 'g/dL',
-    referenceRange: '12.0–18.0', flag: 'Normal', vet: 'Dr. Chen', recordId: 1,
-  },
-  {
-    id: 4, testName: 'ALT (SGPT)', category: 'Chemistry',
-    petName: 'Max', petImage: 'https://images.unsplash.com/photo-1734966213753-1b361564bab4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxnb2xkZW4lMjByZXRyaWV2ZXIlMjBkb2clMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyNDMxMzB8MA&ixlib=rb-4.1.0&q=80&w=400',
-    ownerName: 'John Smith', date: '2026-03-10', result: '28', unit: 'U/L',
-    referenceRange: '10–58', flag: 'Normal', vet: 'Dr. Chen', recordId: 1,
-  },
-  {
-    id: 5, testName: 'Creatinine', category: 'Chemistry',
-    petName: 'Max', petImage: 'https://images.unsplash.com/photo-1734966213753-1b361564bab4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxnb2xkZW4lMjByZXRyaWV2ZXIlMjBkb2clMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyNDMxMzB8MA&ixlib=rb-4.1.0&q=80&w=400',
-    ownerName: 'John Smith', date: '2026-03-10', result: '0.9', unit: 'mg/dL',
-    referenceRange: '0.5–1.8', flag: 'Normal', vet: 'Dr. Chen', recordId: 1,
-  },
-  {
-    id: 6, testName: 'Glucose', category: 'Chemistry',
-    petName: 'Max', petImage: 'https://images.unsplash.com/photo-1734966213753-1b361564bab4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxnb2xkZW4lMjByZXRyaWV2ZXIlMjBkb2clMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyNDMxMzB8MA&ixlib=rb-4.1.0&q=80&w=400',
-    ownerName: 'John Smith', date: '2026-03-10', result: '98', unit: 'mg/dL',
-    referenceRange: '70–138', flag: 'Normal', vet: 'Dr. Chen', recordId: 1,
-  },
-  {
-    id: 7, testName: 'Urinary Specific Gravity', category: 'Urinalysis',
-    petName: 'Max', petImage: 'https://images.unsplash.com/photo-1734966213753-1b361564bab4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxnb2xkZW4lMjByZXRyaWV2ZXIlMjBkb2clMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyNDMxMzB8MA&ixlib=rb-4.1.0&q=80&w=400',
-    ownerName: 'John Smith', date: '2026-03-10', result: '1.025', unit: '',
-    referenceRange: '1.015–1.045', flag: 'Normal', vet: 'Dr. Chen', recordId: 1,
-  },
-
-  // Bella — Spay Surgery (Record VT-2026-001478)
-  {
-    id: 8, testName: 'WBC Count', category: 'Hematology',
-    petName: 'Bella', petImage: 'https://images.unsplash.com/photo-1513360371669-4adf3dd7dff8?w=400',
-    ownerName: 'Sarah Williams', date: '2026-02-28', result: '9.2', unit: '10³/µL',
-    referenceRange: '5.5–19.5', flag: 'Normal', vet: 'Dr. Garcia', recordId: 5,
-    notes: 'Pre-operative baseline',
-  },
-  {
-    id: 9, testName: 'Platelet Count', category: 'Hematology',
-    petName: 'Bella', petImage: 'https://images.unsplash.com/photo-1513360371669-4adf3dd7dff8?w=400',
-    ownerName: 'Sarah Williams', date: '2026-02-28', result: '210', unit: '10³/µL',
-    referenceRange: '175–500', flag: 'Normal', vet: 'Dr. Garcia', recordId: 5,
-  },
-  {
-    id: 10, testName: 'ALT (SGPT)', category: 'Chemistry',
-    petName: 'Bella', petImage: 'https://images.unsplash.com/photo-1513360371669-4adf3dd7dff8?w=400',
-    ownerName: 'Sarah Williams', date: '2026-02-28', result: '45', unit: 'U/L',
-    referenceRange: '10–100', flag: 'Normal', vet: 'Dr. Garcia', recordId: 5,
-  },
-  {
-    id: 11, testName: 'Creatinine', category: 'Chemistry',
-    petName: 'Bella', petImage: 'https://images.unsplash.com/photo-1513360371669-4adf3dd7dff8?w=400',
-    ownerName: 'Sarah Williams', date: '2026-02-28', result: '0.7', unit: 'mg/dL',
-    referenceRange: '0.6–2.4', flag: 'Normal', vet: 'Dr. Garcia', recordId: 5,
-  },
-
-  // Rocky — Cardiac Evaluation (Record VT-2026-001390)
-  {
-    id: 12, testName: 'WBC Count', category: 'Hematology',
-    petName: 'Rocky', petImage: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400',
-    ownerName: 'James Wilson', date: '2026-01-15', result: '12.4', unit: '10³/µL',
-    referenceRange: '5.0–11.0', flag: 'High', vet: 'Dr. Patel', recordId: 8,
-    notes: 'Mild leukocytosis — possible inflammatory response',
-  },
-  {
-    id: 13, testName: 'Hemoglobin', category: 'Hematology',
-    petName: 'Rocky', petImage: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400',
-    ownerName: 'James Wilson', date: '2026-01-15', result: '12.1', unit: 'g/dL',
-    referenceRange: '12.0–18.0', flag: 'Low', vet: 'Dr. Patel', recordId: 8,
-    notes: 'Borderline low — monitor for anemia progression',
-  },
-  {
-    id: 14, testName: 'Troponin I', category: 'Cardiac',
-    petName: 'Rocky', petImage: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400',
-    ownerName: 'James Wilson', date: '2026-01-15', result: '0.12', unit: 'ng/mL',
-    referenceRange: '<0.07', flag: 'Critical', vet: 'Dr. Patel', recordId: 8,
-    notes: 'Elevated cardiac troponin — indicates myocardial injury. Recheck in 4 hours.',
-  },
-  {
-    id: 15, testName: 'NT-proBNP', category: 'Cardiac',
-    petName: 'Rocky', petImage: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400',
-    ownerName: 'James Wilson', date: '2026-01-15', result: '850', unit: 'pmol/L',
-    referenceRange: '<900', flag: 'High', vet: 'Dr. Patel', recordId: 8,
-    notes: 'Approaching critical threshold — consistent with congestive heart failure',
-  },
-  {
-    id: 16, testName: 'C-Reactive Protein', category: 'Chemistry',
-    petName: 'Rocky', petImage: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400',
-    ownerName: 'James Wilson', date: '2026-01-15', result: '2.8', unit: 'mg/dL',
-    referenceRange: '<1.0', flag: 'Critical', vet: 'Dr. Patel', recordId: 8,
-    notes: 'Significantly elevated — systemic inflammation',
-  },
-  {
-    id: 17, testName: 'Creatinine', category: 'Chemistry',
-    petName: 'Rocky', petImage: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400',
-    ownerName: 'James Wilson', date: '2026-01-15', result: '1.8', unit: 'mg/dL',
-    referenceRange: '0.5–1.8', flag: 'High', vet: 'Dr. Patel', recordId: 8,
-    notes: 'Upper limit of normal — renal function monitoring recommended',
-  },
-
-  // Luna — Thyroid screen
-  {
-    id: 18, testName: 'Total T4', category: 'Thyroid',
-    petName: 'Luna', petImage: 'https://images.unsplash.com/photo-1574158622682-e40e69881006?w=400',
-    ownerName: 'Emily Johnson', date: '2026-03-05', result: '4.8', unit: 'µg/dL',
-    referenceRange: '1.0–4.0', flag: 'High', vet: 'Dr. Patel', recordId: 1,
-    notes: 'Elevated T4 — hyperthyroidism suspected. Recommend Free T4 by equilibrium dialysis.',
-  },
-  {
-    id: 19, testName: 'Free T4', category: 'Thyroid',
-    petName: 'Luna', petImage: 'https://images.unsplash.com/photo-1574158622682-e40e69881006?w=400',
-    ownerName: 'Emily Johnson', date: '2026-03-05', result: '2.9', unit: 'ng/dL',
-    referenceRange: '0.8–2.4', flag: 'High', vet: 'Dr. Patel', recordId: 1,
-    notes: 'Confirms hyperthyroidism diagnosis',
-  },
-  {
-    id: 20, testName: 'TSH', category: 'Thyroid',
-    petName: 'Luna', petImage: 'https://images.unsplash.com/photo-1574158622682-e40e69881006?w=400',
-    ownerName: 'Emily Johnson', date: '2026-03-05', result: '0.01', unit: 'µIU/mL',
-    referenceRange: '0.05–0.40', flag: 'Low', vet: 'Dr. Patel', recordId: 1,
-    notes: 'Suppressed TSH consistent with hyperthyroidism',
-  },
-
-  // Cooper — Dental / infection screen
-  {
-    id: 21, testName: 'Aerobic Culture', category: 'Microbiology',
-    petName: 'Cooper', petImage: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400',
-    ownerName: 'Michael Brown', date: '2026-03-08', result: 'Staphylococcus pseudintermedius', unit: '',
-    referenceRange: 'No growth', flag: 'Critical', vet: 'Dr. Chen', recordId: 1,
-    notes: 'Moderate growth. Sensitivity: Amoxicillin-R, Clindamycin-S, Enrofloxacin-S.',
-  },
-  {
-    id: 22, testName: 'WBC Count', category: 'Hematology',
-    petName: 'Cooper', petImage: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400',
-    ownerName: 'Michael Brown', date: '2026-03-08', result: '15.2', unit: '10³/µL',
-    referenceRange: '5.0–11.0', flag: 'High', vet: 'Dr. Chen', recordId: 1,
-    notes: 'Leukocytosis consistent with active infection',
-  },
-  {
-    id: 23, testName: 'Neutrophil %', category: 'Hematology',
-    petName: 'Cooper', petImage: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400',
-    ownerName: 'Michael Brown', date: '2026-03-08', result: '86', unit: '%',
-    referenceRange: '60–77', flag: 'High', vet: 'Dr. Chen', recordId: 1,
-    notes: 'Left shift — supports bacterial infection',
-  },
-
-  // Daisy — post-op bloodwork
-  {
-    id: 24, testName: 'Albumin', category: 'Chemistry',
-    petName: 'Daisy', petImage: 'https://images.unsplash.com/photo-1518717758536-85ae29035b6d?w=400',
-    ownerName: 'Robert Anderson', date: '2026-03-12', result: '2.3', unit: 'g/dL',
-    referenceRange: '2.5–4.4', flag: 'Low', vet: 'Dr. Garcia', recordId: 1,
-    notes: 'Mild hypoalbuminemia post-operatively — nutritional support recommended',
-  },
-  {
-    id: 25, testName: 'Total Protein', category: 'Chemistry',
-    petName: 'Daisy', petImage: 'https://images.unsplash.com/photo-1518717758536-85ae29035b6d?w=400',
-    ownerName: 'Robert Anderson', date: '2026-03-12', result: '5.8', unit: 'g/dL',
-    referenceRange: '5.4–8.2', flag: 'Normal', vet: 'Dr. Garcia', recordId: 1,
-  },
-  {
-    id: 26, testName: 'Packed Cell Volume', category: 'Hematology',
-    petName: 'Daisy', petImage: 'https://images.unsplash.com/photo-1518717758536-85ae29035b6d?w=400',
-    ownerName: 'Robert Anderson', date: '2026-03-12', result: '32', unit: '%',
-    referenceRange: '37–55', flag: 'Low', vet: 'Dr. Garcia', recordId: 1,
-    notes: 'Post-surgical anemia — likely blood loss. Recheck in 72 hours.',
-  },
-
-  // Milo — fecal exam
-  {
-    id: 27, testName: 'Fecal Float', category: 'Parasitology',
-    petName: 'Milo', petImage: 'https://images.unsplash.com/photo-1589883661923-6476cb0ae9f2?w=400',
-    ownerName: 'Jessica Taylor', date: '2026-03-01', result: 'Toxocara cati eggs detected', unit: '',
-    referenceRange: 'Negative', flag: 'High', vet: 'Dr. Chen', recordId: 1,
-    notes: 'Moderate egg burden. Pyrantel pamoate prescribed.',
-  },
-  {
-    id: 28, testName: 'Giardia Antigen', category: 'Parasitology',
-    petName: 'Milo', petImage: 'https://images.unsplash.com/photo-1589883661923-6476cb0ae9f2?w=400',
-    ownerName: 'Jessica Taylor', date: '2026-03-01', result: 'Negative', unit: '',
-    referenceRange: 'Negative', flag: 'Normal', vet: 'Dr. Chen', recordId: 1,
-  },
-
-  // Charlie — emergency bloodwork
-  {
-    id: 29, testName: 'Lactate', category: 'Chemistry',
-    petName: 'Charlie', petImage: 'https://images.unsplash.com/photo-1612195583950-b8fd34c87093?w=400',
-    ownerName: 'David Miller', date: '2026-03-11', result: '3.8', unit: 'mmol/L',
-    referenceRange: '0.5–2.0', flag: 'Critical', vet: 'Dr. Garcia', recordId: 1,
-    notes: 'Critically elevated lactate — possible tissue hypoperfusion. IV fluids initiated.',
-  },
-  {
-    id: 30, testName: 'BUN', category: 'Chemistry',
-    petName: 'Charlie', petImage: 'https://images.unsplash.com/photo-1612195583950-b8fd34c87093?w=400',
-    ownerName: 'David Miller', date: '2026-03-11', result: '38', unit: 'mg/dL',
-    referenceRange: '7–27', flag: 'High', vet: 'Dr. Garcia', recordId: 1,
-    notes: 'Elevated BUN — dehydration likely',
-  },
-];
+const LAB_RESULTS: LabResult[] = []
 
 // ─── Helpers ───────────────────────────────────────────────────
 
@@ -296,16 +81,16 @@ export default function LabPage() {
   const [filterPet, setFilterPet] = useState<string>('all');
 
   // Derived stats
-  const total = LAB_RESULTS.length;
-  const normal = LAB_RESULTS.filter((r) => r.flag === 'Normal').length;
-  const abnormal = LAB_RESULTS.filter((r) => r.flag === 'High' || r.flag === 'Low').length;
-  const critical = LAB_RESULTS.filter((r) => r.flag === 'Critical').length;
+  const total = 0;
+  const normal = [].filter((r) => r.flag === 'Normal').length;
+  const abnormal = [].filter((r) => r.flag === 'High' || r.flag === 'Low').length;
+  const critical = [].filter((r) => r.flag === 'Critical').length;
 
   // Unique pets for filter
-  const uniquePets = Array.from(new Set(LAB_RESULTS.map((r) => r.petName))).sort();
+  const uniquePets = Array.from(new Set([].map((r) => r.petName))).sort();
 
   // Filtered results
-  const filtered = LAB_RESULTS.filter((r) => {
+  const filtered = [].filter((r) => {
     const q = search.toLowerCase();
     if (q && !(
       r.testName.toLowerCase().includes(q) ||

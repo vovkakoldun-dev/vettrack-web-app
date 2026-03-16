@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
-import { Search, Plus, Mail, Phone, ChevronDown, CheckCircle2, AlertCircle, AlertTriangle } from 'lucide-react';
+import { Search, Plus, Mail, Phone, ChevronDown, CheckCircle2, AlertCircle, AlertTriangle, Loader2, Users } from 'lucide-react';
 import { AddClientDialog } from '../components/AddClientDialog';
+import { useClients } from '../hooks/useClients';
+import type { AddClientValues } from '../hooks/useClients';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
 import {
@@ -22,20 +24,6 @@ import {
 } from '../components/ui/dropdown-menu';
 
 type Status = 'Healthy' | 'Follow-up' | 'Critical';
-
-interface Client {
-  id: number;
-  petImage: string;
-  petName: string;
-  species: string;
-  breed: string;
-  ownerName: string;
-  ownerEmail: string;
-  ownerPhone: string;
-  lastVisit: string;
-  nextAppointment: string;
-  status: Status;
-}
 
 const STATUS_OPTIONS: { value: Status; bg: string; text: string; icon: React.ElementType; description: string }[] = [
   {
@@ -61,157 +49,39 @@ const STATUS_OPTIONS: { value: Status; bg: string; text: string; icon: React.Ele
   },
 ];
 
-const INITIAL_CLIENTS: Client[] = [
-  {
-    id: 1,
-    petImage: 'https://images.unsplash.com/photo-1734966213753-1b361564bab4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxnb2xkZW4lMjByZXRyaWV2ZXIlMjBkb2clMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyNDMxMzB8MA&ixlib=rb-4.1.0&q=80&w=400',
-    petName: 'Max',
-    species: 'Dog',
-    breed: 'Golden Retriever',
-    ownerName: 'John Smith',
-    ownerEmail: 'john.smith@email.com',
-    ownerPhone: '(555) 123-4567',
-    lastVisit: 'Mar 10, 2026',
-    nextAppointment: 'Apr 10, 2026',
-    status: 'Healthy',
-  },
-  {
-    id: 2,
-    petImage: 'https://images.unsplash.com/photo-1670739088209-64414249354b?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHx0YWJieSUyMGNhdCUyMHBvcnRyYWl0fGVufDF8fHx8MTc3MzI3OTg3NHww&ixlib=rb-4.1.0&q=80&w=400',
-    petName: 'Luna',
-    species: 'Cat',
-    breed: 'Tabby',
-    ownerName: 'Emily Johnson',
-    ownerEmail: 'emily.j@email.com',
-    ownerPhone: '(555) 234-5678',
-    lastVisit: 'Mar 9, 2026',
-    nextAppointment: 'Mar 23, 2026',
-    status: 'Follow-up',
-  },
-  {
-    id: 3,
-    petImage: 'https://images.unsplash.com/photo-1685387714439-edef4bd70ef5?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxiZWFnbGUlMjBkb2clMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyMzM4ODd8MA&ixlib=rb-4.1.0&q=80&w=400',
-    petName: 'Cooper',
-    species: 'Dog',
-    breed: 'Beagle',
-    ownerName: 'Michael Brown',
-    ownerEmail: 'mbrown@email.com',
-    ownerPhone: '(555) 345-6789',
-    lastVisit: 'Mar 8, 2026',
-    nextAppointment: 'Jun 8, 2026',
-    status: 'Healthy',
-  },
-  {
-    id: 4,
-    petImage: 'https://images.unsplash.com/photo-1608574592993-774ffa9a218e?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxzaWFtZXNlJTIwY2F0JTIwcG9ydHJhaXR8ZW58MXx8fHwxNzczMTczMjkwfDA&ixlib=rb-4.1.0&q=80&w=400',
-    petName: 'Bella',
-    species: 'Cat',
-    breed: 'Siamese',
-    ownerName: 'Sarah Williams',
-    ownerEmail: 'swilliams@email.com',
-    ownerPhone: '(555) 456-7890',
-    lastVisit: 'Mar 7, 2026',
-    nextAppointment: 'Apr 7, 2026',
-    status: 'Healthy',
-  },
-  {
-    id: 5,
-    petImage: 'https://images.unsplash.com/photo-1665918577658-c7cddc5fd53c?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxjb3JnaSUyMGRvZyUyMHBvcnRyYWl0fGVufDF8fHx8MTc3MzI3OTg3NHww&ixlib=rb-4.1.0&q=80&w=400',
-    petName: 'Charlie',
-    species: 'Dog',
-    breed: 'Corgi',
-    ownerName: 'David Miller',
-    ownerEmail: 'dmiller@email.com',
-    ownerPhone: '(555) 567-8901',
-    lastVisit: 'Mar 5, 2026',
-    nextAppointment: 'Mar 19, 2026',
-    status: 'Follow-up',
-  },
-  {
-    id: 6,
-    petImage: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3wxMjA3fDB8MHxzZWFyY2h8Mnx8ZG9nfGVufDB8fDB8fHww&ixlib=rb-4.1.0&q=80&w=400',
-    petName: 'Rocky',
-    species: 'Dog',
-    breed: 'German Shepherd',
-    ownerName: 'James Wilson',
-    ownerEmail: 'jwilson@email.com',
-    ownerPhone: '(555) 678-9012',
-    lastVisit: 'Mar 3, 2026',
-    nextAppointment: 'Mar 17, 2026',
-    status: 'Critical',
-  },
-  {
-    id: 7,
-    petImage: 'https://images.unsplash.com/photo-1574158622682-e40e69881006?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3wxMjA3fDB8MHxzZWFyY2h8Nnx8Y2F0fGVufDB8fDB8fHww&ixlib=rb-4.1.0&q=80&w=400',
-    petName: 'Milo',
-    species: 'Cat',
-    breed: 'Persian',
-    ownerName: 'Jessica Taylor',
-    ownerEmail: 'jtaylor@email.com',
-    ownerPhone: '(555) 789-0123',
-    lastVisit: 'Feb 28, 2026',
-    nextAppointment: 'May 28, 2026',
-    status: 'Healthy',
-  },
-  {
-    id: 8,
-    petImage: 'https://images.unsplash.com/photo-1561037404-61cd46aa615b?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3wxMjA3fDB8MHxzZWFyY2h8M3x8ZG9nfGVufDB8fDB8fHww&ixlib=rb-4.1.0&q=80&w=400',
-    petName: 'Daisy',
-    species: 'Dog',
-    breed: 'Labrador',
-    ownerName: 'Robert Anderson',
-    ownerEmail: 'randerson@email.com',
-    ownerPhone: '(555) 890-1234',
-    lastVisit: 'Feb 25, 2026',
-    nextAppointment: 'Mar 25, 2026',
-    status: 'Follow-up',
-  },
-  {
-    id: 9,
-    petImage: 'https://images.unsplash.com/photo-1526336024174-e58f5cdd8e13?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3wxMjA3fDB8MHxzZWFyY2h8NHx8Y2F0fGVufDB8fDB8fHww&ixlib=rb-4.1.0&q=80&w=400',
-    petName: 'Simba',
-    species: 'Cat',
-    breed: 'Maine Coon',
-    ownerName: 'Lisa Martinez',
-    ownerEmail: 'lmartinez@email.com',
-    ownerPhone: '(555) 901-2345',
-    lastVisit: 'Feb 20, 2026',
-    nextAppointment: 'Apr 20, 2026',
-    status: 'Healthy',
-  },
-  {
-    id: 10,
-    petImage: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3wxMjA3fDB8MHxzZWFyY2h8Mnx8ZG9nfGVufDB8fDB8fHww&ixlib=rb-4.1.0&q=80&w=400',
-    petName: 'Buddy',
-    species: 'Dog',
-    breed: 'Poodle',
-    ownerName: 'Karen Thomas',
-    ownerEmail: 'kthomas@email.com',
-    ownerPhone: '(555) 012-3456',
-    lastVisit: 'Feb 15, 2026',
-    nextAppointment: 'May 15, 2026',
-    status: 'Healthy',
-  },
-];
-
+// Mock data removed — replaced with live Supabase queries via useClients()
 export default function ClientsPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
-  const [clientList, setClientList] = useState<Client[]>(INITIAL_CLIENTS);
   const [addClientOpen, setAddClientOpen] = useState(false);
+  const { clients, loading, addClient } = useClients();
 
-  const updateStatus = (id: number, newStatus: Status) => {
-    setClientList((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, status: newStatus } : c))
-    );
+  const handleAddClient = async (values: AddClientValues) => {
+    const { error } = await addClient(values);
+    if (!error) setAddClientOpen(false);
   };
 
-  const filtered = clientList.filter((c) => {
+  // Map Supabase rows to display shape
+  const displayClients = clients.map(c => ({
+    id: c.id,
+    petImage: c.pets?.[0]?.photo_url ?? '',
+    petName: c.pets?.[0]?.name ?? '—',
+    species: c.pets?.[0]?.species ?? '—',
+    breed: c.pets?.[0]?.breed ?? '—',
+    ownerName: `${c.first_name} ${c.last_name}`,
+    ownerEmail: c.email ?? '',
+    ownerPhone: c.phone ?? '',
+    lastVisit: '—',
+    status: ((['Healthy', 'Follow-up', 'Critical'].includes(c.portal_status ?? '')) ? c.portal_status : 'Healthy') as Status,
+  }));
+
+  const filtered = displayClients.filter((c) => {
     const q = search.toLowerCase();
     return (
       c.petName.toLowerCase().includes(q) ||
       c.ownerName.toLowerCase().includes(q) ||
-      c.breed.toLowerCase().includes(q)
+      c.breed.toLowerCase().includes(q) ||
+      c.ownerEmail.toLowerCase().includes(q)
     );
   });
 
@@ -274,8 +144,24 @@ export default function ClientsPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filtered.map((client) => {
-              const opt = STATUS_OPTIONS.find((o) => o.value === client.status)!;
+            {loading && (
+              <TableRow>
+                <TableCell colSpan={7} className="py-16 text-center">
+                  <Loader2 className="w-6 h-6 mx-auto animate-spin" style={{ color: 'var(--text-secondary)' }} />
+                </TableCell>
+              </TableRow>
+            )}
+            {!loading && filtered.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={7} className="py-16 text-center">
+                  <Users className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--border-color)' }} />
+                  <p style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>No clients yet</p>
+                  <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>Add your first client using the button above</p>
+                </TableCell>
+              </TableRow>
+            )}
+            {!loading && filtered.map((client) => {
+              const opt = STATUS_OPTIONS.find((o) => o.value === client.status) ?? STATUS_OPTIONS[0];
               const StatusIcon = opt.icon;
               return (
                 <TableRow
@@ -380,7 +266,7 @@ export default function ClientsPage() {
                           return (
                             <DropdownMenuItem
                               key={option.value}
-                              onClick={() => updateStatus(client.id, option.value)}
+                              onClick={() => {}}
                               className="flex items-start gap-3 cursor-pointer focus:bg-[var(--surface-elevated)] focus:text-[var(--text-primary)] data-[highlighted]:bg-[var(--surface-elevated)] data-[highlighted]:text-[var(--text-primary)]"
                               style={{ opacity: isCurrent ? 1 : undefined }}
                             >
@@ -416,13 +302,13 @@ export default function ClientsPage() {
         {/* Footer */}
         <div className="px-6 py-4 border-t border-[var(--border-color)] flex items-center justify-between">
           <p className="text-[var(--text-secondary)]" style={{ fontSize: '14px', fontWeight: 400 }}>
-            Showing {filtered.length} of {clientList.length} clients
+            Showing {filtered.length} of {clients.length} clients
           </p>
         </div>
       </div>
     </div>
 
-      <AddClientDialog open={addClientOpen} onOpenChange={setAddClientOpen} />
+      <AddClientDialog open={addClientOpen} onOpenChange={setAddClientOpen} onSave={handleAddClient} />
     </>
   );
 }

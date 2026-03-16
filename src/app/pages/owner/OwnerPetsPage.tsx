@@ -11,50 +11,7 @@ const BRAND = '#2D6A4F';
 const BRAND_TEXT = 'var(--brand-green-text)';
 
 // ─── Mock Data ───────────────────────────────────────────────
-const PETS = [
-  {
-    id: 1,
-    name: 'Max',
-    species: 'Dog',
-    breed: 'Golden Retriever',
-    age: '5 years',
-    dob: 'Jun 15, 2020',
-    sex: 'Male (Neutered)',
-    weight: '32 kg',
-    color: 'Golden',
-    image: 'https://images.unsplash.com/photo-1734966213753-1b361564bab4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxnb2xkZW4lMjByZXRyaWV2ZXIlMjBkb2clMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyNDMxMzB8MA&ixlib=rb-4.1.0&q=80&w=800',
-    status: 'Healthy' as const,
-    activeConditions: ['Hip Dysplasia', 'Seasonal Allergies'],
-    allergies: ['Chicken', 'Amoxicillin'],
-    nextAppointment: { date: 'Mar 15, 2026', time: '2:30 PM', reason: 'Dental Cleaning' },
-    lastVisit: 'Mar 10, 2026',
-    vaccinesUpToDate: 4,
-    vaccinesDue: 1,
-    vet: 'Dr. Chen',
-    microchip: '900118000123456',
-  },
-  {
-    id: 2,
-    name: 'Hugo',
-    species: 'Cat',
-    breed: 'Persian',
-    age: '3 years',
-    dob: 'Mar 10, 2022',
-    sex: 'Male (Neutered)',
-    weight: '4.2 kg',
-    color: 'White',
-    image: 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=800',
-    status: 'Follow-up' as const,
-    activeConditions: ['Dental Disease'],
-    allergies: ['Fish'],
-    nextAppointment: { date: 'Mar 20, 2026', time: '10:00 AM', reason: 'Dental Recheck' },
-    lastVisit: 'Feb 1, 2026',
-    vaccinesUpToDate: 2,
-    vaccinesDue: 1,
-    vet: 'Dr. Chen',
-    microchip: '900118000789012',
-  },
-];
+const PETS = []
 
 const STATUS_CONFIG = {
   Healthy:     { bg: '#74C69D20', text: BRAND_TEXT,  border: '#74C69D50', icon: CheckCircle2, label: 'Healthy' },

@@ -60,12 +60,7 @@ const TIME_SLOTS = [
   '2:00 PM', '2:30 PM', '3:00 PM', '3:30 PM', '4:00 PM', '4:30 PM',
 ];
 
-const INITIAL_APPOINTMENTS: Appointment[] = [
-  { id: 1, date: '2026-03-15', time: '2:30 PM', reason: 'Dental Cleaning', pet: 'Max', petImage: PETS[0].image, vet: 'Dr. Chen', status: 'upcoming', notes: 'Please fast Max from midnight the night before.' },
-  { id: 2, date: '2026-03-20', time: '10:00 AM', reason: 'Dental Recheck',  pet: 'Hugo', petImage: PETS[1].image, vet: 'Dr. Patel', status: 'upcoming' },
-  { id: 3, date: '2026-03-10', time: '11:00 AM', reason: 'Annual Checkup',  pet: 'Max',  petImage: PETS[0].image, vet: 'Dr. Chen', status: 'completed' },
-  { id: 4, date: '2026-03-25', time: '3:00 PM',  reason: 'Vaccination',     pet: 'Hugo', petImage: PETS[1].image, vet: 'Dr. Chen', status: 'upcoming' },
-];
+const INITIAL_APPOINTMENTS: Appointment[] = []
 
 const DAYS_OF_WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];

@@ -3,77 +3,63 @@ import { useNavigate, Link } from 'react-router';
 import { Users, Calendar, Syringe, PawPrint, ChevronRight, ArrowUpRight, Search, X, Clock } from 'lucide-react';
 import { ClientRow } from '../components/ClientRow';
 import { AppointmentCard } from '../components/AppointmentCard';
-import { MOCK_APPOINTMENTS } from '../data/mockAppointments';
+import { useDashboardStats } from '../hooks/useDashboardStats';
+import { useAppointments } from '../hooks/useAppointments';
+import { useClients } from '../hooks/useClients';
 
-// ─── Glow Card Data ───────────────────────────────────────────
+// ─── Glow Card Config (values injected at runtime) ────────────
 
-const GLOW_CARDS = [
+const GLOW_CARD_CONFIG = [
   {
     title: 'Total Clients',
     subtitle: 'All Time',
     metricLabel: 'Client Growth',
-    value: '1,247',
-    trendLabel: '+12% this month',
     trendPositive: true,
     color: '#818CF8',
     shadowColor: 'rgba(129,140,248,0.35)',
     icon: Users,
-    data: [940, 985, 1020, 1058, 1090, 1135, 1182, 1247],
-    labels: ['Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'],
+    data: [0, 0],
+    labels: ['—', 'Now'],
     unit: 'clients',
-    annotationStart: '940',
-    annotationEnd: '1,247',
     path: '/clients',
   },
   {
     title: 'Appointments',
     subtitle: 'Today',
     metricLabel: 'Daily Volume',
-    value: '24',
-    trendLabel: '8 remaining',
     trendPositive: true,
     color: '#F4A261',
     shadowColor: 'rgba(244,162,97,0.35)',
     icon: Calendar,
-    data: [18, 21, 19, 23, 22, 20, 25, 24],
-    labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Mon', 'Tue', 'Today'],
+    data: [0, 0],
+    labels: ['—', 'Today'],
     unit: 'appts',
-    annotationStart: '18',
-    annotationEnd: '24',
     path: '/appointments',
   },
   {
     title: 'Vaccines Due',
     subtitle: 'This Week',
     metricLabel: 'Overdue Risk',
-    value: '18',
-    trendLabel: 'This week',
     trendPositive: false,
     color: '#38BDF8',
     shadowColor: 'rgba(56,189,248,0.35)',
     icon: Syringe,
-    data: [8, 11, 14, 10, 13, 16, 15, 18],
-    labels: ['W−7', 'W−6', 'W−5', 'W−4', 'W−3', 'W−2', 'W−1', 'Now'],
+    data: [0, 0],
+    labels: ['—', 'Now'],
     unit: 'due',
-    annotationStart: '8',
-    annotationEnd: '18',
     path: '/vaccines',
   },
   {
     title: 'Active Pets',
     subtitle: 'Registered',
     metricLabel: 'Pet Population',
-    value: '2,163',
-    trendLabel: '+5% this month',
     trendPositive: true,
     color: '#4ADE80',
     shadowColor: 'rgba(74,222,128,0.35)',
     icon: PawPrint,
-    data: [1820, 1880, 1930, 1970, 2020, 2065, 2110, 2163],
-    labels: ['Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'],
+    data: [0, 0],
+    labels: ['—', 'Now'],
     unit: 'pets',
-    annotationStart: '1,820',
-    annotationEnd: '2,163',
     path: '/pets',
   },
 ];
@@ -108,11 +94,18 @@ function useDarkMode(): boolean {
 
 // ─── GlowStatCard ─────────────────────────────────────────────
 
+interface GlowStatCardProps {
+  title: string; subtitle: string; metricLabel: string; value: string;
+  trendLabel: string; trendPositive: boolean; color: string; shadowColor: string;
+  icon: React.ElementType; data: number[]; labels: string[]; unit: string;
+  annotationStart?: string; annotationEnd?: string; path: string;
+}
+
 function GlowStatCard({
   title, subtitle, metricLabel, value, trendLabel, trendPositive,
   color, shadowColor, icon: Icon, data, labels, unit,
   annotationStart, annotationEnd, path,
-}: (typeof GLOW_CARDS)[0]) {
+}: GlowStatCardProps) {
   const dark = useDarkMode();
   const navigate = useNavigate();
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
@@ -415,17 +408,40 @@ export default function DashboardPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
 
-  const recentClients = [
-    { id: 1, petImage: 'https://images.unsplash.com/photo-1734966213753-1b361564bab4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxnb2xkZW4lMjByZXRyaWV2ZXIlMjBkb2clMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyNDMxMzB8MA&ixlib=rb-4.1.0&q=80&w=1080', petName: 'Max',     ownerName: 'John Smith',    breed: 'Golden Retriever', lastVisit: 'Mar 10, 2026', status: 'Healthy'   as const },
-    { id: 2, petImage: 'https://images.unsplash.com/photo-1670739088209-64414249354b?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHx0YWJieSUyMGNhdCUyMHBvcnRyYWl0fGVufDF8fHx8MTc3MzI3OTg3NHww&ixlib=rb-4.1.0&q=80&w=1080', petName: 'Luna',    ownerName: 'Emily Johnson', breed: 'Tabby Cat',       lastVisit: 'Mar 9, 2026',  status: 'Follow-up' as const },
-    { id: 3, petImage: 'https://images.unsplash.com/photo-1685387714439-edef4bd70ef5?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxiZWFnbGUlMjBkb2clMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyMzM4ODd8MA&ixlib=rb-4.1.0&q=80&w=1080', petName: 'Cooper',  ownerName: 'Michael Brown', breed: 'Beagle',           lastVisit: 'Mar 8, 2026',  status: 'Healthy'   as const },
-    { id: 4, petImage: 'https://images.unsplash.com/photo-1608574592993-774ffa9a218e?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxzaWFtZXNlJTIwY2F0JTIwcG9ydHJhaXR8ZW58MXx8fHwxNzczMTczMjkwfDA&ixlib=rb-4.1.0&q=80&w=1080', petName: 'Bella',   ownerName: 'Sarah Williams',breed: 'Siamese Cat',      lastVisit: 'Mar 7, 2026',  status: 'Healthy'   as const },
-    { id: 5, petImage: 'https://images.unsplash.com/photo-1665918577658-c7cddc5fd53c?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxjb3JnaSUyMGRvZyUyMHBvcnRyYWl0fGVufDF8fHx8MTc3MzI3OTg3NHww&ixlib=rb-4.1.0&q=80&w=1080', petName: 'Charlie', ownerName: 'David Miller',  breed: 'Corgi',            lastVisit: 'Mar 5, 2026',  status: 'Follow-up' as const },
-  ];
+  // ── Real data from Supabase ─────────────────────────────────
+  const stats = useDashboardStats();
+  const today = new Date().toISOString().split('T')[0];
+  const { appointments: todayAppointments } = useAppointments(today);
+  const { clients: allClients } = useClients();
 
-  // Use real MOCK_APPOINTMENTS for Mar 11 (the dashboard "today")
-  const upcomingAppointments = MOCK_APPOINTMENTS
-    .filter((a) => a.date === '2026-03-11' && a.status !== 'Cancelled' && a.status !== 'Completed')
+  // Merge live stats into card configs
+  const GLOW_CARDS = GLOW_CARD_CONFIG.map((c, i) => {
+    const values = [stats.totalClients, stats.appointmentsToday, stats.vaccinesDueThisWeek, stats.activePets];
+    const v = values[i];
+    return {
+      ...c,
+      value: v.toLocaleString(),
+      trendLabel: 'Live data',
+      data: [0, v],
+      annotationStart: '0',
+      annotationEnd: v.toLocaleString(),
+    };
+  });
+
+  // Recent 5 clients for dashboard table
+  const recentClients = allClients.slice(0, 5).map(c => ({
+    id: c.id,
+    petImage: c.pets?.[0]?.photo_url ?? '',
+    petName: c.pets?.[0]?.name ?? '—',
+    ownerName: `${c.first_name} ${c.last_name}`,
+    breed: c.pets?.[0]?.breed ?? c.pets?.[0]?.species ?? '—',
+    lastVisit: new Date(c.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+    status: (c.portal_status ?? 'Healthy') as 'Healthy' | 'Follow-up' | 'Critical',
+  }));
+
+  // Today's upcoming appointments
+  const upcomingAppointments = todayAppointments
+    .filter(a => a.status !== 'Cancelled' && a.status !== 'Completed')
     .slice(0, 4);
 
   // ── Search ──────────────────────────────────────────────────
@@ -439,11 +455,11 @@ export default function DashboardPage() {
       )
     : [];
   const matchedAppointments = q
-    ? MOCK_APPOINTMENTS.filter(
+    ? todayAppointments.filter(
         (a) =>
-          a.petName.toLowerCase().includes(q) ||
-          a.ownerName.toLowerCase().includes(q) ||
-          a.service.toLowerCase().includes(q)
+          (a.pets?.name ?? '').toLowerCase().includes(q) ||
+          (a.clients ? `${a.clients.first_name} ${a.clients.last_name}` : '').toLowerCase().includes(q) ||
+          (a.services?.name ?? '').toLowerCase().includes(q)
       )
     : [];
   const hasResults = matchedClients.length > 0 || matchedAppointments.length > 0;
@@ -556,14 +572,18 @@ export default function DashboardPage() {
                       className="flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-[var(--surface-elevated)] transition-colors"
                       style={{ borderTop: i > 0 ? '1px solid var(--border-color)' : undefined }}
                     >
-                      <img src={a.petImage} alt={a.petName} className="w-10 h-10 object-cover flex-shrink-0" style={{ borderRadius: '9999px' }} />
+                      <div className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center" style={{ background: '#2D6A4F18' }}>
+                        <PawPrint className="w-5 h-5" style={{ color: 'var(--brand-green-text)' }} />
+                      </div>
                       <div className="flex-1 min-w-0">
-                        <p style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>{a.petName}</p>
-                        <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{a.ownerName} · {a.service}</p>
+                        <p style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>{a.pets?.name ?? '—'}</p>
+                        <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                          {a.clients ? `${a.clients.first_name} ${a.clients.last_name}` : '—'} · {a.services?.name ?? '—'}
+                        </p>
                       </div>
                       <div className="flex items-center gap-1.5 flex-shrink-0" style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>
                         <Clock className="w-3.5 h-3.5" />
-                        {a.timeStart} · {new Date(a.date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        {new Date(a.scheduled_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
                       </div>
                       <span
                         className="flex-shrink-0 px-2.5 py-0.5"
@@ -575,7 +595,6 @@ export default function DashboardPage() {
                       >
                         {a.status}
                       </span>
-                      <ArrowRight className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--text-secondary)' }} />
                     </div>
                   ))}
                 </div>
@@ -606,26 +625,33 @@ export default function DashboardPage() {
             </Link>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-[var(--border-color)]">
-                  {['Pet Name', 'Owner', 'Breed', 'Last Visit', 'Status'].map((h) => (
-                    <th key={h} className="py-3 px-4 text-left">
-                      <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px', fontWeight: 600 }}>{h}</span>
-                    </th>
+            {recentClients.length === 0 ? (
+              <div className="py-12 text-center">
+                <Users className="w-8 h-8 mx-auto mb-2" style={{ color: 'var(--border-color)' }} />
+                <p style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>No clients yet — add your first client</p>
+              </div>
+            ) : (
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-[var(--border-color)]">
+                    {['Pet Name', 'Owner', 'Breed', 'Added', 'Status'].map((h) => (
+                      <th key={h} className="py-3 px-4 text-left">
+                        <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px', fontWeight: 600 }}>{h}</span>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentClients.map((client) => (
+                    <ClientRow
+                      key={client.id}
+                      {...client}
+                      onClick={() => navigate(`/clients/${client.id}`)}
+                    />
                   ))}
-                </tr>
-              </thead>
-              <tbody>
-                {recentClients.map((client) => (
-                  <ClientRow
-                    key={client.id}
-                    {...client}
-                    onClick={() => navigate(`/clients/${client.id}`)}
-                  />
-                ))}
-              </tbody>
-            </table>
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
 
@@ -635,7 +661,7 @@ export default function DashboardPage() {
             <div>
               <h3 className="text-[var(--text-primary)]">Today's Appointments</h3>
               <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: '14px', fontWeight: 400 }}>
-                {upcomingAppointments.length} scheduled
+                {stats.appointmentsToday} scheduled
               </p>
             </div>
             <Link
@@ -647,14 +673,19 @@ export default function DashboardPage() {
             </Link>
           </div>
           <div className="p-4 space-y-3">
-            {upcomingAppointments.map((appt) => (
+            {upcomingAppointments.length === 0 ? (
+              <div className="py-8 text-center">
+                <Calendar className="w-8 h-8 mx-auto mb-2" style={{ color: 'var(--border-color)' }} />
+                <p style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>No appointments today</p>
+              </div>
+            ) : upcomingAppointments.map((appt) => (
               <AppointmentCard
                 key={appt.id}
-                time={appt.timeStart}
-                petName={appt.petName}
-                ownerName={appt.ownerName}
-                service={appt.service}
-                petImage={appt.petImage}
+                time={new Date(appt.scheduled_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                petName={appt.pets?.name ?? '—'}
+                ownerName={appt.clients ? `${appt.clients.first_name} ${appt.clients.last_name}` : '—'}
+                service={appt.services?.name ?? appt.reason ?? '—'}
+                petImage={appt.pets?.photo_url ?? ''}
                 onClick={() => navigate('/appointments', { state: { openApptId: appt.id } })}
               />
             ))}

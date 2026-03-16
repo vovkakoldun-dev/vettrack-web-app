@@ -52,116 +52,7 @@ const statusColors: Record<RecordStatus, { bg: string; text: string }> = {
 
 // ─── Mock Data ───────────────────────────────────────────────
 
-const RECORDS: MedicalRecord[] = [
-  {
-    id: 1, petName: 'Max', breed: 'Golden Retriever',
-    petImage: 'https://images.unsplash.com/photo-1734966213753-1b361564bab4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxnb2xkZW4lMjByZXRyaWV2ZXIlMjBkb2clMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyNDMxMzB8MA&ixlib=rb-4.1.0&q=80&w=400',
-    ownerName: 'John Smith', recordType: 'Visit', date: 'Mar 11, 2026', dateISO: '2026-03-11',
-    vet: 'Dr. Sarah Chen', summary: 'Annual wellness exam — all vitals normal, weight stable', status: 'Final',
-  },
-  {
-    id: 2, petName: 'Max', breed: 'Golden Retriever',
-    petImage: 'https://images.unsplash.com/photo-1734966213753-1b361564bab4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxnb2xkZW4lMjByZXRyaWV2ZXIlMjBkb2clMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyNDMxMzB8MA&ixlib=rb-4.1.0&q=80&w=400',
-    ownerName: 'John Smith', recordType: 'Lab Result', date: 'Mar 11, 2026', dateISO: '2026-03-11',
-    vet: 'Dr. Sarah Chen', summary: 'CBC & comprehensive metabolic panel — within normal limits', status: 'Final',
-  },
-  {
-    id: 3, petName: 'Luna', breed: 'Tabby',
-    petImage: 'https://images.unsplash.com/photo-1670739088209-64414249354b?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHx0YWJieSUyMGNhdCUyMHBvcnRyYWl0fGVufDF8fHx8MTc3MzI3OTg3NHww&ixlib=rb-4.1.0&q=80&w=400',
-    ownerName: 'Emily Johnson', recordType: 'Vaccination', date: 'Mar 9, 2026', dateISO: '2026-03-09',
-    vet: 'Dr. Sarah Chen', summary: 'FVRCP booster administered — no adverse reaction', status: 'Final',
-  },
-  {
-    id: 4, petName: 'Cooper', breed: 'Beagle',
-    petImage: 'https://images.unsplash.com/photo-1685387714439-edef4bd70ef5?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxiZWFnbGUlMjBkb2clMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyMzM4ODd8MA&ixlib=rb-4.1.0&q=80&w=400',
-    ownerName: 'Michael Brown', recordType: 'Dental', date: 'Mar 11, 2026', dateISO: '2026-03-11',
-    vet: 'Dr. Sarah Chen', summary: 'Full dental cleaning, 2 extractions (teeth 108, 309)', status: 'Final',
-  },
-  {
-    id: 5, petName: 'Bella', breed: 'Siamese',
-    petImage: 'https://images.unsplash.com/photo-1608574592993-774ffa9a218e?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxzaWFtZXNlJTIwY2F0JTIwcG9ydHJhaXR8ZW58MXx8fHwxNzczMTczMjkwfDA&ixlib=rb-4.1.0&q=80&w=400',
-    ownerName: 'Sarah Williams', recordType: 'Surgery', date: 'Mar 7, 2026', dateISO: '2026-03-07',
-    vet: 'Dr. James Park', summary: 'Ovariohysterectomy (spay) — no complications, recovery normal', status: 'Final',
-  },
-  {
-    id: 6, petName: 'Bella', breed: 'Siamese',
-    petImage: 'https://images.unsplash.com/photo-1608574592993-774ffa9a218e?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxzaWFtZXNlJTIwY2F0JTIwcG9ydHJhaXR8ZW58MXx8fHwxNzczMTczMjkwfDA&ixlib=rb-4.1.0&q=80&w=400',
-    ownerName: 'Sarah Williams', recordType: 'Visit', date: 'Mar 10, 2026', dateISO: '2026-03-10',
-    vet: 'Dr. Sarah Chen', summary: 'Post-surgery follow-up — incision healing well, sutures intact', status: 'Final',
-  },
-  {
-    id: 7, petName: 'Charlie', breed: 'Corgi',
-    petImage: 'https://images.unsplash.com/photo-1665918577658-c7cddc5fd53c?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxjb3JnaSUyMGRvZyUyMHBvcnRyYWl0fGVufDF8fHx8MTc3MzI3OTg3NHww&ixlib=rb-4.1.0&q=80&w=400',
-    ownerName: 'David Miller', recordType: 'Prescription', date: 'Mar 5, 2026', dateISO: '2026-03-05',
-    vet: 'Dr. Sarah Chen', summary: 'Carprofen 75mg for joint inflammation — 14-day course', status: 'Final',
-  },
-  {
-    id: 8, petName: 'Rocky', breed: 'German Shepherd',
-    petImage: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400',
-    ownerName: 'James Wilson', recordType: 'Imaging', date: 'Mar 3, 2026', dateISO: '2026-03-03',
-    vet: 'Dr. James Park', summary: 'Thoracic radiographs (3 views) — mild cardiomegaly noted', status: 'Pending Review',
-  },
-  {
-    id: 9, petName: 'Rocky', breed: 'German Shepherd',
-    petImage: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400',
-    ownerName: 'James Wilson', recordType: 'Lab Result', date: 'Mar 3, 2026', dateISO: '2026-03-03',
-    vet: 'Dr. James Park', summary: 'Cardiac biomarker panel — elevated NT-proBNP, recommend echo', status: 'Pending Review',
-  },
-  {
-    id: 10, petName: 'Milo', breed: 'Persian',
-    petImage: 'https://images.unsplash.com/photo-1574158622682-e40e69881006?w=400',
-    ownerName: 'Jessica Taylor', recordType: 'Vaccination', date: 'Feb 28, 2026', dateISO: '2026-02-28',
-    vet: 'Dr. Sarah Chen', summary: 'Rabies 3-year & FVRCP booster — both administered', status: 'Final',
-  },
-  {
-    id: 11, petName: 'Daisy', breed: 'Labrador',
-    petImage: 'https://images.unsplash.com/photo-1561037404-61cd46aa615b?w=400',
-    ownerName: 'Robert Anderson', recordType: 'Visit', date: 'Feb 25, 2026', dateISO: '2026-02-25',
-    vet: 'Dr. Sarah Chen', summary: 'Limping on rear-left leg — suspected cruciate injury, imaging ordered', status: 'Amended',
-  },
-  {
-    id: 12, petName: 'Daisy', breed: 'Labrador',
-    petImage: 'https://images.unsplash.com/photo-1561037404-61cd46aa615b?w=400',
-    ownerName: 'Robert Anderson', recordType: 'Imaging', date: 'Feb 26, 2026', dateISO: '2026-02-26',
-    vet: 'Dr. James Park', summary: 'Stifle radiographs — confirmed partial CCL tear, surgery recommended', status: 'Final',
-  },
-  {
-    id: 13, petName: 'Simba', breed: 'Maine Coon',
-    petImage: 'https://images.unsplash.com/photo-1526336024174-e58f5cdd8e13?w=400',
-    ownerName: 'Lisa Martinez', recordType: 'Visit', date: 'Feb 20, 2026', dateISO: '2026-02-20',
-    vet: 'Dr. Sarah Chen', summary: 'Wellness exam — overweight (14.2 lbs), diet plan discussed', status: 'Final',
-  },
-  {
-    id: 14, petName: 'Buddy', breed: 'Poodle',
-    petImage: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400',
-    ownerName: 'Karen Thomas', recordType: 'Dental', date: 'Feb 15, 2026', dateISO: '2026-02-15',
-    vet: 'Dr. Sarah Chen', summary: 'Dental prophylaxis — Grade 2 periodontal disease, no extractions', status: 'Final',
-  },
-  {
-    id: 15, petName: 'Luna', breed: 'Tabby',
-    petImage: 'https://images.unsplash.com/photo-1670739088209-64414249354b?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHx0YWJieSUyMGNhdCUyMHBvcnRyYWl0fGVufDF8fHx8MTc3MzI3OTg3NHww&ixlib=rb-4.1.0&q=80&w=400',
-    ownerName: 'Emily Johnson', recordType: 'Lab Result', date: 'Mar 9, 2026', dateISO: '2026-03-09',
-    vet: 'Dr. Sarah Chen', summary: 'Urinalysis — trace crystals, recommend diet change & recheck', status: 'Pending Review',
-  },
-  {
-    id: 16, petName: 'Charlie', breed: 'Corgi',
-    petImage: 'https://images.unsplash.com/photo-1665918577658-c7cddc5fd53c?w=400',
-    ownerName: 'David Miller', recordType: 'Visit', date: 'Mar 5, 2026', dateISO: '2026-03-05',
-    vet: 'Dr. Sarah Chen', summary: 'Lameness evaluation — bilateral hip dysplasia, mild to moderate', status: 'Final',
-  },
-  {
-    id: 17, petName: 'Cooper', breed: 'Beagle',
-    petImage: 'https://images.unsplash.com/photo-1685387714439-edef4bd70ef5?w=400',
-    ownerName: 'Michael Brown', recordType: 'Prescription', date: 'Mar 11, 2026', dateISO: '2026-03-11',
-    vet: 'Dr. Sarah Chen', summary: 'Amoxicillin 250mg post-dental — 10-day course with food', status: 'Draft',
-  },
-  {
-    id: 18, petName: 'Max', breed: 'Golden Retriever',
-    petImage: 'https://images.unsplash.com/photo-1734966213753-1b361564bab4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxnb2xkZW4lMjByZXRyaWV2ZXIlMjBkb2clMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyNDMxMzB8MA&ixlib=rb-4.1.0&q=80&w=400',
-    ownerName: 'John Smith', recordType: 'Vaccination', date: 'Mar 11, 2026', dateISO: '2026-03-11',
-    vet: 'Dr. Sarah Chen', summary: 'DHPP booster & Bordetella nasal — due for rabies in 6 months', status: 'Final',
-  },
-];
+const RECORDS: MedicalRecord[] = []
 
 // ─── Component ───────────────────────────────────────────────
 
@@ -175,7 +66,7 @@ export default function RecordsPage() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
 
-  const filtered = RECORDS.filter((r) => {
+  const filtered = [].filter((r) => {
     const q = search.toLowerCase();
     const matchesSearch =
       r.petName.toLowerCase().includes(q) ||
@@ -189,8 +80,8 @@ export default function RecordsPage() {
     return matchesSearch && matchesType && matchesStatus && matchesDateFrom && matchesDateTo;
   });
 
-  const pendingCount = RECORDS.filter((r) => r.status === 'Pending Review').length;
-  const thisMonthCount = RECORDS.filter((r) => r.dateISO >= '2026-03-01').length;
+  const pendingCount = [].filter((r) => r.status === 'Pending Review').length;
+  const thisMonthCount = [].filter((r) => r.dateISO >= '2026-03-01').length;
 
   return (
     <div className="max-w-[1440px] mx-auto p-8">

@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
   Search, Plus, PawPrint, Heart, Sparkles, Mail,
-  CheckCircle2, AlertCircle, AlertTriangle,
+  CheckCircle2, AlertCircle, AlertTriangle, Loader2,
 } from 'lucide-react';
+import { usePets } from '../hooks/usePets';
 import { StatCard } from '../components/StatCard';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
@@ -70,36 +71,40 @@ function getInitials(name: string): string {
     .toUpperCase();
 }
 
-// ─── Mock Data ───────────────────────────────────────────────
-
-const MOCK_PETS: Pet[] = [
-  { id: 1,  petImage: 'https://images.unsplash.com/photo-1734966213753-1b361564bab4?w=400',  petName: 'Max',     species: 'Dog', breed: 'Golden Retriever',  dob: 'Jun 15, 2020', age: '5y', weight: '32 kg',  ownerName: 'John Smith',      ownerEmail: 'john.smith@email.com',  vet: 'Dr. Chen',     lastVisit: 'Mar 10, 2026', nextAppointment: 'Apr 10, 2026', status: 'Healthy'   as const },
-  { id: 2,  petImage: 'https://images.unsplash.com/photo-1670739088209-64414249354b?w=400',  petName: 'Luna',    species: 'Cat', breed: 'Tabby',              dob: 'Feb 3, 2022',  age: '4y', weight: '4.2 kg', ownerName: 'Emily Johnson',   ownerEmail: 'emily.j@email.com',     vet: 'Dr. Chen',     lastVisit: 'Mar 9, 2026',  nextAppointment: 'Mar 23, 2026', status: 'Follow-up' as const },
-  { id: 3,  petImage: 'https://images.unsplash.com/photo-1685387714439-edef4bd70ef5?w=400',  petName: 'Cooper',  species: 'Dog', breed: 'Beagle',             dob: 'Aug 20, 2021', age: '4y', weight: '11 kg',  ownerName: 'Michael Brown',   ownerEmail: 'mbrown@email.com',      vet: 'Dr. Chen',     lastVisit: 'Mar 8, 2026',  nextAppointment: 'Jun 8, 2026',  status: 'Healthy'   as const },
-  { id: 4,  petImage: 'https://images.unsplash.com/photo-1608574592993-774ffa9a218e?w=400',  petName: 'Bella',   species: 'Cat', breed: 'Siamese',            dob: 'Oct 11, 2019', age: '6y', weight: '3.8 kg', ownerName: 'Sarah Williams',  ownerEmail: 'swilliams@email.com',   vet: 'Dr. Chen',     lastVisit: 'Mar 7, 2026',  nextAppointment: 'Apr 7, 2026',  status: 'Healthy'   as const },
-  { id: 5,  petImage: 'https://images.unsplash.com/photo-1665918577658-c7cddc5fd53c?w=400',  petName: 'Charlie', species: 'Dog', breed: 'Corgi',              dob: 'Apr 5, 2022',  age: '3y', weight: '14 kg',  ownerName: 'David Miller',    ownerEmail: 'dmiller@email.com',     vet: 'Dr. Williams', lastVisit: 'Mar 5, 2026',  nextAppointment: 'Mar 19, 2026', status: 'Follow-up' as const },
-  { id: 6,  petImage: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400',  petName: 'Rocky',   species: 'Dog', breed: 'German Shepherd',    dob: 'Sep 12, 2020', age: '5y', weight: '38 kg',  ownerName: 'James Wilson',    ownerEmail: 'jwilson@email.com',     vet: 'Dr. Patel',    lastVisit: 'Mar 3, 2026',  nextAppointment: 'Mar 17, 2026', status: 'Critical'  as const },
-  { id: 7,  petImage: 'https://images.unsplash.com/photo-1574158622682-e40e69881006?w=400',  petName: 'Milo',    species: 'Cat', breed: 'Persian',            dob: 'Jan 30, 2021', age: '5y', weight: '5.1 kg', ownerName: 'Jessica Taylor',  ownerEmail: 'jtaylor@email.com',     vet: 'Dr. Patel',    lastVisit: 'Feb 28, 2026', nextAppointment: 'May 28, 2026', status: 'Healthy'   as const },
-  { id: 8,  petImage: 'https://images.unsplash.com/photo-1561037404-61cd46aa615b?w=400',     petName: 'Daisy',   species: 'Dog', breed: 'Labrador',           dob: 'Jul 14, 2021', age: '4y', weight: '28 kg',  ownerName: 'Robert Anderson', ownerEmail: 'randerson@email.com',   vet: 'Dr. Patel',    lastVisit: 'Feb 25, 2026', nextAppointment: 'Mar 25, 2026', status: 'Follow-up' as const },
-  { id: 9,  petImage: 'https://images.unsplash.com/photo-1526336024174-e58f5cdd8e13?w=400',  petName: 'Simba',   species: 'Cat', breed: 'Maine Coon',         dob: 'Mar 8, 2020',  age: '6y', weight: '7.2 kg', ownerName: 'Lisa Martinez',   ownerEmail: 'lmartinez@email.com',   vet: 'Dr. Williams', lastVisit: 'Feb 20, 2026', nextAppointment: 'Apr 20, 2026', status: 'Healthy'   as const },
-  { id: 10, petImage: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400',  petName: 'Buddy',   species: 'Dog', breed: 'Poodle',             dob: 'Nov 22, 2022', age: '3y', weight: '8 kg',   ownerName: 'Karen Thomas',    ownerEmail: 'kthomas@email.com',     vet: 'Dr. Patel',    lastVisit: 'Feb 15, 2026', nextAppointment: 'May 15, 2026', status: 'Healthy'   as const },
-  { id: 11, petImage: 'https://images.unsplash.com/photo-1548681528-6a5c45b66b42?w=400',     petName: 'Cleo',    species: 'Cat', breed: 'British Shorthair',  dob: 'May 17, 2021', age: '4y', weight: '4.8 kg', ownerName: 'Anna Rivera',     ownerEmail: 'arivera@email.com',     vet: 'Dr. Chen',     lastVisit: 'Feb 10, 2026', nextAppointment: 'May 10, 2026', status: 'Healthy'   as const },
-  { id: 12, petImage: 'https://images.unsplash.com/photo-1583511655826-05700d52f4d9?w=400',  petName: 'Zeus',    species: 'Dog', breed: 'Boxer',              dob: 'Feb 28, 2022', age: '4y', weight: '32 kg',  ownerName: 'Tom Baker',       ownerEmail: 'tbaker@email.com',      vet: 'Dr. Williams', lastVisit: 'Feb 8, 2026',  nextAppointment: 'Apr 8, 2026',  status: 'Follow-up' as const },
-  { id: 13, petImage: 'https://images.unsplash.com/photo-1516750105099-4b8a83e217ee?w=400',  petName: 'Nala',    species: 'Cat', breed: 'Bengal',             dob: 'Dec 4, 2022',  age: '3y', weight: '4.0 kg', ownerName: 'Priya Patel',     ownerEmail: 'ppatel@email.com',      vet: 'Dr. Patel',    lastVisit: 'Feb 5, 2026',  nextAppointment: 'May 5, 2026',  status: 'Healthy'   as const },
-  { id: 14, petImage: 'https://images.unsplash.com/photo-1551717743-49959800b1f6?w=400',     petName: 'Archie',  species: 'Dog', breed: 'Dachshund',          dob: 'Aug 1, 2023',  age: '2y', weight: '7 kg',   ownerName: 'Mark Lee',        ownerEmail: 'mlee@email.com',        vet: 'Dr. Chen',     lastVisit: 'Jan 28, 2026', nextAppointment: 'Apr 28, 2026', status: 'Healthy'   as const },
-  { id: 15, petImage: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400',  petName: 'Oliver',  species: 'Dog', breed: 'Beagle Mix',         dob: 'Jun 10, 2021', age: '4y', weight: '10 kg',  ownerName: 'Claire Nguyen',   ownerEmail: 'cnguyen@email.com',     vet: 'Dr. Williams', lastVisit: 'Jan 20, 2026', nextAppointment: 'Apr 20, 2026', status: 'Healthy'   as const },
-];
+// Mock data removed — live Supabase queries used via usePets()
 
 // ─── Component ───────────────────────────────────────────────
+
+// Mock data removed — replaced by live Supabase queries
 
 export default function PetsPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [speciesFilter, setSpeciesFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('all');
   const [sortFilter, setSortFilter] = useState('recent');
+  const { pets, loading } = usePets();
 
-  const filtered = MOCK_PETS
+  // Adapter: map PetRow to legacy display shape
+  const allPets = pets.map(p => ({
+    id: p.id,
+    petImage: p.photo_url ?? '',
+    petName: p.name,
+    species: p.species,
+    breed: p.breed ?? '—',
+    dob: p.date_of_birth ?? '—',
+    age: p.date_of_birth
+      ? `${Math.floor((Date.now() - new Date(p.date_of_birth).getTime()) / (365.25 * 86400000))}y`
+      : '—',
+    weight: p.weight_kg ? `${p.weight_kg} kg` : '—',
+    ownerName: p.clients ? `${p.clients.first_name} ${p.clients.last_name}` : '—',
+    ownerEmail: '',
+    vet: '—',
+    lastVisit: '—',
+    nextAppointment: '—',
+    status: 'Healthy' as const,
+  }));
+
+  const filtered = allPets
     .filter((p) => {
       const q = search.toLowerCase();
       const matchesSearch =
@@ -107,15 +112,16 @@ export default function PetsPage() {
         p.breed.toLowerCase().includes(q) ||
         p.ownerName.toLowerCase().includes(q);
       const matchesSpecies = speciesFilter === 'all' || p.species === speciesFilter;
-      const matchesStatus = statusFilter === 'all' || p.status === statusFilter;
-      return matchesSearch && matchesSpecies && matchesStatus;
+      return matchesSearch && matchesSpecies;
     })
     .sort((a, b) => {
       if (sortFilter === 'name-asc') return a.petName.localeCompare(b.petName);
       if (sortFilter === 'name-desc') return b.petName.localeCompare(a.petName);
-      // Default: recent visit — keep original order (already sorted by lastVisit desc in mock data)
       return 0;
     });
+
+  const dogCount = allPets.filter(p => p.species === 'Dog').length;
+  const catCount = allPets.filter(p => p.species === 'Cat').length;
 
   return (
     <div className="max-w-[1440px] mx-auto p-8">
@@ -137,31 +143,31 @@ export default function PetsPage() {
       <div className="grid grid-cols-4 gap-6 mb-8">
         <StatCard
           title="Total Pets"
-          value={2163}
+          value={allPets.length}
           icon={PawPrint}
           iconColor="var(--brand-green-text)"
-          trend={{ value: '+5% from last month', isPositive: true }}
+          trend={{ value: 'Active patients', isPositive: true }}
         />
         <StatCard
           title="Dogs"
-          value={1284}
+          value={dogCount}
           icon={PawPrint}
           iconColor="#F4A261"
-          trend={{ value: '59% of total', isPositive: true }}
+          trend={{ value: allPets.length ? `${Math.round(dogCount / allPets.length * 100)}% of total` : '—', isPositive: true }}
         />
         <StatCard
           title="Cats"
-          value={731}
+          value={catCount}
           icon={Heart}
           iconColor="#8B5CF6"
-          trend={{ value: '34% of total', isPositive: true }}
+          trend={{ value: allPets.length ? `${Math.round(catCount / allPets.length * 100)}% of total` : '—', isPositive: true }}
         />
         <StatCard
-          title="New This Month"
-          value={47}
+          title="Other Species"
+          value={allPets.length - dogCount - catCount}
           icon={Sparkles}
           iconColor="#06B6D4"
-          trend={{ value: '+18% vs last month', isPositive: true }}
+          trend={{ value: 'Registered', isPositive: true }}
         />
       </div>
 
@@ -225,7 +231,23 @@ export default function PetsPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filtered.map((pet) => {
+            {loading && (
+              <TableRow>
+                <TableCell colSpan={9} className="py-16 text-center">
+                  <Loader2 className="w-6 h-6 mx-auto animate-spin" style={{ color: 'var(--text-secondary)' }} />
+                </TableCell>
+              </TableRow>
+            )}
+            {!loading && filtered.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={9} className="py-16 text-center">
+                  <PawPrint className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--border-color)' }} />
+                  <p style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>No pets yet</p>
+                  <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>Add your first pet using the button above</p>
+                </TableCell>
+              </TableRow>
+            )}
+            {!loading && filtered.map((pet) => {
               const cfg = STATUS_CONFIG[pet.status];
               const StatusIcon = cfg.icon;
               const vetColor = VET_COLORS[pet.vet] ?? 'var(--brand-green-text)';
@@ -341,7 +363,7 @@ export default function PetsPage() {
         {/* Footer */}
         <div className="px-6 py-4 border-t border-[var(--border-color)] flex items-center justify-between">
           <p className="text-[var(--text-secondary)]" style={{ fontSize: '14px', fontWeight: 400 }}>
-            Showing {filtered.length} of {MOCK_PETS.length} pets
+            Showing {filtered.length} of {allPets.length} pets
           </p>
         </div>
       </div>

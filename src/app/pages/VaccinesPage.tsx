@@ -44,26 +44,7 @@ interface VaccineRecord {
 
 // ─── Mock Data ───────────────────────────────────────────────
 
-const MOCK_VACCINES: VaccineRecord[] = [
-  { id: 1,  petId: 6,  petName: 'Rocky',   petImage: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400',   breed: 'German Shepherd',  species: 'Dog', ownerName: 'James Wilson',    vaccine: 'Rabies',       lastGiven: 'Nov 5, 2024',  nextDue: 'Nov 5, 2025',  daysUntilDue: -130, status: 'Overdue',     vet: 'Dr. Chen' },
-  { id: 2,  petId: 8,  petName: 'Daisy',   petImage: 'https://images.unsplash.com/photo-1561037404-61cd46aa615b?w=400',      breed: 'Labrador',         species: 'Dog', ownerName: 'Robert Anderson', vaccine: 'DHPP',         lastGiven: 'Dec 1, 2024',  nextDue: 'Dec 1, 2025',  daysUntilDue: -104, status: 'Overdue',     vet: 'Dr. Patel' },
-  { id: 3,  petId: 2,  petName: 'Luna',    petImage: 'https://images.unsplash.com/photo-1670739088209-64414249354b?w=400',   breed: 'Tabby',            species: 'Cat', ownerName: 'Emily Johnson',   vaccine: 'FVRCP',        lastGiven: 'Jan 10, 2025', nextDue: 'Jan 10, 2026', daysUntilDue: -63,  status: 'Overdue',     vet: 'Dr. Chen' },
-  { id: 4,  petId: 5,  petName: 'Charlie', petImage: 'https://images.unsplash.com/photo-1665918577658-c7cddc5fd53c?w=400',   breed: 'Corgi',            species: 'Dog', ownerName: 'David Miller',    vaccine: 'Bordetella',   lastGiven: 'Sep 10, 2025', nextDue: 'Mar 10, 2026', daysUntilDue: -4,   status: 'Overdue',     vet: 'Dr. Williams' },
-  { id: 5,  petId: 1,  petName: 'Max',     petImage: 'https://images.unsplash.com/photo-1734966213753-1b361564bab4?w=400',   breed: 'Golden Retriever', species: 'Dog', ownerName: 'John Smith',      vaccine: 'Leptospirosis',lastGiven: 'Mar 18, 2025', nextDue: 'Mar 18, 2026', daysUntilDue: 4,    status: 'Due Soon',    vet: 'Dr. Chen' },
-  { id: 6,  petId: 7,  petName: 'Milo',    petImage: 'https://images.unsplash.com/photo-1574158622682-e40e69881006?w=400',   breed: 'Persian',          species: 'Cat', ownerName: 'Jessica Taylor',  vaccine: 'Rabies',       lastGiven: 'Mar 22, 2025', nextDue: 'Mar 22, 2026', daysUntilDue: 8,    status: 'Due Soon',    vet: 'Dr. Patel' },
-  { id: 7,  petId: 3,  petName: 'Cooper',  petImage: 'https://images.unsplash.com/photo-1685387714439-edef4bd70ef5?w=400',   breed: 'Beagle',           species: 'Dog', ownerName: 'Michael Brown',   vaccine: 'Lyme',         lastGiven: 'Mar 25, 2025', nextDue: 'Mar 25, 2026', daysUntilDue: 11,   status: 'Due Soon',    vet: 'Dr. Chen' },
-  { id: 8,  petId: 9,  petName: 'Simba',   petImage: 'https://images.unsplash.com/photo-1526336024174-e58f5cdd8e13?w=400',   breed: 'Maine Coon',       species: 'Cat', ownerName: 'Lisa Martinez',   vaccine: 'FeLV',         lastGiven: 'Apr 2, 2025',  nextDue: 'Apr 2, 2026',  daysUntilDue: 19,   status: 'Due Soon',    vet: 'Dr. Williams' },
-  { id: 9,  petId: 4,  petName: 'Bella',   petImage: 'https://images.unsplash.com/photo-1608574592993-774ffa9a218e?w=400',   breed: 'Siamese',          species: 'Cat', ownerName: 'Sarah Williams',  vaccine: 'FVRCP',        lastGiven: 'Apr 7, 2025',  nextDue: 'Apr 7, 2026',  daysUntilDue: 24,   status: 'Due Soon',    vet: 'Dr. Chen' },
-  { id: 10, petId: 10, petName: 'Buddy',   petImage: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400',   breed: 'Poodle',           species: 'Dog', ownerName: 'Karen Thomas',    vaccine: 'DHPP',         lastGiven: 'May 15, 2025', nextDue: 'May 15, 2026', daysUntilDue: 62,   status: 'Due Soon',    vet: 'Dr. Patel' },
-  { id: 11, petId: 1,  petName: 'Max',     petImage: 'https://images.unsplash.com/photo-1734966213753-1b361564bab4?w=400',   breed: 'Golden Retriever', species: 'Dog', ownerName: 'John Smith',      vaccine: 'Rabies',       lastGiven: 'Dec 15, 2025', nextDue: 'Dec 15, 2026', daysUntilDue: 276,  status: 'Up to Date',  vet: 'Dr. Chen' },
-  { id: 12, petId: 1,  petName: 'Max',     petImage: 'https://images.unsplash.com/photo-1734966213753-1b361564bab4?w=400',   breed: 'Golden Retriever', species: 'Dog', ownerName: 'John Smith',      vaccine: 'DHPP',         lastGiven: 'Jan 20, 2026', nextDue: 'Jan 20, 2027', daysUntilDue: 312,  status: 'Up to Date',  vet: 'Dr. Chen' },
-  { id: 13, petId: 4,  petName: 'Bella',   petImage: 'https://images.unsplash.com/photo-1608574592993-774ffa9a218e?w=400',   breed: 'Siamese',          species: 'Cat', ownerName: 'Sarah Williams',  vaccine: 'Rabies',       lastGiven: 'Apr 7, 2025',  nextDue: 'Apr 7, 2026',  daysUntilDue: 24,   status: 'Due Soon',    vet: 'Dr. Chen' },
-  { id: 14, petId: 3,  petName: 'Cooper',  petImage: 'https://images.unsplash.com/photo-1685387714439-edef4bd70ef5?w=400',   breed: 'Beagle',           species: 'Dog', ownerName: 'Michael Brown',   vaccine: 'Bordetella',   lastGiven: 'Jun 8, 2025',  nextDue: 'Jun 8, 2026',  daysUntilDue: 86,   status: 'Up to Date',  vet: 'Dr. Chen' },
-  { id: 15, petId: 7,  petName: 'Milo',    petImage: 'https://images.unsplash.com/photo-1574158622682-e40e69881006?w=400',   breed: 'Persian',          species: 'Cat', ownerName: 'Jessica Taylor',  vaccine: 'FeLV',         lastGiven: 'May 28, 2025', nextDue: 'May 28, 2026', daysUntilDue: 75,   status: 'Up to Date',  vet: 'Dr. Patel' },
-  { id: 16, petId: 9,  petName: 'Simba',   petImage: 'https://images.unsplash.com/photo-1526336024174-e58f5cdd8e13?w=400',   breed: 'Maine Coon',       species: 'Cat', ownerName: 'Lisa Martinez',   vaccine: 'Rabies',       lastGiven: 'Apr 20, 2025', nextDue: 'Apr 20, 2026', daysUntilDue: 37,   status: 'Up to Date',  vet: 'Dr. Williams' },
-  { id: 17, petId: 10, petName: 'Buddy',   petImage: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400',   breed: 'Poodle',           species: 'Dog', ownerName: 'Karen Thomas',    vaccine: 'Rabies',       lastGiven: 'May 15, 2025', nextDue: 'May 15, 2026', daysUntilDue: 62,   status: 'Up to Date',  vet: 'Dr. Patel' },
-  { id: 18, petId: 5,  petName: 'Charlie', petImage: 'https://images.unsplash.com/photo-1665918577658-c7cddc5fd53c?w=400',   breed: 'Corgi',            species: 'Dog', ownerName: 'David Miller',    vaccine: 'DHPP',         lastGiven: 'Mar 19, 2025', nextDue: 'Mar 19, 2026', daysUntilDue: 5,    status: 'Due Soon',    vet: 'Dr. Williams' },
-];
+const MOCK_VACCINES: VaccineRecord[] = []
 
 // ─── Status Config ───────────────────────────────────────────
 
@@ -82,7 +63,7 @@ export default function VaccinesPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [vetFilter, setVetFilter] = useState('all');
 
-  const filtered = MOCK_VACCINES.filter((v) => {
+  const filtered = [].filter((v) => {
     const q = search.toLowerCase();
     const matchesSearch =
       v.petName.toLowerCase().includes(q) ||
@@ -313,7 +294,7 @@ export default function VaccinesPage() {
         {/* Footer */}
         <div className="px-6 py-4 border-t border-[var(--border-color)] flex items-center justify-between">
           <p className="text-[var(--text-secondary)]" style={{ fontSize: '14px', fontWeight: 400 }}>
-            Showing {filtered.length} of {MOCK_VACCINES.length} vaccine records
+            Showing {filtered.length} of {0} vaccine records
           </p>
         </div>
       </div>

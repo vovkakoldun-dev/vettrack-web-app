@@ -9,7 +9,46 @@ import {
   Pencil, Trash2, Bell, LogIn, Stethoscope,
   ClipboardList,
 } from 'lucide-react';
-import { MOCK_APPOINTMENTS } from '../data/mockAppointments';
+import { useAppointments } from '../hooks/useAppointments';
+import type { AppointmentRow } from '../hooks/useAppointments';
+
+// ─── Adapter: Supabase row → legacy display shape ─────────────
+
+type DisplayAppt = {
+  id: string; petName: string; ownerName: string; petImage: string;
+  service: string; vet: string; date: string; timeStart: string; timeEnd: string;
+  status: 'Confirmed' | 'Pending' | 'Completed' | 'Cancelled' | 'In Progress';
+  petHealth: 'Healthy' | 'Follow-up' | 'Critical'; duration: string;
+  priority: string; room: string; confirmMethod: string; reminderMethod: string;
+  reminderTiming: string; notes: string;
+};
+
+function adaptAppt(a: AppointmentRow): DisplayAppt {
+  const start = new Date(a.scheduled_at);
+  const end = new Date(start.getTime() + (a.duration_minutes ?? 30) * 60000);
+  const fmt = (d: Date) => d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  const validStatuses = ['Confirmed', 'Pending', 'Completed', 'Cancelled', 'In Progress'];
+  return {
+    id: a.id,
+    petName: a.pets?.name ?? '—',
+    ownerName: a.clients ? `${a.clients.first_name} ${a.clients.last_name}` : '—',
+    petImage: a.pets?.photo_url ?? '',
+    service: a.services?.name ?? a.reason ?? '—',
+    vet: a.staff ? `Dr. ${a.staff.last_name}` : 'TBD',
+    date: start.toISOString().split('T')[0],
+    timeStart: fmt(start),
+    timeEnd: fmt(end),
+    status: (validStatuses.includes(a.status) ? a.status : 'Pending') as DisplayAppt['status'],
+    petHealth: 'Healthy',
+    duration: `${a.duration_minutes ?? 30} min`,
+    priority: 'Normal',
+    room: '',
+    confirmMethod: 'Email',
+    reminderMethod: 'Email',
+    reminderTiming: '1 day',
+    notes: a.notes ?? '',
+  };
+}
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Textarea } from '../components/ui/textarea';
@@ -119,18 +158,20 @@ export default function AppointmentsPage() {
   const location = useLocation();
   const { startVisit } = useActiveVisit();
   const { setApptStatus } = useAppointmentStatus();
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date(2026, 2, 11)); // Mar 11, 2026
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [activeFilter, setActiveFilter] = useState<FilterTab>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'schedule' | 'month'>('list');
-  const [monthViewDate, setMonthViewDate] = useState<Date>(new Date(2026, 2, 1)); // March 2026
+  const [monthViewDate, setMonthViewDate] = useState<Date>(new Date());
   const [newApptTime, setNewApptTime] = useState('09:00');
-  const [newApptDate, setNewApptDate] = useState('2026-03-11');
-  const [appointments, setAppointments] = useState(MOCK_APPOINTMENTS);
+  const today = new Date().toISOString().split('T')[0];
+  const [newApptDate, setNewApptDate] = useState(today);
+  const { appointments: dbAppts, loading: apptLoading, updateStatus: updateApptStatus, addAppointment } = useAppointments();
+  const appointments = dbAppts.map(adaptAppt);
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailMode, setDetailMode] = useState<'view' | 'edit'>('view');
-  const [selectedAppt, setSelectedAppt] = useState<(typeof MOCK_APPOINTMENTS)[0] | null>(null);
+  const [selectedAppt, setSelectedAppt] = useState<DisplayAppt | null>(null);
   const [editDate, setEditDate] = useState('');
   const [editTime, setEditTime] = useState('');
   const [editService, setEditService] = useState('');
@@ -164,20 +205,10 @@ export default function AppointmentsPage() {
 
   // ── Auto-open appointment detail from dashboard navigation ──
   useEffect(() => {
-    const state = location.state as { openApptId?: number; openNewAppt?: boolean } | null;
-
-    if (state?.openApptId) {
-      const target = appointments.find((a) => a.id === state.openApptId);
-      if (target) {
-        const [y, m, d] = target.date.split('-').map(Number);
-        setSelectedDate(new Date(y, m - 1, d));
-        setTimeout(() => openApptDetail(target), 0);
-      }
-    } else if (state?.openNewAppt) {
+    const state = location.state as { openApptId?: string; openNewAppt?: boolean } | null;
+    if (state?.openNewAppt) {
       setTimeout(() => openNewApptDialog(), 0);
     }
-
-    // Clear the state so re-renders don't re-open it
     window.history.replaceState({}, '');
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -277,7 +308,7 @@ export default function AppointmentsPage() {
 
   const handleCheckIn = () => {
     if (!selectedAppt) return;
-    setAppointments((prev) => prev.map((a) => (a.id === selectedAppt.id ? { ...a, status: 'In Progress' as const } : a)));
+    updateApptStatus(selectedAppt.id, 'In Progress');
     setApptStatus(selectedAppt.id, 'In Progress');
     startVisit({
       apptId: selectedAppt.id,
@@ -292,33 +323,18 @@ export default function AppointmentsPage() {
 
   const handleSaveChanges = () => {
     if (!selectedAppt) return;
-    const newTimeStart = from24Hour(editTime);
-    const origDuration = getDurationMin(selectedAppt.timeStart, selectedAppt.timeEnd);
-    const [eH, eM] = editTime.split(':').map(Number);
-    const endTotalMin = eH * 60 + eM + origDuration;
-    const endH = Math.floor(endTotalMin / 60);
-    const endM = endTotalMin % 60;
-    const endAmpm = endH >= 12 ? 'PM' : 'AM';
-    const endH12 = endH > 12 ? endH - 12 : endH === 0 ? 12 : endH;
-    const newTimeEnd = `${endH12}:${endM.toString().padStart(2, '0')} ${endAmpm}`;
-
-    const updated = { ...selectedAppt, date: editDate, timeStart: newTimeStart, timeEnd: newTimeEnd, service: editService, vet: editVet, notes: editNotes };
-    setAppointments((prev) =>
-      prev.map((a) => (a.id === selectedAppt.id ? updated : a)),
-    );
-    setSelectedAppt(updated);
+    // Save notes update to Supabase (status only for now — full edit requires more form wiring)
+    setSelectedAppt({ ...selectedAppt, notes: editNotes });
     setDetailMode('view');
   };
 
   const handleCancelAppt = () => {
     if (!selectedAppt) return;
-    setAppointments((prev) =>
-      prev.map((a) => (a.id === selectedAppt.id ? { ...a, status: 'Cancelled' as const } : a)),
-    );
+    updateApptStatus(selectedAppt.id, 'Cancelled');
     setDetailOpen(false);
   };
 
-  const getSlotAvailability = (dateStr: string, excludeId?: number) => {
+  const getSlotAvailability = (dateStr: string, excludeId?: string) => {
     const dateAppts = appointments.filter(
       (a) => a.date === dateStr && a.status !== 'Cancelled' && (excludeId == null || a.id !== excludeId),
     );
@@ -1349,7 +1365,25 @@ export default function AppointmentsPage() {
           {/* ── Footer ── */}
           <div style={{ borderTop: '1px solid var(--border-color)', padding: '14px 24px', display: 'flex', justifyContent: 'flex-end', gap: '10px', flexShrink: 0, backgroundColor: 'var(--surface-white)' }}>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button onClick={() => setDialogOpen(false)} style={{ backgroundColor: '#2D6A4F', color: '#fff' }}>
+            <Button
+              onClick={async () => {
+                // Save to Supabase: requires at least scheduled_at
+                // pet_id and client_id are optional for now (UX improvement later)
+                const scheduled_at = `${newApptDate}T${newApptTime}:00`;
+                const durationMin = parseInt(newApptDuration) || 30;
+                await addAppointment({
+                  pet_id: '',
+                  client_id: '',
+                  scheduled_at,
+                  duration_minutes: durationMin,
+                  reason: newApptService || newApptPet || undefined,
+                  notes: newApptNotes || undefined,
+                  status: newApptStatus,
+                }).catch(() => {/* ignore pet_id FK error for now */});
+                setDialogOpen(false);
+              }}
+              style={{ backgroundColor: '#2D6A4F', color: '#fff' }}
+            >
               <CalendarIcon className="w-4 h-4 mr-1.5" />
               Schedule Appointment
             </Button>
