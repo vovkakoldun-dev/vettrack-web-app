@@ -37,7 +37,7 @@ export function useAppointments(dateFilter?: string) {
     setError(null)
     let query = supabase
       .from('appointments')
-      .select('id, scheduled_at, duration_minutes, status, reason, notes, created_at, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name, phone), staff(id, first_name, last_name), services(id, name, price)')
+      .select('id, scheduled_at, duration_minutes, status, reason, notes, created_at, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name, phone), staff!appointments_vet_id_fkey(id, first_name, last_name), services(id, name, price)')
       .order('scheduled_at', { ascending: true })
 
     if (dateFilter) {
@@ -68,7 +68,7 @@ export function useAppointments(dateFilter?: string) {
         status: 'Scheduled',
         ...values,
       }])
-      .select('id, scheduled_at, duration_minutes, status, reason, notes, created_at, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name, phone), staff(id, first_name, last_name), services(id, name, price)')
+      .select('id, scheduled_at, duration_minutes, status, reason, notes, created_at, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name, phone), staff!appointments_vet_id_fkey(id, first_name, last_name), services(id, name, price)')
       .single()
     if (!err) {
       await fetchAppointments()

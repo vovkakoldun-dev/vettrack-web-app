@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   ChevronLeft, ChevronRight, X, Calendar, Clock, PawPrint,
   CheckCircle2, Plus, FileText, Bell, User,
 } from 'lucide-react';
 import { Avatar, AvatarImage, AvatarFallback } from '../../components/ui/avatar';
+import { useAppointments } from '../../hooks/useAppointments';
 
 // ─── Brand ───────────────────────────────────────────────────
 const BRAND = '#2D6A4F';
@@ -60,7 +61,7 @@ const TIME_SLOTS = [
   '2:00 PM', '2:30 PM', '3:00 PM', '3:30 PM', '4:00 PM', '4:30 PM',
 ];
 
-const INITIAL_APPOINTMENTS: Appointment[] = []
+const INITIAL_APPOINTMENTS_PLACEHOLDER: Appointment[] = []
 
 const DAYS_OF_WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -74,7 +75,35 @@ export default function OwnerAppointmentsPage() {
   const today = new Date();
   const [viewYear, setViewYear]   = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
-  const [appointments, setAppointments] = useState<Appointment[]>(INITIAL_APPOINTMENTS);
+  const { appointments: supaAppts } = useAppointments();
+
+  const mappedAppts: Appointment[] = useMemo(() =>
+    supaAppts.map((a, idx) => {
+      const dt = new Date(a.scheduled_at);
+      const dateStr = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+      const h = dt.getHours(); const m = dt.getMinutes();
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
+      const time = `${h12}:${String(m).padStart(2, '0')} ${ampm}`;
+      const status: Appointment['status'] = ['Completed'].includes(a.status) ? 'completed' : ['Cancelled','No Show'].includes(a.status) ? 'cancelled' : 'upcoming';
+      return {
+        id: idx + 1,
+        date: dateStr,
+        time,
+        reason: a.reason ?? a.services?.name ?? '—',
+        pet: a.pets?.name ?? '—',
+        petImage: a.pets?.photo_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(a.pets?.name ?? 'Pet')}&background=74C69D&color=fff`,
+        vet: a.staff ? `Dr. ${a.staff.last_name}` : 'Dr. Chen',
+        status,
+        notes: a.notes ?? undefined,
+      };
+    }),
+    [supaAppts],
+  );
+
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  // Sync Supabase data into local state when it arrives
+  useMemo(() => { if (mappedAppts.length > 0) setAppointments(mappedAppts); }, [mappedAppts]);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [bookingOpen, setBookingOpen]   = useState(false);
   const [detailAppt, setDetailAppt]     = useState<Appointment | null>(null);

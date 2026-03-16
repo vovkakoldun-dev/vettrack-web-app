@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import {
   Calendar, Clock, AlertCircle, Syringe,
@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 import { Avatar, AvatarImage, AvatarFallback } from '../../components/ui/avatar';
 import { Badge } from '../../components/ui/badge';
+import { usePets } from '../../hooks/usePets';
+import { useAppointments } from '../../hooks/useAppointments';
 
 // ─── Brand ────────────────────────────────────────────────────
 
@@ -99,7 +101,7 @@ interface Pet {
   vaccinations: Vaccination[];
 }
 
-const mockPets: Pet[] = []
+const mockPetsStatic: Pet[] = []
 
 // ─── Helpers ──────────────────────────────────────────────────
 
@@ -190,6 +192,51 @@ const RECOMMENDED_SERVICES: RecommendedService[] = []
 export default function OwnerDashboardPage() {
   const navigate = useNavigate();
   const [_selectedPet] = useState(0);
+  const { pets: supaPets } = usePets();
+  const { appointments: supaAppts } = useAppointments();
+
+  const mockPets: Pet[] = useMemo(() =>
+    supaPets.map((p, idx) => {
+      const age = p.date_of_birth
+        ? `${Math.floor((Date.now() - new Date(p.date_of_birth).getTime()) / (365.25 * 24 * 60 * 60 * 1000))} years`
+        : '—';
+      // Find upcoming appointments for this pet
+      const petAppts = supaAppts
+        .filter(a => a.pet_id === p.id && new Date(a.scheduled_at) >= new Date())
+        .map((a, i) => {
+          const dt = new Date(a.scheduled_at);
+          return {
+            id: i + 1,
+            time: dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
+            date: dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+            reason: a.reason ?? a.services?.name ?? 'Checkup',
+          };
+        });
+      return {
+        id: idx + 1,
+        name: p.name,
+        species: p.species,
+        breed: p.breed ?? '—',
+        dob: p.date_of_birth ?? '—',
+        age,
+        sex: '—',
+        weight: p.weight_kg ? `${p.weight_kg} kg` : '—',
+        microchip: p.microchip_no ?? '—',
+        color: '—',
+        image: p.photo_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.name)}&background=74C69D&color=fff&size=400`,
+        status: 'Healthy' as PetStatus,
+        conditions: [],
+        treatments: [],
+        allergies: [],
+        visits: [],
+        vetNotes: '',
+        clientNotes: '',
+        upcomingAppointments: petAppts,
+        vaccinations: [],
+      };
+    }),
+    [supaPets, supaAppts],
+  );
 
   const allConditionsCount = mockPets.reduce(
     (acc, p) => acc + p.conditions.filter(c => c.status === 'active').length,

@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import {
   PawPrint, Calendar, AlertCircle, CheckCircle2,
@@ -5,13 +6,11 @@ import {
 } from 'lucide-react';
 import { Avatar, AvatarImage, AvatarFallback } from '../../components/ui/avatar';
 import { Badge } from '../../components/ui/badge';
+import { usePets } from '../../hooks/usePets';
 
 // ─── Brand ───────────────────────────────────────────────────
 const BRAND = '#2D6A4F';
 const BRAND_TEXT = 'var(--brand-green-text)';
-
-// ─── Mock Data ───────────────────────────────────────────────
-const PETS = []
 
 const STATUS_CONFIG = {
   Healthy:     { bg: '#74C69D20', text: BRAND_TEXT,  border: '#74C69D50', icon: CheckCircle2, label: 'Healthy' },
@@ -23,6 +22,35 @@ const PET_EMOJI = { Dog: '🐕', Cat: '🐈', default: '🐾' };
 
 export default function OwnerPetsPage() {
   const navigate = useNavigate();
+  const { pets: supaPets } = usePets();
+
+  const PETS = useMemo(() =>
+    supaPets.map((p) => {
+      const age = p.date_of_birth
+        ? `${Math.floor((Date.now() - new Date(p.date_of_birth).getTime()) / (365.25 * 24 * 60 * 60 * 1000))}y`
+        : '—';
+      return {
+        id: p.id,
+        name: p.name,
+        species: p.species,
+        breed: p.breed ?? '—',
+        age,
+        weight: p.weight_kg ? `${p.weight_kg} kg` : '—',
+        sex: '—',
+        image: p.photo_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.name)}&background=74C69D&color=fff&size=400`,
+        status: 'Healthy' as const,
+        vaccinesUpToDate: 0,
+        vaccinesDue: 0,
+        activeConditions: [] as string[],
+        allergies: [] as string[],
+        nextAppointment: { reason: 'No upcoming', date: '—', time: '—' },
+        vet: 'Dr. Chen',
+        lastVisit: new Date(p.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        microchip: p.microchip_no ?? '—',
+      };
+    }),
+    [supaPets],
+  );
 
   return (
     <div className="p-4 md:p-8" style={{ minHeight: '100vh', backgroundColor: 'var(--bg-base)' }}>
