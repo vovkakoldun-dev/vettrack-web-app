@@ -188,7 +188,7 @@ function formatDate(date: Date): string {
 }
 
 function isToday(date: Date): boolean {
-  const now = new Date(2026, 2, 11);
+  const now = new Date();
   return date.getDate() === now.getDate() && date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
 }
 
@@ -590,8 +590,15 @@ function GlowStatCard({
 
 export default function MyPortalPage() {
   const navigate = useNavigate();
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date(2026, 2, 11));
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>(INITIAL_BLOCKS);
+
+  // ── Vet profile from Supabase ──
+  const [vetProfile, setVetProfile] = useState(VET_PROFILE);
+  const [vetId, setVetId] = useState<string | null>(null);
+
+  // ── Real appointments from Supabase ──
+  const [realAppointments, setRealAppointments] = useState<Appointment[]>([]);
 
   // Real clients from Supabase
   const [realPatients, setRealPatients] = useState<any[]>([]);
@@ -599,26 +606,80 @@ export default function MyPortalPage() {
 
   useEffect(() => {
     (async () => {
-      const { data } = await supabase
-        .from('clients')
-        .select('id, first_name, last_name, portal_status, pets(id, name, species, breed, photo_url)')
-        .order('created_at', { ascending: false });
-      if (data) {
-        const rows = data.flatMap((c: any) => {
-          const pets = c.pets && c.pets.length > 0 ? c.pets : [null];
-          return pets.map((pet: any) => ({
-            clientId: c.id,
-            petId: pet?.id || null,
-            petImage: pet?.photo_url || '',
-            petName: pet?.name ?? '—',
-            ownerName: `${c.first_name} ${c.last_name}`,
-            species: pet?.species ?? '—',
-            breed: pet?.breed ?? '—',
-            lastVisit: '—',
-            status: (['Healthy', 'Follow-up', 'Critical'].includes(c.portal_status ?? '') ? c.portal_status : 'Healthy') as 'Healthy' | 'Follow-up' | 'Critical',
-          }));
+      // Fetch vet profile (first staff member)
+      const { data: staffData } = await supabase
+        .from('staff')
+        .select('id, first_name, last_name, role, email, phone, created_at')
+        .limit(1)
+        .single();
+      if (staffData) {
+        setVetId(staffData.id);
+        const joinDate = new Date(staffData.created_at);
+        setVetProfile({
+          name: `Dr. ${staffData.first_name} ${staffData.last_name}`,
+          role: (staffData.role || 'veterinarian').replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
+          specialization: 'Small Animal Medicine',
+          email: staffData.email || '—',
+          phone: staffData.phone || '—',
+          licenseNo: `DVM-${joinDate.getFullYear()}-${staffData.id.slice(0, 5).toUpperCase()}`,
+          joinedDate: joinDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+          image: '',
         });
-        setRealPatients(rows);
+
+        // Fetch appointments for this vet
+        const { data: apptData } = await supabase
+          .from('appointments')
+          .select('id, scheduled_at, duration_minutes, status, reason, notes, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name, phone)')
+          .eq('vet_id', staffData.id)
+          .order('scheduled_at', { ascending: true });
+        if (apptData) {
+          const mapped: Appointment[] = apptData.map((a: any, i: number) => {
+            const start = new Date(a.scheduled_at);
+            const end = new Date(start.getTime() + (a.duration_minutes ?? 30) * 60000);
+            const fmtUTC = (d: Date) => {
+              let h = d.getUTCHours();
+              const m = d.getUTCMinutes();
+              const ampm = h >= 12 ? 'PM' : 'AM';
+              if (h > 12) h -= 12;
+              if (h === 0) h = 12;
+              return `${h}:${m.toString().padStart(2, '0')} ${ampm}`;
+            };
+            const y = start.getUTCFullYear();
+            const mo = (start.getUTCMonth() + 1).toString().padStart(2, '0');
+            const da = start.getUTCDate().toString().padStart(2, '0');
+            return {
+              id: i + 1,
+              date: `${y}-${mo}-${da}`,
+              timeStart: fmtUTC(start),
+              timeEnd: fmtUTC(end),
+              petName: a.pets?.name ?? '—',
+              petImage: a.pets?.photo_url ?? '',
+              ownerName: a.clients ? `${a.clients.first_name} ${a.clients.last_name}` : '—',
+              service: a.reason ?? '—',
+            };
+          });
+          setRealAppointments(mapped);
+        }
+
+        // Fetch patients assigned to this vet
+        const { data: petData } = await supabase
+          .from('pets')
+          .select('id, name, species, breed, photo_url, assigned_vet_id, client_id, clients(id, first_name, last_name, health_status)')
+          .eq('assigned_vet_id', staffData.id);
+        if (petData) {
+          const rows = petData.map((pet: any) => ({
+            clientId: pet.clients?.id || null,
+            petId: pet.id,
+            petImage: pet.photo_url || '',
+            petName: pet.name ?? '—',
+            ownerName: pet.clients ? `${pet.clients.first_name} ${pet.clients.last_name}` : '—',
+            species: pet.species ?? '—',
+            breed: pet.breed ?? '—',
+            lastVisit: '—',
+            status: (['Healthy', 'Follow-up', 'Critical'].includes(pet.clients?.health_status ?? '') ? pet.clients.health_status : 'Healthy') as 'Healthy' | 'Follow-up' | 'Critical',
+          }));
+          setRealPatients(rows);
+        }
       }
     })();
   }, []);
@@ -632,14 +693,15 @@ export default function MyPortalPage() {
   const [nextBlockId, setNextBlockId] = useState(10);
 
   // Day data
-  const dayAppts = MY_APPOINTMENTS.filter((a) => isSameDay(a.date, selectedDate));
+  const activeAppts = realAppointments.length > 0 ? realAppointments : MY_APPOINTMENTS;
+  const dayAppts = activeAppts.filter((a) => isSameDay(a.date, selectedDate));
   const dayBlocks = timeBlocks.filter((b) => isSameDay(b.date, selectedDate));
   const apptByTime = new Map(dayAppts.map((a) => [a.timeStart, a]));
   const blockByTime = new Map(dayBlocks.map((b) => [b.timeStart, b]));
 
   // Dates with events (for calendar dots)
   const eventDates = new Set<string>();
-  MY_APPOINTMENTS.forEach((a) => eventDates.add(a.date));
+  activeAppts.forEach((a) => eventDates.add(a.date));
   timeBlocks.forEach((b) => eventDates.add(b.date));
   const datesWithEvents = Array.from(eventDates).map((d) => new Date(d + 'T12:00:00'));
 
@@ -657,7 +719,7 @@ export default function MyPortalPage() {
   // Navigation
   const goToPrevDay = () => { const d = new Date(selectedDate); d.setDate(d.getDate() - 1); setSelectedDate(d); };
   const goToNextDay = () => { const d = new Date(selectedDate); d.setDate(d.getDate() + 1); setSelectedDate(d); };
-  const goToToday = () => setSelectedDate(new Date(2026, 2, 11));
+  const goToToday = () => setSelectedDate(new Date());
 
   // Quick booking helpers
   const openBlockDialog = (type: BlockType, startH = '12:00', endH = '13:00') => {
@@ -729,8 +791,8 @@ export default function MyPortalPage() {
         <div className="flex items-center gap-6">
           <div style={{ position: 'relative', flexShrink: 0 }}>
             <Avatar className="w-16 h-16">
-              <AvatarImage src={VET_PROFILE.image} alt={VET_PROFILE.name} className="object-cover" />
-              <AvatarFallback>SC</AvatarFallback>
+              <AvatarImage src={vetProfile.image} alt={vetProfile.name} className="object-cover" />
+              <AvatarFallback>{vetProfile.name.split(' ').filter(w => w[0] && w[0] === w[0].toUpperCase()).map(w => w[0]).join('').slice(0, 2)}</AvatarFallback>
             </Avatar>
             <button
               title="Change photo"
@@ -746,14 +808,14 @@ export default function MyPortalPage() {
             </button>
           </div>
           <div className="flex-1">
-            <h1 className="text-[var(--text-primary)]" style={{ fontSize: '26px', fontWeight: 700 }}>{VET_PROFILE.name}</h1>
-            <p className="text-[var(--brand-green-text)]" style={{ fontSize: '15px', fontWeight: 600 }}>{VET_PROFILE.role} · {VET_PROFILE.specialization}</p>
+            <h1 className="text-[var(--text-primary)]" style={{ fontSize: '26px', fontWeight: 700 }}>{vetProfile.name}</h1>
+            <p className="text-[var(--brand-green-text)]" style={{ fontSize: '15px', fontWeight: 600 }}>{vetProfile.role} · {vetProfile.specialization}</p>
             <div className="flex items-center gap-3 mt-1">
-              <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{VET_PROFILE.email}</span>
+              <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{vetProfile.email}</span>
               <span className="text-[var(--border-color)]">|</span>
-              <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{VET_PROFILE.phone}</span>
+              <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{vetProfile.phone}</span>
               <span className="text-[var(--border-color)]">|</span>
-              <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>License {VET_PROFILE.licenseNo}</span>
+              <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>License {vetProfile.licenseNo}</span>
             </div>
           </div>
         </div>
@@ -877,7 +939,11 @@ export default function MyPortalPage() {
                         className="flex-1 m-1 px-3 py-2.5 flex items-center gap-3"
                         style={{ backgroundColor: '#2D6A4F10', borderLeft: '4px solid #2D6A4F', borderRadius: '8px' }}
                       >
-                        <img src={appt.petImage} alt={appt.petName} className="w-8 h-8 object-cover flex-shrink-0" style={{ borderRadius: '9999px' }} />
+                        {appt.petImage ? (
+                          <img src={appt.petImage} alt={appt.petName} className="w-8 h-8 object-cover flex-shrink-0" style={{ borderRadius: '9999px' }} />
+                        ) : (
+                          <div className="w-8 h-8 flex-shrink-0 flex items-center justify-center text-white font-semibold" style={{ borderRadius: '9999px', backgroundColor: '#2D6A4F', fontSize: '12px' }}>{appt.petName.slice(0, 2).toUpperCase()}</div>
+                        )}
                         <div className="flex-1 min-w-0">
                           <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{appt.petName}</p>
                           <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{appt.ownerName} · {appt.service}</p>

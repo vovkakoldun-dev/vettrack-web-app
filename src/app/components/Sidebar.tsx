@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
+import { supabase } from '../../lib/supabase';
 import {
   Home, Users, Calendar, FileText, Settings, PawPrint,
   UserCircle, Bell, FlaskConical, Sun, Moon, Syringe,
@@ -59,6 +60,20 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
   const [collapsed, setCollapsed]     = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [sections, setSections]       = useState<NavSection[]>(INITIAL_SECTIONS);
+
+  // Fetch staff profile from Supabase
+  const [staffName, setStaffName] = useState('Dr. Sarah Chen');
+  const [staffRole, setStaffRole] = useState('Veterinarian');
+  const [staffEmail, setStaffEmail] = useState('sarah.chen@vettrack.com');
+  useEffect(() => {
+    supabase.from('staff').select('first_name, last_name, role, email').limit(1).single().then(({ data }) => {
+      if (data) {
+        setStaffName(`Dr. ${data.first_name} ${data.last_name}`);
+        setStaffRole((data.role || 'veterinarian').replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()));
+        setStaffEmail(data.email || '—');
+      }
+    });
+  }, []);
 
   // Drag state for sections
   const dragSectionIndex = useRef<number | null>(null);
@@ -354,16 +369,16 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
                 <div className="flex items-center gap-3">
                   <img
                     src="https://images.unsplash.com/photo-1640161415278-a5ac46f82d04?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjB2ZXRlcmluYXJpYW4lMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyODYxNTB8MA&ixlib=rb-4.1.0&q=80&w=1080"
-                    alt="Dr. Sarah Chen"
+                    alt={staffName}
                     className="w-10 h-10 object-cover flex-shrink-0"
                     style={{ borderRadius: '50%' }}
                   />
                   <div className="min-w-0">
                     <p className="text-[var(--text-primary)] truncate" style={{ fontSize: '14px', fontWeight: 600 }}>
-                      Dr. Sarah Chen
+                      {staffName}
                     </p>
                     <p className="text-[var(--text-secondary)] truncate" style={{ fontSize: '12px' }}>
-                      sarah.chen@vettrack.com
+                      {staffEmail}
                     </p>
                   </div>
                 </div>
@@ -395,7 +410,7 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
           {/* Trigger */}
           <button
             onClick={() => setProfileOpen(!profileOpen)}
-            title={collapsed ? 'Dr. Sarah Chen' : undefined}
+            title={collapsed ? staffName : undefined}
             className={`w-full flex items-center transition-colors overflow-hidden ${profileOpen ? 'bg-[var(--surface-elevated)]' : 'hover:bg-[var(--surface-elevated)]'}`}
             style={{
               borderRadius: '8px',
@@ -406,7 +421,7 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
           >
             <img
               src="https://images.unsplash.com/photo-1640161415278-a5ac46f82d04?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjB2ZXRlcmluYXJpYW4lMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyODYxNTB8MA&ixlib=rb-4.1.0&q=80&w=1080"
-              alt="Dr. Sarah Chen"
+              alt={staffName}
               className="w-9 h-9 object-cover flex-shrink-0"
               style={{ borderRadius: '50%' }}
             />
@@ -414,10 +429,10 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
               <>
                 <div className="flex-1 min-w-0 text-left">
                   <p className="text-[var(--text-primary)] truncate" style={{ fontSize: '14px', fontWeight: 600 }}>
-                    Dr. Sarah Chen
+                    {staffName}
                   </p>
                   <p className="text-[var(--text-secondary)] truncate" style={{ fontSize: '12px', fontWeight: 400 }}>
-                    Veterinarian
+                    {staffRole}
                   </p>
                 </div>
                 <ChevronUp

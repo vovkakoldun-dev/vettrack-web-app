@@ -29,10 +29,21 @@ type DisplayAppt = {
 };
 
 function adaptAppt(a: AppointmentRow): DisplayAppt {
+  // Treat scheduled_at as UTC and display as-is (user enters local time, stored as UTC)
   const start = new Date(a.scheduled_at);
   const end = new Date(start.getTime() + (a.duration_minutes ?? 30) * 60000);
-  const fmt = (d: Date) => d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  const fmtUTC = (d: Date) => {
+    let h = d.getUTCHours();
+    const m = d.getUTCMinutes();
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    if (h > 12) h -= 12;
+    if (h === 0) h = 12;
+    return `${h}:${m.toString().padStart(2, '0')} ${ampm}`;
+  };
   const validStatuses = ['Confirmed', 'Pending', 'Completed', 'Cancelled', 'In Progress'];
+  const y = start.getUTCFullYear();
+  const mo = (start.getUTCMonth() + 1).toString().padStart(2, '0');
+  const da = start.getUTCDate().toString().padStart(2, '0');
   return {
     id: a.id,
     petName: a.pets?.name ?? '—',
@@ -40,9 +51,9 @@ function adaptAppt(a: AppointmentRow): DisplayAppt {
     petImage: a.pets?.photo_url ?? '',
     service: a.services?.name ?? a.reason ?? '—',
     vet: a.staff ? `Dr. ${a.staff.last_name}` : 'TBD',
-    date: start.toISOString().split('T')[0],
-    timeStart: fmt(start),
-    timeEnd: fmt(end),
+    date: `${y}-${mo}-${da}`,
+    timeStart: fmtUTC(start),
+    timeEnd: fmtUTC(end),
     status: (validStatuses.includes(a.status) ? a.status : 'Pending') as DisplayAppt['status'],
     petHealth: 'Healthy',
     duration: `${a.duration_minutes ?? 30} min`,
@@ -177,6 +188,8 @@ export default function AppointmentsPage() {
   const { pets: allPets } = usePets();
   const appointments = dbAppts.map(adaptAppt);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [dayPopupOpen, setDayPopupOpen] = useState(false);
+  const [dayPopupDate, setDayPopupDate] = useState('');
   const [detailMode, setDetailMode] = useState<'view' | 'edit'>('view');
   const [selectedAppt, setSelectedAppt] = useState<DisplayAppt | null>(null);
   const [editDate, setEditDate] = useState('');
@@ -190,7 +203,8 @@ export default function AppointmentsPage() {
   const [newApptPetId, setNewApptPetId] = useState('');
   const [newApptPet, setNewApptPet] = useState('');
   const [newApptService, setNewApptService] = useState('');
-  const [newApptVetName, setNewApptVetName] = useState('Dr. Chen');
+  const [newApptVetId, setNewApptVetId] = useState('');
+  const [newApptVetName, setNewApptVetName] = useState('');
   const [newApptDuration, setNewApptDuration] = useState('30 min');
   const [newApptNotes, setNewApptNotes] = useState('');
   const [newApptStatus, setNewApptStatus] = useState('Confirmed');
@@ -212,6 +226,18 @@ export default function AppointmentsPage() {
   const [npOwnerName, setNpOwnerName] = useState('');
   const [npOwnerEmail, setNpOwnerEmail] = useState('');
   const [npOwnerPhone, setNpOwnerPhone] = useState('');
+
+  // ── Fetch staff/vets from database ──
+  const [staffList, setStaffList] = useState<{ id: string; name: string; initials: string }[]>([]);
+  useEffect(() => {
+    supabase.from('staff').select('id, first_name, last_name').then(({ data }) => {
+      if (data) setStaffList(data.map((s: any) => ({
+        id: s.id,
+        name: `Dr. ${s.first_name} ${s.last_name}`,
+        initials: `${(s.first_name?.[0] ?? '').toUpperCase()}${(s.last_name?.[0] ?? '').toUpperCase()}`,
+      })));
+    });
+  }, []);
 
   // ── Auto-open appointment detail from dashboard navigation ──
   useEffect(() => {
@@ -253,7 +279,35 @@ export default function AppointmentsPage() {
   const cancelledToday = dayAppointments.filter((a) => a.status === 'Cancelled').length;
   const remainingToday = totalToday - completedToday - cancelledToday;
   const scheduledCount = dayAppointments.filter((a) => a.status === 'Confirmed' || a.status === 'Pending').length;
-  const appointmentByTime = new Map(dayAppointments.map((a) => [a.timeStart, a]));
+  const appointmentsByTime = new Map<string, DisplayAppt[]>();
+  dayAppointments.forEach((a) => {
+    const existing = appointmentsByTime.get(a.timeStart) || [];
+    existing.push(a);
+    appointmentsByTime.set(a.timeStart, existing);
+  });
+
+  // Track which slots are busy (spanned by an appointment's duration)
+  const busySlots = new Map<string, DisplayAppt[]>();
+  const timeToMin = (t: string) => {
+    const [tp, ap] = t.split(' ');
+    let [h, m] = tp.split(':').map(Number);
+    if (ap === 'PM' && h !== 12) h += 12;
+    if (ap === 'AM' && h === 12) h = 0;
+    return h * 60 + m;
+  };
+  dayAppointments.forEach((a) => {
+    const startMin = timeToMin(a.timeStart);
+    const dur = getDurationMin(a.timeStart, a.timeEnd);
+    // Mark all slots that fall within this appointment's time range (excluding start slot)
+    SCHEDULE_SLOTS.forEach((slot) => {
+      const slotMin = timeToMin(slot);
+      if (slotMin > startMin && slotMin < startMin + dur) {
+        const existing = busySlots.get(slot) || [];
+        existing.push(a);
+        busySlots.set(slot, existing);
+      }
+    });
+  });
 
   const goToPrevDay = () => {
     const prev = new Date(selectedDate);
@@ -298,7 +352,19 @@ export default function AppointmentsPage() {
     setNewApptPet('');
     setNewApptService('');
     setNewApptNotes('');
+    setNewApptVetId('');
+    setNewApptVetName('');
+    setNewApptPetHealth('Healthy');
     setVisitType('returning');
+    setNpPetName('');
+    setNpSpecies('');
+    setNpBreed('');
+    setNpDob('');
+    setNpWeight('');
+    setNpSex('');
+    setNpOwnerName('');
+    setNpOwnerEmail('');
+    setNpOwnerPhone('');
     setDialogOpen(true);
   };
 
@@ -674,6 +740,10 @@ export default function AppointmentsPage() {
                       onClick={() => {
                         setSelectedDate(dayDate);
                         setMonthViewDate(new Date(mvYear, mvMonth, 1));
+                        if (dayAppts.length > 0) {
+                          setDayPopupDate(dateStr);
+                          setDayPopupOpen(true);
+                        }
                       }}
                     >
                       {/* Day number */}
@@ -766,7 +836,8 @@ export default function AppointmentsPage() {
               {/* Time Slot Grid */}
               <div className="bg-[var(--surface-white)] border border-[var(--border-color)] overflow-hidden" style={{ borderRadius: '12px' }}>
                 {SCHEDULE_SLOTS.map((slot, idx) => {
-                  const appt = appointmentByTime.get(slot);
+                  const slotAppts = appointmentsByTime.get(slot) || [];
+                  const slotBusy = busySlots.get(slot) || [];
                   const isLast = idx === SCHEDULE_SLOTS.length - 1;
                   return (
                     <div
@@ -774,44 +845,64 @@ export default function AppointmentsPage() {
                       className={`flex items-stretch ${!isLast ? 'border-b border-[var(--border-color)]' : ''}`}
                     >
                       {/* Time Label */}
-                      <div className="w-28 flex-shrink-0 px-4 py-4 flex items-center justify-end">
-                        <span style={{ fontSize: '14px', color: 'var(--text-secondary)', fontWeight: 500 }}>{slot}</span>
+                      <div className="w-28 flex-shrink-0 px-4 py-4 flex items-start justify-end">
+                        <span style={{ fontSize: '14px', color: 'var(--text-secondary)', fontWeight: 500, paddingTop: '2px' }}>{slot}</span>
                       </div>
 
                       {/* Slot Content */}
-                      {appt ? (
+                      {slotAppts.length > 0 ? (
+                        <div className="flex-1 flex flex-col gap-1 py-1">
+                          {slotAppts.map((appt) => (
+                            <div
+                              key={appt.id}
+                              className="mx-1.5 px-4 py-3 flex items-center gap-4 cursor-pointer hover:brightness-95 transition-all"
+                              style={{
+                                backgroundColor: '#2D6A4F10',
+                                borderLeft: '4px solid #2D6A4F',
+                                borderRadius: '8px',
+                              }}
+                              onClick={() => openApptDetail(appt)}
+                            >
+                              <Avatar className="w-8 h-8 flex-shrink-0">
+                                <AvatarImage src={appt.petImage} alt={appt.petName} className="object-cover" />
+                                <AvatarFallback>{appt.petName.slice(0, 2)}</AvatarFallback>
+                              </Avatar>
+                              <div className="flex-1 min-w-0">
+                                <p style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>{appt.petName}</p>
+                                <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{appt.service} · {appt.vet}</p>
+                              </div>
+                              <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>
+                                {getDurationMin(appt.timeStart, appt.timeEnd)} min
+                              </span>
+                              <span
+                                className="inline-flex items-center gap-1 px-2 py-0.5"
+                                style={{
+                                  backgroundColor: statusStyles[appt.status].bg,
+                                  color: statusStyles[appt.status].text,
+                                  borderRadius: '9999px',
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                }}
+                              >
+                                {appt.status}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : slotBusy.length > 0 ? (
                         <div
-                          className="flex-1 m-1.5 px-4 py-3 flex items-center gap-4 cursor-pointer hover:brightness-95 transition-all"
-                          style={{
-                            backgroundColor: '#2D6A4F10',
-                            borderLeft: '4px solid #2D6A4F',
-                            borderRadius: '8px',
-                          }}
-                          onClick={() => openApptDetail(appt)}
+                          className="flex-1 m-1.5 px-4 py-3 flex items-center gap-3"
+                          style={{ borderRadius: '8px', backgroundColor: 'var(--surface-elevated)', opacity: 0.7 }}
                         >
-                          <Avatar className="w-8 h-8 flex-shrink-0">
-                            <AvatarImage src={appt.petImage} alt={appt.petName} className="object-cover" />
-                            <AvatarFallback>{appt.petName.slice(0, 2)}</AvatarFallback>
-                          </Avatar>
-                          <div className="flex-1 min-w-0">
-                            <p style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>{appt.petName}</p>
-                            <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{appt.service}</p>
+                          <div className="w-1 self-stretch rounded-full" style={{ backgroundColor: '#6B728050' }} />
+                          <div className="flex-1 flex items-center gap-2">
+                            {slotBusy.map((b, i) => (
+                              <span key={i} style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                                {b.vet} — {b.service}{i < slotBusy.length - 1 ? ' · ' : ''}
+                              </span>
+                            ))}
+                            <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontStyle: 'italic', marginLeft: 'auto' }}>Busy</span>
                           </div>
-                          <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>
-                            {getDurationMin(appt.timeStart, appt.timeEnd)} min
-                          </span>
-                          <span
-                            className="inline-flex items-center gap-1 px-2 py-0.5"
-                            style={{
-                              backgroundColor: statusStyles[appt.status].bg,
-                              color: statusStyles[appt.status].text,
-                              borderRadius: '9999px',
-                              fontSize: '11px',
-                              fontWeight: 600,
-                            }}
-                          >
-                            {appt.status}
-                          </span>
                         </div>
                       ) : (
                         <div
@@ -1184,23 +1275,22 @@ export default function AppointmentsPage() {
               <div>
                 <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Veterinarian</p>
                 <div className="flex gap-2 flex-wrap">
-                  {[
-                    { name: 'Dr. Chen',   initials: 'SC', color: '#2D6A4F' },
-                    { name: 'Dr. Patel',  initials: 'RP', color: '#3B82F6' },
-                    { name: 'Dr. Garcia', initials: 'MG', color: '#8B5CF6' },
-                  ].map(v => {
-                    const active = newApptVetName === v.name;
+                  {staffList.length === 0 && <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>No vets found</span>}
+                  {staffList.map((v, i) => {
+                    const colors = ['#2D6A4F', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261'];
+                    const color = colors[i % colors.length];
+                    const active = newApptVetId === v.id;
                     return (
-                      <button key={v.name} onClick={() => setNewApptVetName(v.name)} style={{
+                      <button key={v.id} onClick={() => { setNewApptVetId(v.id); setNewApptVetName(v.name); }} style={{
                         padding: '7px 14px', borderRadius: '8px', fontSize: '13px',
                         fontWeight: active ? 700 : 500,
-                        border: `1.5px solid ${active ? v.color : 'var(--border-color)'}`,
-                        backgroundColor: active ? `${v.color}18` : 'transparent',
-                        color: active ? v.color : 'var(--text-secondary)',
+                        border: `1.5px solid ${active ? color : 'var(--border-color)'}`,
+                        backgroundColor: active ? `${color}18` : 'transparent',
+                        color: active ? color : 'var(--text-secondary)',
                         cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '7px',
                         transition: 'all 0.15s',
                       }}>
-                        <span style={{ width: '22px', height: '22px', borderRadius: '50%', backgroundColor: `${v.color}20`, color: v.color, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', fontWeight: 700, flexShrink: 0 }}>
+                        <span style={{ width: '22px', height: '22px', borderRadius: '50%', backgroundColor: `${color}20`, color: color, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', fontWeight: 700, flexShrink: 0 }}>
                           {v.initials}
                         </span>
                         {v.name}
@@ -1243,7 +1333,7 @@ export default function AppointmentsPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     <User style={{ width: '12px', height: '12px', color: 'var(--text-secondary)', flexShrink: 0 }} />
-                    <span style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{newApptVetName}</span>
+                    <span style={{ fontSize: '13px', color: newApptVetName ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{newApptVetName || 'No vet selected'}</span>
                   </div>
                   {newApptService && (
                     <div className="flex items-center gap-2">
@@ -1426,6 +1516,7 @@ export default function AppointmentsPage() {
                         last_name: nameParts.slice(1).join(' ') || '',
                         email: npOwnerEmail || undefined,
                         phone: npOwnerPhone || undefined,
+                        health_status: newApptPetHealth,
                       }])
                       .select('id')
                       .single();
@@ -1443,6 +1534,7 @@ export default function AppointmentsPage() {
                         date_of_birth: npDob || undefined,
                         sex: npSex || undefined,
                         weight_kg: weightKg && !isNaN(weightKg) ? weightKg : undefined,
+                        assigned_vet_id: newApptVetId || undefined,
                         is_active: true,
                       }])
                       .select('id')
@@ -1453,9 +1545,15 @@ export default function AppointmentsPage() {
 
                   if (!finalClientId || !finalPetId) { setSavingAppt(false); return; }
 
+                  // Update pet's assigned vet when booking for returning patient
+                  if (visitType === 'returning' && newApptVetId && finalPetId) {
+                    await supabase.from('pets').update({ assigned_vet_id: newApptVetId }).eq('id', finalPetId);
+                  }
+
                   await addAppointment({
                     pet_id: finalPetId,
                     client_id: finalClientId,
+                    vet_id: newApptVetId || undefined,
                     scheduled_at,
                     duration_minutes: durationMin,
                     reason: newApptService || undefined,
@@ -1475,6 +1573,93 @@ export default function AppointmentsPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ─── Day Appointments Popup ─────────── */}
+      {dayPopupOpen && (() => {
+        const popupAppts = apptsByDate[dayPopupDate] || [];
+        const popupDateObj = dayPopupDate ? new Date(dayPopupDate + 'T12:00:00') : new Date();
+        const dateLabel = popupDateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+        return (
+          <Dialog open={dayPopupOpen} onOpenChange={setDayPopupOpen}>
+            <DialogContent
+              className="p-0 overflow-hidden gap-0"
+              style={{
+                maxWidth: '520px',
+                width: '95vw',
+                maxHeight: '80vh',
+                display: 'flex',
+                flexDirection: 'column',
+                borderRadius: '16px',
+              }}
+            >
+              <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid var(--border-color)' }}>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#2D6A4F15' }}>
+                    <CalendarIcon className="w-5 h-5" style={{ color: 'var(--brand-green-text)' }} />
+                  </div>
+                  <div>
+                    <DialogTitle style={{ fontSize: '17px', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>{dateLabel}</DialogTitle>
+                    <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '2px' }}>{popupAppts.length} appointment{popupAppts.length !== 1 ? 's' : ''}</p>
+                  </div>
+                </div>
+              </div>
+              <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px' }}>
+                <div className="space-y-2">
+                  {popupAppts.map((appt) => {
+                    const sColor = serviceColors[appt.service] || serviceColors.Other || '#6B7280';
+                    const st = statusStyles[appt.status] || statusStyles.Pending;
+                    return (
+                      <div
+                        key={appt.id}
+                        className="flex items-center gap-3 p-3 cursor-pointer hover:bg-[var(--surface-elevated)] transition-colors"
+                        style={{ borderRadius: '10px', border: '1px solid var(--border-color)' }}
+                        onClick={() => { setDayPopupOpen(false); openApptDetail(appt); }}
+                      >
+                        <Avatar className="w-9 h-9 flex-shrink-0">
+                          <AvatarImage src={appt.petImage} alt={appt.petName} className="object-cover" />
+                          <AvatarFallback>{appt.petName.slice(0, 2)}</AvatarFallback>
+                        </Avatar>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{appt.petName}</p>
+                            <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>· {appt.ownerName}</span>
+                          </div>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>{appt.timeStart} – {appt.timeEnd}</span>
+                            <span style={{ fontSize: '11px', color: sColor, fontWeight: 600 }}>{appt.service}</span>
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{appt.vet}</span>
+                          <span
+                            className="inline-flex items-center px-2 py-0.5"
+                            style={{
+                              backgroundColor: st.bg,
+                              color: st.text,
+                              borderRadius: '9999px',
+                              fontSize: '10px',
+                              fontWeight: 600,
+                            }}
+                          >
+                            {appt.status}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div style={{ borderTop: '1px solid var(--border-color)', padding: '12px 16px', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                <Button variant="outline" size="sm" onClick={() => setDayPopupOpen(false)}>Close</Button>
+                <Button size="sm" onClick={() => { setDayPopupOpen(false); setViewMode('schedule'); }} style={{ backgroundColor: '#2D6A4F', color: '#fff' }}>
+                  <LayoutGrid className="w-3.5 h-3.5 mr-1.5" />
+                  View Schedule
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        );
+      })()}
 
       {/* ─── Appointment Detail / Edit Dialog ─────────── */}
       <Dialog open={detailOpen} onOpenChange={(open) => { setDetailOpen(open); if (!open) setDetailMode('view'); }}>

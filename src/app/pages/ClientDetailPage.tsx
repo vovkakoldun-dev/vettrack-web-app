@@ -258,14 +258,16 @@ export default function ClientDetailPage() {
       if (c) {
         const petIds = (c.pets as any[] || []).map((p: any) => p.id);
         // Fetch allergies and conditions for all pets
-        const [allergiesRes, conditionsRes, treatmentsRes] = await Promise.all([
+        const [allergiesRes, conditionsRes, treatmentsRes, appointmentsRes] = await Promise.all([
           petIds.length > 0 ? supabase.from('pet_allergies').select('*').in('pet_id', petIds) : { data: [] },
           petIds.length > 0 ? supabase.from('pet_conditions').select('*').in('pet_id', petIds) : { data: [] },
           petIds.length > 0 ? supabase.from('pet_treatments').select('*').in('pet_id', petIds).order('date', { ascending: false }) : { data: [] },
+          petIds.length > 0 ? supabase.from('appointments').select('id, pet_id, scheduled_at, duration_minutes, status, reason, staff!appointments_vet_id_fkey(first_name, last_name)').in('pet_id', petIds).gte('scheduled_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString()).order('scheduled_at', { ascending: true }) : { data: [] },
         ]);
         const petAllergies = (allergiesRes.data || []) as any[];
         const petConditions = (conditionsRes.data || []) as any[];
         const petTreatments = (treatmentsRes.data || []) as any[];
+        const petAppointments = (appointmentsRes.data || []) as any[];
 
         const pets = (c.pets as any[] || []).map((p: any, idx: number) => ({
           id: idx + 1,
@@ -292,7 +294,21 @@ export default function ClientDetailPage() {
           visits: [] as { id: number; date: string; reason: string; vet: string; summary: string; notes: string; status: 'Completed' | 'Scheduled' }[],
           vetNotes: '',
           clientNotes: '',
-          upcomingAppointments: [] as { id: number; time: string; date: string; reason: string }[],
+          upcomingAppointments: petAppointments.filter((a: any) => a.pet_id === p.id).map((a: any, ai: number) => {
+            const d = new Date(a.scheduled_at);
+            const fmtTime = (dt: Date) => {
+              let h = dt.getUTCHours(); const m = dt.getUTCMinutes();
+              const ampm = h >= 12 ? 'PM' : 'AM';
+              if (h > 12) h -= 12; if (h === 0) h = 12;
+              return `${h}:${m.toString().padStart(2, '0')} ${ampm}`;
+            };
+            return {
+              id: ai + 1,
+              time: fmtTime(d),
+              date: d.toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' }),
+              reason: a.reason || a.status || 'Appointment',
+            };
+          }),
           vaccinations: [] as { id: number; name: string; status: 'Up to date' | 'Due soon' | 'Overdue'; lastGiven: string; nextDue: string }[],
         }));
         const addr = [c.address, c.city, c.state, c.zip].filter(Boolean).join(', ');
@@ -385,11 +401,13 @@ export default function ClientDetailPage() {
           .single();
         if (c) {
           const petIds = (c.pets as any[] || []).map((p: any) => p.id);
-          const [alRes, coRes, trRes] = await Promise.all([
+          const [alRes, coRes, trRes, apRes] = await Promise.all([
             petIds.length > 0 ? supabase.from('pet_allergies').select('*').in('pet_id', petIds) : { data: [] },
             petIds.length > 0 ? supabase.from('pet_conditions').select('*').in('pet_id', petIds) : { data: [] },
             petIds.length > 0 ? supabase.from('pet_treatments').select('*').in('pet_id', petIds).order('date', { ascending: false }) : { data: [] },
+            petIds.length > 0 ? supabase.from('appointments').select('id, pet_id, scheduled_at, duration_minutes, status, reason, staff!appointments_vet_id_fkey(first_name, last_name)').in('pet_id', petIds).gte('scheduled_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString()).order('scheduled_at', { ascending: true }) : { data: [] },
           ]);
+          const petAppts2 = (apRes.data || []) as any[];
           const pets = (c.pets as any[] || []).map((p: any, idx: number) => ({
             id: idx + 1, dbId: p.id as string, name: p.name || '—', species: p.species || '—', breed: p.breed || '—',
             dob: p.date_of_birth || '', age: p.date_of_birth ? `${Math.floor((Date.now() - new Date(p.date_of_birth).getTime()) / (365.25 * 24 * 60 * 60 * 1000))} years` : '—',
@@ -398,7 +416,13 @@ export default function ClientDetailPage() {
             conditions: ((coRes.data as any[]) || []).filter((co: any) => co.pet_id === p.id).map((co: any) => ({ id: co.id, name: co.name, status: co.status || 'active', date: co.date_diagnosed || co.created_at?.split('T')[0] || '', notes: co.notes || '' })),
             treatments: ((trRes.data as any[]) || []).filter((t: any) => t.pet_id === p.id).map((t: any) => ({ id: t.id, name: t.name, date: t.date || '', vet: t.vet || '—', notes: t.notes || '' })),
             allergies: ((alRes.data as any[]) || []).filter((a: any) => a.pet_id === p.id).map((a: any) => a.name as string),
-            visits: [] as any[], vetNotes: '', clientNotes: '', upcomingAppointments: [] as any[], vaccinations: [] as any[],
+            visits: [] as any[], vetNotes: '', clientNotes: '',
+            upcomingAppointments: petAppts2.filter((a: any) => a.pet_id === p.id).map((a: any, ai: number) => {
+              const d = new Date(a.scheduled_at);
+              const fmtTime = (dt: Date) => { let h = dt.getUTCHours(); const m = dt.getUTCMinutes(); const ampm = h >= 12 ? 'PM' : 'AM'; if (h > 12) h -= 12; if (h === 0) h = 12; return `${h}:${m.toString().padStart(2, '0')} ${ampm}`; };
+              return { id: ai + 1, time: fmtTime(d), date: d.toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' }), reason: a.reason || a.status || 'Appointment' };
+            }),
+            vaccinations: [] as any[],
           }));
           const addr = [c.address, c.city, c.state, c.zip].filter(Boolean).join(', ');
           setClient({
@@ -938,7 +962,56 @@ export default function ClientDetailPage() {
                 <InfoRow label="Weight" value={petWeight} editing={editing} onChange={setPetWeight} />
                 <InfoRow label="Microchip #" value={petMicrochip} editing={editing} onChange={setPetMicrochip} />
                 <InfoRow label="Color" value={petColor} editing={editing} onChange={setPetColor} />
-                <InfoRow label="Assigned Doctor" value={petAssignedVet} />
+                <div className="flex items-start py-3">
+                  <span className="w-36 flex-shrink-0 text-[var(--text-secondary)]" style={{ fontSize: '14px', fontWeight: 400 }}>
+                    Assigned Doctor
+                  </span>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        className="flex items-center gap-1.5 hover:bg-[var(--surface-elevated)] px-2 py-0.5 transition-colors"
+                        style={{ fontSize: '16px', fontWeight: 400, color: petAssignedVet !== '—' ? 'var(--text-primary)' : 'var(--text-secondary)', borderRadius: '6px', border: 'none', background: 'none', cursor: 'pointer', marginLeft: '-8px' }}
+                      >
+                        {petAssignedVet !== '—' ? petAssignedVet : 'Unassigned'}
+                        <ChevronDown className="w-3.5 h-3.5 opacity-50" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-52">
+                      <DropdownMenuLabel>Assign Doctor</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      {vets.map((v) => (
+                        <DropdownMenuItem
+                          key={v.id}
+                          onClick={async () => {
+                            const petDbId = client.pets[selectedPetIdx]?.dbId;
+                            setPetAssignedVet(v.name);
+                            if (petDbId) {
+                              await supabase.from('pets').update({ assigned_vet_id: v.id }).eq('id', petDbId);
+                            }
+                          }}
+                        >
+                          <span style={{ fontWeight: petAssignedVet === v.name ? 600 : 400 }}>{v.name}</span>
+                        </DropdownMenuItem>
+                      ))}
+                      {petAssignedVet !== '—' && (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onClick={async () => {
+                              const petDbId = client.pets[selectedPetIdx]?.dbId;
+                              setPetAssignedVet('—');
+                              if (petDbId) {
+                                await supabase.from('pets').update({ assigned_vet_id: null }).eq('id', petDbId);
+                              }
+                            }}
+                          >
+                            <span style={{ color: 'var(--text-secondary)' }}>Unassign</span>
+                          </DropdownMenuItem>
+                        </>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </div>
             </div>
 
