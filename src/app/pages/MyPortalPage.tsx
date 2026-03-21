@@ -1113,22 +1113,43 @@ export default function MyPortalPage() {
                       <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{busyAppt.timeStart} – {busyAppt.timeEnd}</span>
                     </div>
                   ) : block ? (
-                    <div
-                      className="flex-1 m-1 px-3 py-2.5 flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity"
-                      style={{
-                        backgroundColor: blockStyles[block.type].bg,
-                        borderLeft: `4px solid ${blockStyles[block.type].border}`,
-                        borderRadius: '8px',
-                      }}
-                      onClick={() => openEditBlockDialog(block)}
-                    >
-                      {(() => { const Icon = blockStyles[block.type].icon; return <Icon className="w-4 h-4 flex-shrink-0" style={{ color: blockStyles[block.type].text }} />; })()}
-                      <div className="flex-1 min-w-0">
-                        <p style={{ fontSize: '14px', fontWeight: 600, color: blockStyles[block.type].text }}>{block.type}</p>
-                        {block.notes && <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{block.notes}</p>}
-                      </div>
-                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{block.timeStart} – {block.timeEnd}</span>
-                    </div>
+                    (() => {
+                      const blockEnd = slotToMin(block.timeEnd);
+                      const slotEnd = slotToMin(slot) + 30;
+                      const hasGap = blockEnd < slotEnd;
+                      const gapStart24 = `${Math.floor(blockEnd / 60).toString().padStart(2, '0')}:${(blockEnd % 60).toString().padStart(2, '0')}`;
+                      const gapEnd24 = `${Math.floor(slotEnd / 60).toString().padStart(2, '0')}:${(slotEnd % 60).toString().padStart(2, '0')}`;
+                      return (
+                        <div className="flex-1 m-1 flex gap-1">
+                          <div
+                            className={`${hasGap ? 'flex-1' : 'flex-1'} px-3 py-2.5 flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity`}
+                            style={{
+                              backgroundColor: blockStyles[block.type].bg,
+                              borderLeft: `4px solid ${blockStyles[block.type].border}`,
+                              borderRadius: '8px',
+                            }}
+                            onClick={() => openEditBlockDialog(block)}
+                          >
+                            {(() => { const Icon = blockStyles[block.type].icon; return <Icon className="w-4 h-4 flex-shrink-0" style={{ color: blockStyles[block.type].text }} />; })()}
+                            <div className="flex-1 min-w-0">
+                              <p style={{ fontSize: '14px', fontWeight: 600, color: blockStyles[block.type].text }}>{block.type}</p>
+                              {block.notes && <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{block.notes}</p>}
+                            </div>
+                            <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{block.timeStart} – {block.timeEnd}</span>
+                          </div>
+                          {hasGap && (
+                            <button
+                              className="px-2 flex items-center justify-center hover:bg-[var(--surface-elevated)] transition-colors"
+                              style={{ borderRadius: '8px', border: '1px dashed var(--border-color)' }}
+                              onClick={() => openBlockDialog('Lunch Break', gapStart24, gapEnd24)}
+                              title={`Block ${to12Hour(gapStart24)} – ${to12Hour(gapEnd24)}`}
+                            >
+                              <Plus className="w-4 h-4 text-[var(--text-secondary)]" />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()
                   ) : busyBlockSlots.has(slot) ? (
                     (() => {
                       const bb = busyBlockSlots.get(slot)!;
