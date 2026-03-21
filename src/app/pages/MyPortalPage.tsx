@@ -1007,18 +1007,68 @@ export default function MyPortalPage() {
           </div>
 
           {/* Time Slot Grid */}
+          {(() => {
+            // Find the current time slot for "now" indicator
+            const now = new Date();
+            const nowMin = now.getHours() * 60 + now.getMinutes();
+            const viewingToday = isToday(selectedDate);
+            // Current slot: the slot whose 30-min window contains "now"
+            const currentSlotIdx = viewingToday
+              ? SCHEDULE_SLOTS.findIndex((slot) => {
+                  const sm = slotToMin(slot);
+                  return nowMin >= sm && nowMin < sm + 30;
+                })
+              : -1;
+            // Position of the red line within the current slot (0–100%)
+            const currentSlotStart = currentSlotIdx >= 0 ? slotToMin(SCHEDULE_SLOTS[currentSlotIdx]) : 0;
+            const linePercent = currentSlotIdx >= 0 ? ((nowMin - currentSlotStart) / 30) * 100 : 0;
+
+            return (
           <div className="bg-[var(--surface-white)] border border-[var(--border-color)] overflow-hidden" style={{ borderRadius: '12px' }}>
             {SCHEDULE_SLOTS.map((slot, idx) => {
               const appt = apptBySlot.get(slot);
               const busyAppt = busyApptSlots.get(slot);
               const block = blockBySlot.get(slot);
               const isLast = idx === SCHEDULE_SLOTS.length - 1;
+              const isCurrent = idx === currentSlotIdx;
 
               return (
-                <div key={slot} className={`flex items-stretch ${!isLast ? 'border-b border-[var(--border-color)]' : ''}`}>
+                <div
+                  key={slot}
+                  className={`flex items-stretch ${!isLast ? 'border-b border-[var(--border-color)]' : ''}`}
+                  style={{
+                    position: 'relative',
+                    backgroundColor: isCurrent ? '#2D6A4F08' : undefined,
+                  }}
+                >
+                  {/* Current time indicator line */}
+                  {isCurrent && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: `${linePercent}%`,
+                        left: 0,
+                        right: 0,
+                        height: '2px',
+                        backgroundColor: '#ef4444',
+                        zIndex: 10,
+                        pointerEvents: 'none',
+                      }}
+                    >
+                      <div style={{
+                        position: 'absolute',
+                        left: '88px',
+                        top: '-4px',
+                        width: '10px',
+                        height: '10px',
+                        borderRadius: '50%',
+                        backgroundColor: '#ef4444',
+                      }} />
+                    </div>
+                  )}
                   {/* Time Label */}
                   <div className="w-24 flex-shrink-0 px-3 py-3 flex items-center justify-end">
-                    <span style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: 500 }}>{slot}</span>
+                    <span style={{ fontSize: '13px', color: isCurrent ? '#ef4444' : 'var(--text-secondary)', fontWeight: isCurrent ? 600 : 500 }}>{slot}</span>
                   </div>
 
                   {/* Slot Content */}
@@ -1193,6 +1243,8 @@ export default function MyPortalPage() {
               );
             })}
           </div>
+            );
+          })()}
         </div>
 
         {/* Right: Calendar + Quick Actions + Time Off */}
