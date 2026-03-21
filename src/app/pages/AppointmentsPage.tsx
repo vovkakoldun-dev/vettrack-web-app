@@ -1552,7 +1552,7 @@ export default function AppointmentsPage() {
 
                   // ── New patient: create client + pet first ──────────
                   if (visitType === 'new') {
-                    if (!npOwnerName.trim() || !npPetName.trim() || !npSpecies) { setSavingAppt(false); return; }
+                    if (!npOwnerName.trim() || !npPetName.trim() || !npSpecies) { alert('Please fill in owner name, pet name, and species.'); setSavingAppt(false); return; }
                     const nameParts = npOwnerName.trim().split(' ');
                     const { data: newClient, error: cErr } = await supabase
                       .from('clients')
@@ -1566,7 +1566,7 @@ export default function AppointmentsPage() {
                       }])
                       .select('id')
                       .single();
-                    if (cErr || !newClient) { setSavingAppt(false); return; }
+                    if (cErr || !newClient) { alert('Failed to create client: ' + (cErr?.message || 'Unknown error')); setSavingAppt(false); return; }
                     finalClientId = newClient.id;
 
                     const weightKg = npWeight ? parseFloat(npWeight) : undefined;
@@ -1585,11 +1585,11 @@ export default function AppointmentsPage() {
                       }])
                       .select('id')
                       .single();
-                    if (pErr || !newPet) { setSavingAppt(false); return; }
+                    if (pErr || !newPet) { alert('Failed to create pet: ' + (pErr?.message || 'Unknown error')); setSavingAppt(false); return; }
                     finalPetId = newPet.id;
                   }
 
-                  if (!finalClientId || !finalPetId) { setSavingAppt(false); return; }
+                  if (!finalClientId || !finalPetId) { alert('Please select a patient (owner and pet).'); setSavingAppt(false); return; }
 
                   // Update pet's assigned vet when booking for returning patient
                   if (visitType === 'returning' && newApptVetId && finalPetId) {
