@@ -6,7 +6,7 @@ import {
   ChevronRight, ChevronLeft, Plus, Play,
   Syringe, Stethoscope, Pill, Scissors,
   UtensilsCrossed, Palmtree, ThermometerSun, Briefcase, UsersRound,
-  AlertCircle, CheckCircle2, Send, ArrowUpRight, Camera,
+  AlertCircle, CheckCircle2, Send, ArrowUpRight, Camera, Pencil, Trash2,
 } from 'lucide-react';
 import { Avatar, AvatarImage, AvatarFallback } from '../components/ui/avatar';
 import { Calendar } from '../components/ui/calendar';
@@ -27,6 +27,7 @@ type BlockStatus = 'Confirmed' | 'Pending' | 'Approved' | 'Denied';
 
 interface TimeBlock {
   id: number;
+  dbId?: string; // Supabase UUID
   type: BlockType;
   date: string;
   timeStart: string;
@@ -698,6 +699,7 @@ export default function MyPortalPage() {
           };
           const dbBlocks: TimeBlock[] = blockData.map((b: any, i: number) => ({
             id: 1000 + i,
+            dbId: b.id,
             type: b.type as BlockType,
             date: b.date,
             timeStart: b.time_start ? from12(b.time_start) : '8:00 AM',
@@ -796,6 +798,77 @@ export default function MyPortalPage() {
     setBlockDialogOpen(true);
   };
 
+  // ── Edit / Delete block state ──
+  const [editingBlock, setEditingBlock] = useState<TimeBlock | null>(null);
+  const [editBlockDialogOpen, setEditBlockDialogOpen] = useState(false);
+  const [editBlockType, setEditBlockType] = useState<BlockType>('Lunch Break');
+  const [editBlockDate, setEditBlockDate] = useState('');
+  const [editBlockTimeStart, setEditBlockTimeStart] = useState('');
+  const [editBlockTimeEnd, setEditBlockTimeEnd] = useState('');
+  const [editBlockNotes, setEditBlockNotes] = useState('');
+
+  const openEditBlockDialog = (block: TimeBlock) => {
+    setEditingBlock(block);
+    setEditBlockType(block.type);
+    setEditBlockDate(block.date);
+    setEditBlockTimeStart(to24Hour(block.timeStart));
+    setEditBlockTimeEnd(to24Hour(block.timeEnd));
+    setEditBlockNotes(block.notes);
+    setEditBlockDialogOpen(true);
+  };
+
+  const handleUpdateBlock = async () => {
+    if (!editingBlock) return;
+    const from12 = (t24: string) => {
+      let [h, m] = t24.split(':').map(Number);
+      const ap = h >= 12 ? 'PM' : 'AM';
+      if (h > 12) h -= 12;
+      if (h === 0) h = 12;
+      return `${h}:${m.toString().padStart(2, '0')} ${ap}`;
+    };
+    const isRequest = editBlockType === 'PTO' || editBlockType === 'Sick Day';
+    const updated: TimeBlock = {
+      ...editingBlock,
+      type: editBlockType,
+      date: editBlockDate,
+      timeStart: from12(editBlockTimeStart),
+      timeEnd: from12(editBlockTimeEnd),
+      notes: editBlockNotes,
+      status: isRequest ? (editingBlock.status === 'Confirmed' ? 'Pending' : editingBlock.status) : 'Confirmed',
+    };
+    // Update local state
+    setTimeBlocks((prev) => prev.map((b) => b.id === editingBlock.id ? updated : b));
+    // Update in Supabase
+    if (editingBlock.dbId) {
+      supabase.from('staff_time_blocks').update({
+        type: editBlockType,
+        date: editBlockDate,
+        time_start: editBlockTimeStart || null,
+        time_end: editBlockTimeEnd || null,
+        notes: editBlockNotes || null,
+        status: updated.status,
+      }).eq('id', editingBlock.dbId).then(({ error }) => {
+        if (error) console.warn('Block update error:', error.message);
+      });
+    }
+    setEditBlockDialogOpen(false);
+    setEditingBlock(null);
+  };
+
+  const handleDeleteBlock = async () => {
+    if (!editingBlock) return;
+    // Remove from local state
+    setTimeBlocks((prev) => prev.filter((b) => b.id !== editingBlock.id));
+    // Delete from Supabase
+    if (editingBlock.dbId) {
+      supabase.from('staff_time_blocks').delete().eq('id', editingBlock.dbId).then(({ error }) => {
+        if (error) console.warn('Block delete error:', error.message);
+      });
+    }
+    setEditBlockDialogOpen(false);
+    setEditingBlock(null);
+  };
+
   const handleSaveBlock = async () => {
     const from12 = (t24: string) => {
       let [h, m] = t24.split(':').map(Number);
@@ -805,7 +878,6 @@ export default function MyPortalPage() {
       return `${h}:${m.toString().padStart(2, '0')} ${ap}`;
     };
     const isRequest = blockType === 'PTO' || blockType === 'Sick Day';
-    // Generate one block per day in the range
     const start = new Date(blockDateFrom + 'T12:00:00');
     const end = new Date(blockDateTo + 'T12:00:00');
     const newBlocks: TimeBlock[] = [];
@@ -836,10 +908,16 @@ export default function MyPortalPage() {
       });
       cursor.setDate(cursor.getDate() + 1);
     }
-    // Save to Supabase (fire-and-forget — UI updates optimistically)
-    supabase.from('staff_time_blocks').insert(dbRows).then(({ error }) => {
-      if (error) console.warn('Block save error:', error.message);
-    });
+    // Save to Supabase and get IDs back
+    const { data: inserted, error } = await supabase.from('staff_time_blocks').insert(dbRows).select('id');
+    if (error) {
+      console.warn('Block save error:', error.message);
+    } else if (inserted) {
+      // Attach DB IDs to new blocks
+      inserted.forEach((row: any, i: number) => {
+        if (newBlocks[i]) newBlocks[i].dbId = row.id;
+      });
+    }
     setTimeBlocks((prev) => [...prev, ...newBlocks]);
     setNextBlockId(idCounter);
     setBlockDialogOpen(false);
@@ -1033,12 +1111,13 @@ export default function MyPortalPage() {
                     </div>
                   ) : block ? (
                     <div
-                      className="flex-1 m-1 px-3 py-2.5 flex items-center gap-3"
+                      className="flex-1 m-1 px-3 py-2.5 flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity"
                       style={{
                         backgroundColor: blockStyles[block.type].bg,
                         borderLeft: `4px solid ${blockStyles[block.type].border}`,
                         borderRadius: '8px',
                       }}
+                      onClick={() => openEditBlockDialog(block)}
                     >
                       {(() => { const Icon = blockStyles[block.type].icon; return <Icon className="w-4 h-4 flex-shrink-0" style={{ color: blockStyles[block.type].text }} />; })()}
                       <div className="flex-1 min-w-0">
@@ -1052,13 +1131,14 @@ export default function MyPortalPage() {
                       const bb = busyBlockSlots.get(slot)!;
                       return (
                         <div
-                          className="flex-1 m-1 px-3 py-2.5 flex items-center gap-3"
+                          className="flex-1 m-1 px-3 py-2.5 flex items-center gap-3 cursor-pointer hover:opacity-60 transition-opacity"
                           style={{
                             backgroundColor: blockStyles[bb.type].bg,
                             borderLeft: `4px solid ${blockStyles[bb.type].border}`,
                             borderRadius: '8px',
                             opacity: 0.7,
                           }}
+                          onClick={() => openEditBlockDialog(bb)}
                         >
                           {(() => { const Icon = blockStyles[bb.type].icon; return <Icon className="w-4 h-4 flex-shrink-0" style={{ color: blockStyles[bb.type].text }} />; })()}
                           <div className="flex-1 min-w-0">
@@ -1341,6 +1421,63 @@ export default function MyPortalPage() {
             <Button onClick={handleSaveBlock}>
               {blockType === 'PTO' || blockType === 'Sick Day' ? 'Send Request' : 'Save Block'}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Edit / Delete Block Dialog ─────────────── */}
+      <Dialog open={editBlockDialogOpen} onOpenChange={setEditBlockDialogOpen}>
+        <DialogContent className="sm:max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="w-4 h-4 text-[var(--brand-green-text)]" /> Edit Block
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <label className="text-[var(--text-primary)] mb-1.5 block" style={{ fontSize: '14px', fontWeight: 600 }}>Type</label>
+              <Select value={editBlockType} onValueChange={(v) => setEditBlockType(v as BlockType)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(['Lunch Break', 'Meeting', 'Work Hours', 'Personal', 'PTO', 'Sick Day'] as BlockType[]).map((t) => {
+                    const s = blockStyles[t];
+                    const Icon = s.icon;
+                    return <SelectItem key={t} value={t}><span className="flex items-center gap-2"><Icon className="w-3.5 h-3.5" style={{ color: s.text }} />{t}</span></SelectItem>;
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-[var(--text-primary)] mb-1.5 block" style={{ fontSize: '14px', fontWeight: 600 }}>Date</label>
+              <Input type="date" value={editBlockDate} onChange={(e) => setEditBlockDate(e.target.value)} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[var(--text-primary)] mb-1.5 block" style={{ fontSize: '14px', fontWeight: 600 }}>Start Time</label>
+                <Input type="time" value={editBlockTimeStart} onChange={(e) => setEditBlockTimeStart(e.target.value)} />
+              </div>
+              <div>
+                <label className="text-[var(--text-primary)] mb-1.5 block" style={{ fontSize: '14px', fontWeight: 600 }}>End Time</label>
+                <Input type="time" value={editBlockTimeEnd} onChange={(e) => setEditBlockTimeEnd(e.target.value)} />
+              </div>
+            </div>
+            <div>
+              <label className="text-[var(--text-primary)] mb-1.5 block" style={{ fontSize: '14px', fontWeight: 600 }}>Notes</label>
+              <Textarea placeholder="Optional notes..." value={editBlockNotes} onChange={(e) => setEditBlockNotes(e.target.value)} className="min-h-16" />
+            </div>
+          </div>
+          <DialogFooter className="flex !justify-between">
+            <Button
+              variant="outline"
+              className="text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
+              onClick={handleDeleteBlock}
+            >
+              <Trash2 className="w-4 h-4 mr-1" /> Delete
+            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setEditBlockDialogOpen(false)}>Cancel</Button>
+              <Button onClick={handleUpdateBlock}>Save Changes</Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
