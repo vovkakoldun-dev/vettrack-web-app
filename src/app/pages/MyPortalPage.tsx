@@ -175,6 +175,15 @@ function to24Hour(time12: string): string {
   return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
 }
 
+/** Convert 24h time string (e.g. "13:30" or "13:30:00") to 12h (e.g. "1:30 PM") */
+function to12Hour(t24: string): string {
+  let [h, m] = t24.split(':').map(Number);
+  const ap = h >= 12 ? 'PM' : 'AM';
+  if (h > 12) h -= 12;
+  if (h === 0) h = 12;
+  return `${h}:${(m ?? 0).toString().padStart(2, '0')} ${ap}`;
+}
+
 function isSameDay(dateStr: string, date: Date): boolean {
   const parts = dateStr.split('-');
   return (
@@ -690,20 +699,13 @@ export default function MyPortalPage() {
           .eq('staff_id', staffData.id)
           .order('date', { ascending: true });
         if (blockData && blockData.length > 0) {
-          const from12 = (t24: string) => {
-            let [h, m] = t24.split(':').map(Number);
-            const ap = h >= 12 ? 'PM' : 'AM';
-            if (h > 12) h -= 12;
-            if (h === 0) h = 12;
-            return `${h}:${m.toString().padStart(2, '0')} ${ap}`;
-          };
           const dbBlocks: TimeBlock[] = blockData.map((b: any, i: number) => ({
             id: 1000 + i,
             dbId: b.id,
             type: b.type as BlockType,
             date: b.date,
-            timeStart: b.time_start ? from12(b.time_start) : '8:00 AM',
-            timeEnd: b.time_end ? from12(b.time_end) : '5:00 PM',
+            timeStart: b.time_start ? to12Hour(b.time_start) : '8:00 AM',
+            timeEnd: b.time_end ? to12Hour(b.time_end) : '5:00 PM',
             notes: b.notes || '',
             status: (b.status || 'Confirmed') as BlockStatus,
           }));
@@ -728,9 +730,6 @@ export default function MyPortalPage() {
   const activeAppts = realAppointments.length > 0 ? realAppointments : MY_APPOINTMENTS;
   const dayAppts = activeAppts.filter((a) => isSameDay(a.date, selectedDate));
   const dayBlocks = timeBlocks.filter((b) => isSameDay(b.date, selectedDate));
-  const apptByTime = new Map(dayAppts.map((a) => [a.timeStart, a]));
-  const blockByTime = new Map(dayBlocks.map((b) => [b.timeStart, b]));
-
   // Helper: convert 12h time to minutes since midnight
   const slotToMin = (slot12: string) => {
     const t24 = to24Hour(slot12);
@@ -738,28 +737,36 @@ export default function MyPortalPage() {
     return h * 60 + m;
   };
 
-  // Build busy-appointment map: appointments spanning multiple slots
-  const busyApptSlots = new Map<string, Appointment>();
+  // Build slot maps — a block/appt occupies a slot if it overlaps that slot's 30-min window at all
+  // Slot window: [slotMin, slotMin+30). Item window: [startMin, endMin).
+  // Overlap condition: startMin < slotMin+30 && endMin > slotMin
+  const apptBySlot = new Map<string, Appointment>();   // first (primary) slot for appointment
+  const busyApptSlots = new Map<string, Appointment>(); // continuation slots
+  const blockBySlot = new Map<string, TimeBlock>();     // first (primary) slot for block
+  const busyBlockSlots = new Map<string, TimeBlock>();  // continuation slots
+
   dayAppts.forEach((a) => {
-    const startMin = slotToMin(a.timeStart);
-    const endMin = slotToMin(a.timeEnd);
+    const aStart = slotToMin(a.timeStart);
+    const aEnd = slotToMin(a.timeEnd);
+    let first = true;
     SCHEDULE_SLOTS.forEach((slot) => {
       const sm = slotToMin(slot);
-      if (sm > startMin && sm < endMin) {
-        busyApptSlots.set(slot, a);
+      if (aStart < sm + 30 && aEnd > sm) {
+        if (first) { apptBySlot.set(slot, a); first = false; }
+        else { busyApptSlots.set(slot, a); }
       }
     });
   });
 
-  // Build busy-block map: blocks spanning multiple slots show on intermediate slots too
-  const busyBlockSlots = new Map<string, TimeBlock>();
   dayBlocks.forEach((b) => {
-    const startMin = slotToMin(b.timeStart);
-    const endMin = slotToMin(b.timeEnd);
+    const bStart = slotToMin(b.timeStart);
+    const bEnd = slotToMin(b.timeEnd);
+    let first = true;
     SCHEDULE_SLOTS.forEach((slot) => {
       const sm = slotToMin(slot);
-      if (sm > startMin && sm < endMin) {
-        busyBlockSlots.set(slot, b);
+      if (bStart < sm + 30 && bEnd > sm) {
+        if (first) { blockBySlot.set(slot, b); first = false; }
+        else { busyBlockSlots.set(slot, b); }
       }
     });
   });
@@ -819,20 +826,18 @@ export default function MyPortalPage() {
 
   const handleUpdateBlock = async () => {
     if (!editingBlock) return;
-    const from12 = (t24: string) => {
-      let [h, m] = t24.split(':').map(Number);
-      const ap = h >= 12 ? 'PM' : 'AM';
-      if (h > 12) h -= 12;
-      if (h === 0) h = 12;
-      return `${h}:${m.toString().padStart(2, '0')} ${ap}`;
-    };
+    // Validate end > start
+    if (editBlockTimeEnd <= editBlockTimeStart) {
+      alert('End time must be after start time.');
+      return;
+    }
     const isRequest = editBlockType === 'PTO' || editBlockType === 'Sick Day';
     const updated: TimeBlock = {
       ...editingBlock,
       type: editBlockType,
       date: editBlockDate,
-      timeStart: from12(editBlockTimeStart),
-      timeEnd: from12(editBlockTimeEnd),
+      timeStart: to12Hour(editBlockTimeStart),
+      timeEnd: to12Hour(editBlockTimeEnd),
       notes: editBlockNotes,
       status: isRequest ? (editingBlock.status === 'Confirmed' ? 'Pending' : editingBlock.status) : 'Confirmed',
     };
@@ -870,13 +875,11 @@ export default function MyPortalPage() {
   };
 
   const handleSaveBlock = async () => {
-    const from12 = (t24: string) => {
-      let [h, m] = t24.split(':').map(Number);
-      const ap = h >= 12 ? 'PM' : 'AM';
-      if (h > 12) h -= 12;
-      if (h === 0) h = 12;
-      return `${h}:${m.toString().padStart(2, '0')} ${ap}`;
-    };
+    // Validate end > start
+    if (blockTimeEnd <= blockTimeStart) {
+      alert('End time must be after start time.');
+      return;
+    }
     const isRequest = blockType === 'PTO' || blockType === 'Sick Day';
     const start = new Date(blockDateFrom + 'T12:00:00');
     const end = new Date(blockDateTo + 'T12:00:00');
@@ -890,8 +893,8 @@ export default function MyPortalPage() {
         id: idCounter++,
         type: blockType,
         date: dateStr,
-        timeStart: from12(blockTimeStart),
-        timeEnd: from12(blockTimeEnd),
+        timeStart: to12Hour(blockTimeStart),
+        timeEnd: to12Hour(blockTimeEnd),
         notes: blockNotes,
         status: isRequest ? 'Pending' : 'Confirmed',
       });
@@ -1004,9 +1007,9 @@ export default function MyPortalPage() {
           {/* Time Slot Grid */}
           <div className="bg-[var(--surface-white)] border border-[var(--border-color)] overflow-hidden" style={{ borderRadius: '12px' }}>
             {SCHEDULE_SLOTS.map((slot, idx) => {
-              const appt = apptByTime.get(slot);
+              const appt = apptBySlot.get(slot);
               const busyAppt = busyApptSlots.get(slot);
-              const block = blockByTime.get(slot);
+              const block = blockBySlot.get(slot);
               const isLast = idx === SCHEDULE_SLOTS.length - 1;
 
               return (
