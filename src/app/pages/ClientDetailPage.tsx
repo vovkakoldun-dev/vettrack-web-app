@@ -1,10 +1,11 @@
-import { useState, useRef } from 'react';
-import { useParams, Link, useNavigate } from 'react-router';
+import { useState, useRef, useEffect } from 'react';
+import { useParams, Link, useNavigate, useSearchParams, useLocation } from 'react-router';
+import { supabase } from '../../lib/supabase';
 import {
-  ArrowLeft, Edit2, MoreHorizontal, Plus, Save, X, Printer, Archive, Trash2,
+  ArrowLeft, Edit2, MoreHorizontal, Plus, Save, X, Printer, Archive, Trash2, FileDown, PawPrint,
   Mail, Phone, MapPin, Shield, AlertCircle, Check, PlusCircle,
   Calendar, Clock, Syringe, ChevronRight,
-  CheckCircle2, AlertTriangle, ChevronDown,
+  CheckCircle2, AlertTriangle, ChevronDown, Camera, Loader2,
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -65,6 +66,8 @@ const mockClient = {
   pets: [
     {
       id: 1,
+      dbId: '',
+      assignedVet: 'Dr. Sarah Chen',
       name: 'Max',
       species: 'Dog',
       breed: 'Golden Retriever',
@@ -234,19 +237,248 @@ function InfoRow({ label, value, editing, onChange }: {
 export default function ClientDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const client = mockClient; // In real app, fetch by id
+  const location = useLocation();
+  const isAdmin = location.pathname.startsWith('/admin');
+  const clientsPath = isAdmin ? '/admin/clients' : '/clients';
+  const appointmentsPath = isAdmin ? '/admin/bookings' : '/appointments';
+  const [searchParams] = useSearchParams();
+
+  // Fetch real client from Supabase, fall back to mock
+  const [client, setClient] = useState(mockClient);
+  const [dbLoaded, setDbLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!id) return;
+    (async () => {
+      const { data: c } = await supabase
+        .from('clients')
+        .select('id, first_name, last_name, email, phone, address, city, state, zip, notes, portal_status, health_status, created_at, pets(id, name, species, breed, date_of_birth, sex, weight_kg, microchip_no, photo_url, assigned_vet_id, assigned_vet:staff!pets_assigned_vet_id_fkey(id, first_name, last_name))')
+        .eq('id', id)
+        .single();
+      if (c) {
+        const petIds = (c.pets as any[] || []).map((p: any) => p.id);
+        // Fetch allergies and conditions for all pets
+        const [allergiesRes, conditionsRes, treatmentsRes] = await Promise.all([
+          petIds.length > 0 ? supabase.from('pet_allergies').select('*').in('pet_id', petIds) : { data: [] },
+          petIds.length > 0 ? supabase.from('pet_conditions').select('*').in('pet_id', petIds) : { data: [] },
+          petIds.length > 0 ? supabase.from('pet_treatments').select('*').in('pet_id', petIds).order('date', { ascending: false }) : { data: [] },
+        ]);
+        const petAllergies = (allergiesRes.data || []) as any[];
+        const petConditions = (conditionsRes.data || []) as any[];
+        const petTreatments = (treatmentsRes.data || []) as any[];
+
+        const pets = (c.pets as any[] || []).map((p: any, idx: number) => ({
+          id: idx + 1,
+          dbId: p.id as string,
+          name: p.name || '—',
+          species: p.species || '—',
+          breed: p.breed || '—',
+          dob: p.date_of_birth || '',
+          age: p.date_of_birth ? `${Math.floor((Date.now() - new Date(p.date_of_birth).getTime()) / (365.25 * 24 * 60 * 60 * 1000))} years` : '—',
+          sex: p.sex || '—',
+          weight: p.weight_kg ? `${p.weight_kg} kg` : '—',
+          microchip: p.microchip_no || '—',
+          color: '—',
+          image: p.photo_url || '',
+          assignedVet: p.assigned_vet ? `Dr. ${p.assigned_vet.first_name} ${p.assigned_vet.last_name}` : '—',
+          status: ((['Healthy', 'Follow-up', 'Critical'].includes((c as any).health_status)) ? (c as any).health_status : 'Healthy') as 'Healthy' | 'Follow-up' | 'Critical',
+          conditions: petConditions.filter((pc: any) => pc.pet_id === p.id).map((pc: any) => ({
+            id: pc.id, name: pc.name, dateDiagnosed: new Date(pc.date_diagnosed).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }), status: pc.status as 'active' | 'resolved', notes: pc.notes || '',
+          })),
+          treatments: petTreatments.filter((pt: any) => pt.pet_id === p.id).map((pt: any) => ({
+            id: pt.id, name: pt.name, date: new Date(pt.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }), vet: pt.vet, notes: pt.notes,
+          })),
+          allergies: petAllergies.filter((pa: any) => pa.pet_id === p.id).map((pa: any) => pa.name as string),
+          visits: [] as { id: number; date: string; reason: string; vet: string; summary: string; notes: string; status: 'Completed' | 'Scheduled' }[],
+          vetNotes: '',
+          clientNotes: '',
+          upcomingAppointments: [] as { id: number; time: string; date: string; reason: string }[],
+          vaccinations: [] as { id: number; name: string; status: 'Up to date' | 'Due soon' | 'Overdue'; lastGiven: string; nextDue: string }[],
+        }));
+        const addr = [c.address, c.city, c.state, c.zip].filter(Boolean).join(', ');
+        setClient({
+          id: 1,
+          owner: {
+            name: `${c.first_name} ${c.last_name}`,
+            email: c.email || '—',
+            phone: c.phone || '—',
+            address: addr || '—',
+            emergencyContact: '—',
+            emergencyPhone: '—',
+          },
+          insurance: { provider: '—', policyNumber: '—', coverageType: '—', expiryDate: '—' },
+          pets: pets.length > 0 ? pets : [{
+            id: 1, dbId: '', name: '—', species: '—', breed: '—', dob: '', age: '—',
+            sex: '—', weight: '—', microchip: '—', color: '—', image: '',
+            status: 'Healthy' as const, conditions: [], treatments: [], allergies: [],
+            visits: [], vetNotes: '', clientNotes: '', upcomingAppointments: [], vaccinations: [],
+          }],
+        });
+        setDbLoaded(true);
+      }
+    })();
+  }, [id]);
 
   const [selectedPetIdx, setSelectedPetIdx] = useState(0);
 
+  const petIdParam = searchParams.get('petId');
+
+  // Add Pet dialog state
+  const [addPetOpen, setAddPetOpen] = useState(false);
+  const [addPetForm, setAddPetForm] = useState({ name: '', species: '', breed: '', sex: '', dob: '', weight: '', microchip: '', assignedVetId: '' });
+  const [addPetSaving, setAddPetSaving] = useState(false);
+  const [addPetPhoto, setAddPetPhoto] = useState<File | null>(null);
+  const [addPetPhotoPreview, setAddPetPhotoPreview] = useState<string | null>(null);
+  const addPetPhotoRef = useRef<HTMLInputElement>(null);
+
+  // Fetch vets for doctor assignment
+  const [vets, setVets] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from('staff')
+        .select('id, first_name, last_name, role')
+        .in('role', ['veterinarian', 'senior_veterinarian', 'specialist'])
+        .eq('status', 'Active')
+        .order('first_name');
+      if (data) setVets(data.map((s: any) => ({ id: s.id, name: `Dr. ${s.first_name} ${s.last_name}` })));
+    })();
+  }, []);
+
+  const handleAddPet = async () => {
+    if (!addPetForm.name.trim() || !addPetForm.species || !id) return;
+    setAddPetSaving(true);
+    try {
+      const weightNum = addPetForm.weight ? parseFloat(addPetForm.weight) : undefined;
+      let photoUrl: string | null = null;
+      if (addPetPhoto) {
+        const ext = addPetPhoto.name.split('.').pop() || 'jpg';
+        const path = `${id}/${Date.now()}.${ext}`;
+        const { error: uploadErr } = await supabase.storage.from('pet-photos').upload(path, addPetPhoto, { upsert: true });
+        if (!uploadErr) {
+          const { data: urlData } = supabase.storage.from('pet-photos').getPublicUrl(path);
+          photoUrl = urlData.publicUrl;
+        }
+      }
+      const { error: petErr } = await supabase.from('pets').insert([{
+        client_id: id,
+        name: addPetForm.name.trim(),
+        species: addPetForm.species,
+        breed: addPetForm.breed || null,
+        sex: addPetForm.sex || 'Unknown',
+        date_of_birth: addPetForm.dob || null,
+        weight_kg: (weightNum && !isNaN(weightNum)) ? weightNum : null,
+        microchip_no: addPetForm.microchip || null,
+        photo_url: photoUrl,
+        is_active: true,
+        assigned_vet_id: addPetForm.assignedVetId || null,
+      }]);
+      if (petErr) {
+        console.error('Add pet error:', petErr);
+      }
+      {
+        // Reload client data to pick up the new pet
+        const { data: c } = await supabase
+          .from('clients')
+          .select('id, first_name, last_name, email, phone, address, city, state, zip, notes, portal_status, health_status, created_at, pets(id, name, species, breed, date_of_birth, sex, weight_kg, microchip_no, photo_url, assigned_vet_id, assigned_vet:staff!pets_assigned_vet_id_fkey(id, first_name, last_name))')
+          .eq('id', id)
+          .single();
+        if (c) {
+          const petIds = (c.pets as any[] || []).map((p: any) => p.id);
+          const [alRes, coRes, trRes] = await Promise.all([
+            petIds.length > 0 ? supabase.from('pet_allergies').select('*').in('pet_id', petIds) : { data: [] },
+            petIds.length > 0 ? supabase.from('pet_conditions').select('*').in('pet_id', petIds) : { data: [] },
+            petIds.length > 0 ? supabase.from('pet_treatments').select('*').in('pet_id', petIds).order('date', { ascending: false }) : { data: [] },
+          ]);
+          const pets = (c.pets as any[] || []).map((p: any, idx: number) => ({
+            id: idx + 1, dbId: p.id as string, name: p.name || '—', species: p.species || '—', breed: p.breed || '—',
+            dob: p.date_of_birth || '', age: p.date_of_birth ? `${Math.floor((Date.now() - new Date(p.date_of_birth).getTime()) / (365.25 * 24 * 60 * 60 * 1000))} years` : '—',
+            sex: p.sex || '—', weight: p.weight_kg ? `${p.weight_kg} kg` : '—', microchip: p.microchip_no || '—',
+            color: '—', image: p.photo_url || '', assignedVet: p.assigned_vet ? `Dr. ${p.assigned_vet.first_name} ${p.assigned_vet.last_name}` : '—', status: ((['Healthy', 'Follow-up', 'Critical'].includes((c as any).health_status)) ? (c as any).health_status : 'Healthy') as 'Healthy' | 'Follow-up' | 'Critical',
+            conditions: ((coRes.data as any[]) || []).filter((co: any) => co.pet_id === p.id).map((co: any) => ({ id: co.id, name: co.name, status: co.status || 'active', date: co.date_diagnosed || co.created_at?.split('T')[0] || '', notes: co.notes || '' })),
+            treatments: ((trRes.data as any[]) || []).filter((t: any) => t.pet_id === p.id).map((t: any) => ({ id: t.id, name: t.name, date: t.date || '', vet: t.vet || '—', notes: t.notes || '' })),
+            allergies: ((alRes.data as any[]) || []).filter((a: any) => a.pet_id === p.id).map((a: any) => a.name as string),
+            visits: [] as any[], vetNotes: '', clientNotes: '', upcomingAppointments: [] as any[], vaccinations: [] as any[],
+          }));
+          const addr = [c.address, c.city, c.state, c.zip].filter(Boolean).join(', ');
+          setClient({
+            id: 1,
+            owner: { name: `${c.first_name} ${c.last_name}`, email: c.email || '—', phone: c.phone || '—', address: addr || '—', emergencyContact: '—', emergencyPhone: '—' },
+            insurance: { provider: '—', policyNumber: '—', coverageType: '—', expiryDate: '—' },
+            pets: pets.length > 0 ? pets : [{ id: 1, dbId: '', assignedVet: '—', name: '—', species: '—', breed: '—', dob: '', age: '—', sex: '—', weight: '—', microchip: '—', color: '—', image: '', status: 'Healthy' as const, conditions: [], treatments: [], allergies: [], visits: [], vetNotes: '', clientNotes: '', upcomingAppointments: [], vaccinations: [] }],
+          });
+          // Select the newly added pet (last one)
+          handleSelectPet(pets.length - 1);
+        }
+      }
+    } catch (err) {
+      console.error('Add pet error:', err);
+    }
+    setAddPetOpen(false);
+    setAddPetForm({ name: '', species: '', breed: '', sex: '', dob: '', weight: '', microchip: '', assignedVetId: '' });
+    setAddPetPhoto(null);
+    setAddPetPhotoPreview(null);
+    setAddPetSaving(false);
+  };
+
   const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (!id) return;
+    setSaving(true);
+    try {
+      const currentPet = client.pets[selectedPetIdx];
+      const petDbId = currentPet?.dbId;
+
+      // Save pet fields
+      if (petDbId) {
+        const weightVal = petWeight.replace(/\s*kg\s*/i, '').trim();
+        const weightNum = weightVal ? parseFloat(weightVal) : null;
+        await supabase.from('pets').update({
+          name: petName !== '—' ? petName : null,
+          species: petSpecies !== '—' ? petSpecies : null,
+          breed: petBreed !== '—' ? petBreed : null,
+          sex: petSex !== '—' ? petSex : 'Unknown',
+          date_of_birth: petDob || null,
+          weight_kg: (weightNum && !isNaN(weightNum)) ? weightNum : null,
+          microchip_no: petMicrochip !== '—' ? petMicrochip : null,
+        }).eq('id', petDbId);
+      }
+
+      // Save client/owner fields
+      const nameParts = ownerName.split(' ');
+      const firstName = nameParts[0] || '';
+      const lastName = nameParts.slice(1).join(' ') || '';
+      await supabase.from('clients').update({
+        first_name: firstName,
+        last_name: lastName,
+        email: ownerEmail !== '—' ? ownerEmail : null,
+        phone: ownerPhone !== '—' ? ownerPhone : null,
+        address: ownerAddress !== '—' ? ownerAddress : null,
+      }).eq('id', id);
+
+    } catch (err) {
+      console.error('Save error:', err);
+    }
+    setSaving(false);
+    setEditing(false);
+  };
   const [conditionOpen, setConditionOpen] = useState(false);
   const [conditionSearch, setConditionSearch] = useState('');
   const [conditions, setConditions] = useState(client.pets[0].conditions);
+  const [expandedConditionId, setExpandedConditionId] = useState<any>(null);
   const [allergies, setAllergies] = useState(client.pets[0].allergies);
   const [allergyInput, setAllergyInput] = useState('');
   const [showAllergyInput, setShowAllergyInput] = useState(false);
   const [visitDialogOpen, setVisitDialogOpen] = useState(false);
   const [treatmentDialogOpen, setTreatmentDialogOpen] = useState(false);
+  const [treatmentPopoverOpen, setTreatmentPopoverOpen] = useState(false);
+  const [treatments, setTreatments] = useState(client.pets[0].treatments);
+  const [newTreatmentName, setNewTreatmentName] = useState('');
+  const [newTreatmentDate, setNewTreatmentDate] = useState(new Date().toISOString().split('T')[0]);
+  const [newTreatmentVet, setNewTreatmentVet] = useState('');
+  const [newTreatmentNotes, setNewTreatmentNotes] = useState('');
   const [vetNotes, setVetNotes] = useState(client.pets[0].vetNotes);
   const [clientNotes, setClientNotes] = useState(client.pets[0].clientNotes);
   const [activeVaxDot, setActiveVaxDot] = useState(0);
@@ -262,6 +494,7 @@ export default function ClientDetailPage() {
   const [petWeight, setPetWeight] = useState(client.pets[0].weight);
   const [petMicrochip, setPetMicrochip] = useState(client.pets[0].microchip);
   const [petColor, setPetColor] = useState(client.pets[0].color);
+  const [petAssignedVet, setPetAssignedVet] = useState(client.pets[0].assignedVet);
 
   // Editable owner fields
   const [ownerName, setOwnerName] = useState(client.owner.name);
@@ -278,6 +511,66 @@ export default function ClientDetailPage() {
   const [insExpiry, setInsExpiry] = useState(client.insurance.expiryDate);
 
   const [patientStatus, setPatientStatus] = useState<PatientStatus>(client.pets[0].status);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !id) return;
+    setUploadingPhoto(true);
+    try {
+      const ext = file.name.split('.').pop() || 'jpg';
+      const path = `${id}/${Date.now()}.${ext}`;
+      const { error: uploadErr } = await supabase.storage.from('pet-photos').upload(path, file, { upsert: true });
+      if (uploadErr) throw uploadErr;
+      const { data: urlData } = supabase.storage.from('pet-photos').getPublicUrl(path);
+      const publicUrl = urlData.publicUrl;
+      // Update the pet record in Supabase
+      const pet = (client.pets as any[])[selectedPetIdx];
+      if (pet) {
+        // Find the real Supabase pet ID
+        const { data: petsData } = await supabase
+          .from('pets')
+          .select('id')
+          .eq('client_id', id)
+          .order('created_at', { ascending: true });
+        const realPetId = petsData?.[selectedPetIdx]?.id;
+        if (realPetId) {
+          await supabase.from('pets').update({ photo_url: publicUrl }).eq('id', realPetId);
+        }
+      }
+      setPetImage(publicUrl);
+    } catch (err) {
+      console.error('Photo upload failed:', err);
+    }
+    setUploadingPhoto(false);
+    // Reset input so the same file can be re-selected
+    if (photoInputRef.current) photoInputRef.current.value = '';
+  };
+
+  // Sync state when DB data loads
+  useEffect(() => {
+    if (!dbLoaded) return;
+    // Auto-select pet from ?petId= query param, or default to first
+    let initialIdx = 0;
+    if (petIdParam) {
+      const found = client.pets.findIndex((p: any) => p.dbId === petIdParam);
+      if (found >= 0) initialIdx = found;
+    }
+    const p = client.pets[initialIdx];
+    setPetName(p.name); setPetImage(p.image); setPetSpecies(p.species);
+    setPetBreed(p.breed); setPetDob(p.dob); setPetSex(p.sex);
+    setPetWeight(p.weight); setPetMicrochip(p.microchip); setPetColor(p.color); setPetAssignedVet(p.assignedVet);
+    setConditions(p.conditions); setAllergies(p.allergies); setTreatments(p.treatments);
+    setVetNotes(p.vetNotes); setClientNotes(p.clientNotes);
+    setPatientStatus(p.status);
+    setOwnerName(client.owner.name); setOwnerEmail(client.owner.email);
+    setOwnerPhone(client.owner.phone); setOwnerAddress(client.owner.address);
+    setEmergencyContact(client.owner.emergencyContact); setEmergencyPhone(client.owner.emergencyPhone);
+    setInsProvider(client.insurance.provider); setInsPolicyNumber(client.insurance.policyNumber);
+    setInsCoverageType(client.insurance.coverageType); setInsExpiry(client.insurance.expiryDate);
+    setSelectedPetIdx(initialIdx);
+  }, [dbLoaded, client]);
   const petStatus = statusColors[patientStatus] || statusColors.Healthy;
   const petStatusOpt = STATUS_OPTIONS.find((o) => o.value === patientStatus)!;
 
@@ -293,8 +586,10 @@ export default function ClientDetailPage() {
     setPetWeight(p.weight);
     setPetMicrochip(p.microchip);
     setPetColor(p.color);
+    setPetAssignedVet(p.assignedVet);
     setConditions(p.conditions);
     setAllergies(p.allergies);
+    setTreatments(p.treatments);
     setVetNotes(p.vetNotes);
     setClientNotes(p.clientNotes);
     setPatientStatus(p.status);
@@ -302,21 +597,89 @@ export default function ClientDetailPage() {
     setEditing(false);
   };
 
-  const handleAddCondition = (name: string) => {
-    setConditions([
-      ...conditions,
-      { id: Date.now(), name, dateDiagnosed: 'Mar 11, 2026', status: 'active' as const },
-    ]);
+  const handleAddCondition = async (name: string) => {
+    const pet = client.pets[selectedPetIdx];
+    const petDbId = pet?.dbId;
+    const today = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    if (petDbId) {
+      const { data } = await supabase.from('pet_conditions').insert({ pet_id: petDbId, name, status: 'active' }).select().single();
+      setConditions([...conditions, { id: data?.id || Date.now(), name, dateDiagnosed: today, status: 'active' as const, notes: '' }]);
+    } else {
+      setConditions([...conditions, { id: Date.now(), name, dateDiagnosed: today, status: 'active' as const, notes: '' }]);
+    }
     setConditionOpen(false);
     setConditionSearch('');
   };
 
-  const handleAddAllergy = () => {
+  const handleAddAllergy = async () => {
     if (allergyInput.trim()) {
-      setAllergies([...allergies, allergyInput.trim()]);
+      const pet = client.pets[selectedPetIdx];
+      const petDbId = pet?.dbId;
+      const trimmed = allergyInput.trim();
+      if (petDbId) {
+        await supabase.from('pet_allergies').insert({ pet_id: petDbId, name: trimmed });
+      }
+      setAllergies([...allergies, trimmed]);
       setAllergyInput('');
       setShowAllergyInput(false);
     }
+  };
+
+  const handleRemoveAllergy = async (allergyName: string) => {
+    const pet = client.pets[selectedPetIdx];
+    const petDbId = pet?.dbId;
+    if (petDbId) {
+      await supabase.from('pet_allergies').delete().eq('pet_id', petDbId).eq('name', allergyName);
+    }
+    setAllergies(allergies.filter(a => a !== allergyName));
+  };
+
+  const handleToggleConditionStatus = async (conditionId: any) => {
+    const cond = conditions.find(c => c.id === conditionId);
+    if (!cond) return;
+    const newStatus = cond.status === 'active' ? 'resolved' : 'active';
+    await supabase.from('pet_conditions').update({ status: newStatus }).eq('id', conditionId);
+    setConditions(conditions.map(c => c.id === conditionId ? { ...c, status: newStatus as 'active' | 'resolved' } : c));
+  };
+
+  const handleRemoveCondition = async (conditionId: any) => {
+    await supabase.from('pet_conditions').delete().eq('id', conditionId);
+    setConditions(conditions.filter(c => c.id !== conditionId));
+    if (expandedConditionId === conditionId) setExpandedConditionId(null);
+  };
+
+  const handleConditionNotesChange = (conditionId: any, notes: string) => {
+    setConditions(conditions.map(c => c.id === conditionId ? { ...c, notes } : c));
+  };
+
+  const handleConditionNotesSave = async (conditionId: any) => {
+    const cond = conditions.find(c => c.id === conditionId);
+    if (cond) {
+      await supabase.from('pet_conditions').update({ notes: cond.notes }).eq('id', conditionId);
+    }
+  };
+
+  const handleAddTreatment = async () => {
+    if (!newTreatmentName.trim()) return;
+    const pet = client.pets[selectedPetIdx];
+    const petDbId = pet?.dbId;
+    const dateFormatted = new Date(newTreatmentDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    if (petDbId) {
+      const { data } = await supabase.from('pet_treatments').insert({
+        pet_id: petDbId, name: newTreatmentName.trim(), date: newTreatmentDate, vet: newTreatmentVet, notes: newTreatmentNotes,
+      }).select().single();
+      setTreatments([{ id: data?.id || Date.now(), name: newTreatmentName.trim(), date: dateFormatted, vet: newTreatmentVet, notes: newTreatmentNotes }, ...treatments]);
+    } else {
+      setTreatments([{ id: Date.now(), name: newTreatmentName.trim(), date: dateFormatted, vet: newTreatmentVet, notes: newTreatmentNotes }, ...treatments]);
+    }
+    setNewTreatmentName(''); setNewTreatmentDate(new Date().toISOString().split('T')[0]);
+    setNewTreatmentVet(''); setNewTreatmentNotes('');
+    setTreatmentDialogOpen(false);
+  };
+
+  const handleRemoveTreatment = async (treatmentId: any) => {
+    await supabase.from('pet_treatments').delete().eq('id', treatmentId);
+    setTreatments(treatments.filter(t => t.id !== treatmentId));
   };
 
   const filteredDiseases = DISEASES_DB.filter(
@@ -324,11 +687,19 @@ export default function ClientDetailPage() {
       && !conditions.some((c) => c.name === d)
   );
 
+  if (!dbLoaded) {
+    return (
+      <div className="max-w-[1200px] mx-auto p-8 flex items-center justify-center" style={{ minHeight: '60vh' }}>
+        <Loader2 className="w-8 h-8 animate-spin text-[#2D6A4F]" />
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-[1200px] mx-auto p-8">
       {/* Back Link */}
       <Link
-        to="/clients"
+        to={clientsPath}
         className="inline-flex items-center gap-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors mb-6"
         style={{ fontSize: '14px', fontWeight: 400 }}
       >
@@ -339,10 +710,29 @@ export default function ClientDetailPage() {
       {/* ─── Header ─────────────────────────────────────── */}
       <div className="flex items-start justify-between mb-8">
         <div className="flex items-center gap-4">
-          <Avatar className="w-16 h-16">
-            <AvatarImage src={petImage} alt={petName} className="object-cover" />
-            <AvatarFallback>{petName.slice(0, 2)}</AvatarFallback>
-          </Avatar>
+          <div className="relative group cursor-pointer" onClick={() => photoInputRef.current?.click()}>
+            <Avatar className="w-16 h-16">
+              <AvatarImage src={petImage} alt={petName} className="object-cover" />
+              <AvatarFallback>{ownerName.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)}</AvatarFallback>
+            </Avatar>
+            <div
+              className="absolute inset-0 flex items-center justify-center rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+              style={{ backgroundColor: 'rgba(0,0,0,0.45)' }}
+            >
+              {uploadingPhoto ? (
+                <Loader2 className="w-5 h-5 text-white animate-spin" />
+              ) : (
+                <Camera className="w-5 h-5 text-white" />
+              )}
+            </div>
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handlePhotoUpload}
+            />
+          </div>
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-[var(--text-primary)]">{petName}</h1>
@@ -371,7 +761,12 @@ export default function ClientDetailPage() {
                     return (
                       <DropdownMenuItem
                         key={option.value}
-                        onClick={() => setPatientStatus(option.value)}
+                        onClick={async () => {
+                          setPatientStatus(option.value);
+                          if (id) {
+                            await supabase.from('clients').update({ health_status: option.value }).eq('id', id);
+                          }
+                        }}
                         className="flex items-start gap-3 cursor-pointer focus:bg-[var(--surface-elevated)] focus:text-[var(--text-primary)] data-[highlighted]:bg-[var(--surface-elevated)] data-[highlighted]:text-[var(--text-primary)]"
                       >
                         <span
@@ -406,9 +801,10 @@ export default function ClientDetailPage() {
         <div className="flex items-center gap-2">
           <Button
             variant={editing ? 'default' : 'outline'}
-            onClick={() => setEditing(!editing)}
+            onClick={() => editing ? handleSave() : setEditing(true)}
+            disabled={saving}
           >
-            {editing ? <><Save className="w-4 h-4" /> Save</> : <><Edit2 className="w-4 h-4" /> Edit</>}
+            {editing ? <><Save className="w-4 h-4" /> {saving ? 'Saving...' : 'Save'}</> : <><Edit2 className="w-4 h-4" /> Edit</>}
           </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -417,10 +813,55 @@ export default function ClientDetailPage() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem><Printer className="w-4 h-4 mr-2" /> Print Record</DropdownMenuItem>
-              <DropdownMenuItem><Archive className="w-4 h-4 mr-2" /> Archive</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => {
+                // Export full client + pet info as JSON download
+                const exportData = {
+                  owner: { name: ownerName, email: ownerEmail, phone: ownerPhone, address: ownerAddress, emergencyContact, emergencyPhone },
+                  insurance: { provider: insProvider, policyNumber: insPolicyNumber, coverageType: insCoverageType, expiryDate: insExpiry },
+                  pets: client.pets.map(p => ({ name: p.name, species: p.species, breed: p.breed, dob: p.dob, age: p.age, sex: p.sex, weight: p.weight, microchip: p.microchip, assignedVet: p.assignedVet })),
+                };
+                const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${ownerName.replace(/\s+/g, '_')}_profile.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}>
+                <FileDown className="w-4 h-4 mr-2" /> Export Full Info
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => window.print()}><Printer className="w-4 h-4 mr-2" /> Print Record</DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem className="text-[#d4183d]"><Trash2 className="w-4 h-4 mr-2" /> Delete</DropdownMenuItem>
+              <DropdownMenuItem
+                className="text-[#d4183d]"
+                onClick={async () => {
+                  const currentPet = client.pets[selectedPetIdx];
+                  if (!currentPet?.dbId) return;
+                  if (client.pets.length <= 1) {
+                    // Only 1 pet — can't delete pet alone, use "Delete Client Profile"
+                    alert('This is the only pet. Use "Delete Client Profile" to remove everything.');
+                    return;
+                  }
+                  if (!window.confirm(`Delete pet "${petName}"? This cannot be undone.`)) return;
+                  await supabase.from('pets').delete().eq('id', currentPet.dbId);
+                  // Reload
+                  window.location.reload();
+                }}
+              >
+                <PawPrint className="w-4 h-4 mr-2" /> Delete Pet
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="text-[#d4183d]"
+                onClick={async () => {
+                  if (!id) return;
+                  if (!window.confirm(`Delete the entire client profile for "${ownerName}" and all their pets? This cannot be undone.`)) return;
+                  await supabase.from('pets').delete().eq('client_id', id);
+                  await supabase.from('clients').delete().eq('id', id);
+                  navigate(clientsPath);
+                }}
+              >
+                <Trash2 className="w-4 h-4 mr-2" /> Delete Client Profile
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -435,36 +876,50 @@ export default function ClientDetailPage() {
             <TabsTrigger value="visits">Visits</TabsTrigger>
             <TabsTrigger value="notes">Notes</TabsTrigger>
           </TabsList>
-          {/* ── Pet Switcher (only when owner has multiple pets) ── */}
-          {client.pets.length > 1 && (
-            <div className="flex items-center gap-1.5">
-              {client.pets.map((pet, idx) => {
-                const isSelected = idx === selectedPetIdx;
-                return (
-                  <button
-                    key={pet.id}
-                    onClick={() => handleSelectPet(idx)}
-                    className="flex items-center gap-2 px-3 py-1.5 transition-all"
-                    style={{
-                      borderRadius: '9999px',
-                      fontSize: '13px',
-                      fontWeight: isSelected ? 700 : 500,
-                      backgroundColor: isSelected ? '#2D6A4F' : 'var(--surface-elevated)',
-                      color: isSelected ? '#fff' : 'var(--text-secondary)',
-                      border: isSelected ? 'none' : '1px solid var(--border-color)',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <Avatar className="w-5 h-5 flex-shrink-0">
-                      <AvatarImage src={pet.image} alt={pet.name} className="object-cover" />
-                      <AvatarFallback style={{ fontSize: '8px' }}>{pet.name.slice(0, 2)}</AvatarFallback>
-                    </Avatar>
-                    {pet.name}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          {/* ── Pet Switcher + Add Pet ── */}
+          <div className="flex items-center gap-1.5">
+            {client.pets.length > 1 && client.pets.map((pet, idx) => {
+              const isSelected = idx === selectedPetIdx;
+              return (
+                <button
+                  key={pet.id}
+                  onClick={() => handleSelectPet(idx)}
+                  className="flex items-center gap-2 px-3 py-1.5 transition-all"
+                  style={{
+                    borderRadius: '9999px',
+                    fontSize: '13px',
+                    fontWeight: isSelected ? 700 : 500,
+                    backgroundColor: isSelected ? '#2D6A4F' : 'var(--surface-elevated)',
+                    color: isSelected ? '#fff' : 'var(--text-secondary)',
+                    border: isSelected ? 'none' : '1px solid var(--border-color)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <Avatar className="w-5 h-5 flex-shrink-0">
+                    <AvatarImage src={pet.image} alt={pet.name} className="object-cover" />
+                    <AvatarFallback style={{ fontSize: '8px' }}>{pet.name.slice(0, 2)}</AvatarFallback>
+                  </Avatar>
+                  {pet.name}
+                </button>
+              );
+            })}
+            <button
+              onClick={() => setAddPetOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 transition-all hover:bg-[#2D6A4F10]"
+              style={{
+                borderRadius: '9999px',
+                fontSize: '13px',
+                fontWeight: 600,
+                backgroundColor: 'transparent',
+                color: 'var(--brand-green-text)',
+                border: '1px dashed var(--brand-green-text)',
+                cursor: 'pointer',
+              }}
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add Pet
+            </button>
+          </div>
         </div>
 
         {/* ═══ OVERVIEW TAB ═══ */}
@@ -483,6 +938,7 @@ export default function ClientDetailPage() {
                 <InfoRow label="Weight" value={petWeight} editing={editing} onChange={setPetWeight} />
                 <InfoRow label="Microchip #" value={petMicrochip} editing={editing} onChange={setPetMicrochip} />
                 <InfoRow label="Color" value={petColor} editing={editing} onChange={setPetColor} />
+                <InfoRow label="Assigned Doctor" value={petAssignedVet} />
               </div>
             </div>
 
@@ -524,8 +980,7 @@ export default function ClientDetailPage() {
                     )}
                   </div>
                 </div>
-                <Separator className="my-2" />
-                <div className="pt-2">
+                <div className="pt-1">
                   <p className="text-[var(--text-secondary)] mb-2" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                     Emergency Contact
                   </p>
@@ -607,17 +1062,7 @@ export default function ClientDetailPage() {
                     />
                     <CommandList>
                       <CommandEmpty>
-                        <div className="p-2">
-                          <p className="text-[var(--text-secondary)] text-sm mb-2">No condition found.</p>
-                          <Button
-                            size="sm"
-                            className="w-full"
-                            onClick={() => handleAddCondition(conditionSearch)}
-                          >
-                            <PlusCircle className="w-4 h-4" />
-                            Add "{conditionSearch}"
-                          </Button>
-                        </div>
+                        <p className="text-[var(--text-secondary)] text-sm p-2">No matching condition.</p>
                       </CommandEmpty>
                       <CommandGroup>
                         {filteredDiseases.map((disease) => (
@@ -630,6 +1075,18 @@ export default function ClientDetailPage() {
                           </CommandItem>
                         ))}
                       </CommandGroup>
+                      {conditionSearch.trim() && !filteredDiseases.includes(conditionSearch.trim()) && (
+                        <div className="p-2 border-t border-[var(--border-color)]">
+                          <Button
+                            size="sm"
+                            className="w-full"
+                            onClick={() => handleAddCondition(conditionSearch.trim())}
+                          >
+                            <PlusCircle className="w-4 h-4" />
+                            Add "{conditionSearch.trim()}"
+                          </Button>
+                        </div>
+                      )}
                     </CommandList>
                   </Command>
                 </PopoverContent>
@@ -642,18 +1099,82 @@ export default function ClientDetailPage() {
               <div className="space-y-3">
                 {conditions.map((c) => {
                   const cs = conditionStatusColors[c.status];
+                  const isExpanded = expandedConditionId === c.id;
                   return (
-                    <div key={c.id} className="flex items-center justify-between py-2 px-3 border border-[var(--border-color)]" style={{ borderRadius: '8px' }}>
-                      <div className="flex items-center gap-3">
-                        <span className="text-[var(--text-primary)]" style={{ fontSize: '16px', fontWeight: 500 }}>{c.name}</span>
-                        <span
-                          className="inline-block px-2 py-0.5"
-                          style={{ backgroundColor: cs.bg, color: cs.text, borderRadius: '9999px', fontSize: '12px', fontWeight: 600 }}
-                        >
-                          {c.status}
-                        </span>
+                    <div key={c.id} className="border border-[var(--border-color)] overflow-hidden transition-all" style={{ borderRadius: '8px' }}>
+                      <div
+                        className="flex items-center justify-between py-2 px-3 cursor-pointer hover:bg-[var(--surface-elevated)] transition-colors"
+                        onClick={() => setExpandedConditionId(isExpanded ? null : c.id)}
+                      >
+                        <div className="flex items-center gap-3">
+                          <ChevronDown
+                            className="w-4 h-4 text-[var(--text-secondary)] transition-transform"
+                            style={{ transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}
+                          />
+                          <span className="text-[var(--text-primary)]" style={{ fontSize: '16px', fontWeight: 500 }}>{c.name}</span>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleToggleConditionStatus(c.id); }}
+                            className="inline-block px-2 py-0.5 cursor-pointer hover:opacity-70 transition-opacity"
+                            style={{ backgroundColor: cs.bg, color: cs.text, borderRadius: '9999px', fontSize: '12px', fontWeight: 600, border: 'none' }}
+                          >
+                            {c.status}
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>Diagnosed: {c.dateDiagnosed}</span>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleRemoveCondition(c.id); }}
+                            className="text-[var(--text-secondary)] hover:text-[#d4183d] transition-colors"
+                            style={{ fontSize: '16px', lineHeight: 1 }}
+                          >
+                            ×
+                          </button>
+                        </div>
                       </div>
-                      <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>Diagnosed: {c.dateDiagnosed}</span>
+                      {isExpanded && (
+                        <div className="px-3 pb-3 pt-1 border-t border-[var(--border-color)]">
+                          <div className="grid grid-cols-2 gap-4 mb-3">
+                            <div>
+                              <p className="text-[var(--text-secondary)] mb-1" style={{ fontSize: '12px', fontWeight: 600 }}>STATUS</p>
+                              <div className="flex gap-2">
+                                {(['active', 'resolved'] as const).map((s) => {
+                                  const sc = conditionStatusColors[s];
+                                  const isCurrent = c.status === s;
+                                  return (
+                                    <button
+                                      key={s}
+                                      onClick={() => handleToggleConditionStatus(c.id)}
+                                      className="px-3 py-1 transition-opacity"
+                                      style={{
+                                        backgroundColor: isCurrent ? sc.bg : 'var(--surface-elevated)',
+                                        color: isCurrent ? sc.text : 'var(--text-secondary)',
+                                        borderRadius: '6px', fontSize: '13px', fontWeight: isCurrent ? 600 : 400,
+                                        border: isCurrent ? `1px solid ${sc.text}30` : '1px solid var(--border-color)',
+                                      }}
+                                    >
+                                      {s}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                            <div>
+                              <p className="text-[var(--text-secondary)] mb-1" style={{ fontSize: '12px', fontWeight: 600 }}>DATE DIAGNOSED</p>
+                              <p className="text-[var(--text-primary)]" style={{ fontSize: '14px' }}>{c.dateDiagnosed}</p>
+                            </div>
+                          </div>
+                          <div>
+                            <p className="text-[var(--text-secondary)] mb-1" style={{ fontSize: '12px', fontWeight: 600 }}>NOTES</p>
+                            <Textarea
+                              value={(c as any).notes || ''}
+                              onChange={(e) => handleConditionNotesChange(c.id, e.target.value)}
+                              onBlur={() => handleConditionNotesSave(c.id)}
+                              placeholder="Add notes about this condition..."
+                              className="min-h-16 text-sm"
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -680,6 +1201,13 @@ export default function ClientDetailPage() {
                   style={{ backgroundColor: '#d4183d15', color: '#d4183d', borderRadius: '9999px', fontSize: '14px', fontWeight: 600 }}
                 >
                   <AlertCircle className="w-3 h-3" /> {a}
+                  <button
+                    onClick={() => handleRemoveAllergy(a)}
+                    className="ml-1 hover:opacity-70"
+                    style={{ fontSize: '16px', lineHeight: 1, fontWeight: 700 }}
+                  >
+                    ×
+                  </button>
                 </span>
               ))}
               {showAllergyInput && (
@@ -708,34 +1236,48 @@ export default function ClientDetailPage() {
                 <Plus className="w-4 h-4" /> Add Treatment
               </Button>
             </div>
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead className="py-3 px-4" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>Treatment</TableHead>
-                  <TableHead className="py-3 px-4" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>Date</TableHead>
-                  <TableHead className="py-3 px-4" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>Vet</TableHead>
-                  <TableHead className="py-3 px-4" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>Notes</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {client.pets[selectedPetIdx].treatments.map((t) => (
-                  <TableRow key={t.id} className="hover:bg-[var(--surface-elevated)]">
-                    <TableCell className="py-3 px-4">
-                      <span className="text-[var(--text-primary)]" style={{ fontSize: '16px', fontWeight: 500 }}>{t.name}</span>
-                    </TableCell>
-                    <TableCell className="py-3 px-4">
-                      <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>{t.date}</span>
-                    </TableCell>
-                    <TableCell className="py-3 px-4">
-                      <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>{t.vet}</span>
-                    </TableCell>
-                    <TableCell className="py-3 px-4">
-                      <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>{t.notes}</span>
-                    </TableCell>
+            {treatments.length === 0 ? (
+              <p className="text-[var(--text-secondary)] py-4" style={{ fontSize: '14px' }}>No treatments on file.</p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="py-3 px-4" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>Treatment</TableHead>
+                    <TableHead className="py-3 px-4" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>Date</TableHead>
+                    <TableHead className="py-3 px-4" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>Vet</TableHead>
+                    <TableHead className="py-3 px-4" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>Notes</TableHead>
+                    <TableHead className="py-3 px-4 w-10" />
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {treatments.map((t) => (
+                    <TableRow key={t.id} className="hover:bg-[var(--surface-elevated)]">
+                      <TableCell className="py-3 px-4">
+                        <span className="text-[var(--text-primary)]" style={{ fontSize: '16px', fontWeight: 500 }}>{t.name}</span>
+                      </TableCell>
+                      <TableCell className="py-3 px-4">
+                        <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>{t.date}</span>
+                      </TableCell>
+                      <TableCell className="py-3 px-4">
+                        <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>{t.vet}</span>
+                      </TableCell>
+                      <TableCell className="py-3 px-4">
+                        <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>{t.notes}</span>
+                      </TableCell>
+                      <TableCell className="py-3 px-4">
+                        <button
+                          onClick={() => handleRemoveTreatment(t.id)}
+                          className="text-[var(--text-secondary)] hover:text-[#d4183d] transition-colors"
+                          style={{ fontSize: '16px', lineHeight: 1 }}
+                        >
+                          ×
+                        </button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
           </div>
 
           {/* Upcoming Appointments + Vaccination History */}
@@ -755,12 +1297,12 @@ export default function ClientDetailPage() {
                       key={appt.id}
                       className="border border-[var(--border-color)] p-4 cursor-pointer hover:border-[#2D6A4F60] transition-colors"
                       style={{ borderRadius: '8px' }}
-                      onClick={() => navigate('/appointments')}
+                      onClick={() => navigate(appointmentsPath)}
                     >
                       <div className="flex items-center gap-3">
                         <Avatar className="w-10 h-10">
                           <AvatarImage src={petImage} alt={petName} className="object-cover" />
-                          <AvatarFallback>{petName.slice(0, 2)}</AvatarFallback>
+                          <AvatarFallback>{ownerName.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)}</AvatarFallback>
                         </Avatar>
                         <div className="flex-1">
                           <div className="flex items-center gap-2 mb-0.5">
@@ -788,7 +1330,7 @@ export default function ClientDetailPage() {
               <Button
                 variant="outline"
                 className="w-full mt-4 border-[#2D6A4F] text-[var(--brand-green-text)] hover:bg-[#2D6A4F10]"
-                onClick={() => navigate('/appointments', { state: { openNewAppt: true } })}
+                onClick={() => navigate(appointmentsPath, { state: { openNewAppt: true } })}
               >
                 Schedule New Appointment
               </Button>
@@ -885,7 +1427,10 @@ export default function ClientDetailPage() {
           </div>
 
           {/* Add Treatment Dialog */}
-          <Dialog open={treatmentDialogOpen} onOpenChange={setTreatmentDialogOpen}>
+          <Dialog open={treatmentDialogOpen} onOpenChange={(open) => {
+            setTreatmentDialogOpen(open);
+            if (!open) { setNewTreatmentName(''); setNewTreatmentDate(new Date().toISOString().split('T')[0]); setNewTreatmentVet(''); setNewTreatmentNotes(''); }
+          }}>
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>Add Treatment</DialogTitle>
@@ -893,31 +1438,75 @@ export default function ClientDetailPage() {
               <div className="space-y-4 py-4">
                 <div>
                   <label className="text-[var(--text-primary)] mb-1.5 block" style={{ fontSize: '14px', fontWeight: 600 }}>Treatment Name</label>
-                  <Input placeholder="e.g. Rabies Vaccine" />
+                  <Popover open={treatmentPopoverOpen} onOpenChange={setTreatmentPopoverOpen}>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" role="combobox" className="w-full justify-between font-normal" style={{ height: '36px' }}>
+                        {newTreatmentName || <span className="text-muted-foreground">Select or type a treatment...</span>}
+                        <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                      <Command>
+                        <CommandInput placeholder="Search treatments..." value={newTreatmentName} onValueChange={setNewTreatmentName} />
+                        <CommandList>
+                          <CommandEmpty>No matching treatment</CommandEmpty>
+                          <CommandGroup>
+                            {['Rabies Vaccine', 'DHPP Vaccine', 'FVRCP Vaccine', 'FeLV Vaccine', 'Bordetella Vaccine', 'Leptospirosis Vaccine', 'Lyme Vaccine',
+                              'Dental Cleaning', 'Dental Extraction', 'Spay', 'Neuter', 'Microchip Implant',
+                              'Flea/Tick Prevention', 'Heartworm Prevention', 'Deworming',
+                              'X-Ray', 'Ultrasound', 'Blood Work', 'Urinalysis',
+                              'Wound Care', 'Sutures', 'Bandage Change', 'Ear Cleaning',
+                              'Nail Trim', 'Anal Gland Expression',
+                            ].filter(s => !treatments.some(t => t.name === s)).map(s => (
+                              <CommandItem key={s} value={s} onSelect={(val) => { setNewTreatmentName(val); setTreatmentPopoverOpen(false); }}>
+                                {s}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                          {newTreatmentName.trim() && !['Rabies Vaccine', 'DHPP Vaccine', 'FVRCP Vaccine', 'FeLV Vaccine', 'Bordetella Vaccine', 'Leptospirosis Vaccine', 'Lyme Vaccine',
+                            'Dental Cleaning', 'Dental Extraction', 'Spay', 'Neuter', 'Microchip Implant',
+                            'Flea/Tick Prevention', 'Heartworm Prevention', 'Deworming',
+                            'X-Ray', 'Ultrasound', 'Blood Work', 'Urinalysis',
+                            'Wound Care', 'Sutures', 'Bandage Change', 'Ear Cleaning',
+                            'Nail Trim', 'Anal Gland Expression',
+                          ].some(s => s.toLowerCase() === newTreatmentName.trim().toLowerCase()) && (
+                            <div className="p-1 border-t">
+                              <button
+                                className="w-full text-left px-2 py-1.5 text-sm rounded-sm hover:bg-accent flex items-center gap-2"
+                                onClick={() => { setTreatmentPopoverOpen(false); }}
+                              >
+                                <PlusCircle className="w-4 h-4" /> Add &quot;{newTreatmentName.trim()}&quot;
+                              </button>
+                            </div>
+                          )}
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
                 </div>
                 <div>
                   <label className="text-[var(--text-primary)] mb-1.5 block" style={{ fontSize: '14px', fontWeight: 600 }}>Date</label>
-                  <Input type="date" defaultValue="2026-03-11" />
+                  <Input type="date" value={newTreatmentDate} onChange={(e) => setNewTreatmentDate(e.target.value)} />
                 </div>
                 <div>
                   <label className="text-[var(--text-primary)] mb-1.5 block" style={{ fontSize: '14px', fontWeight: 600 }}>Administering Vet</label>
-                  <Select defaultValue="chen">
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                  <Select value={newTreatmentVet} onValueChange={setNewTreatmentVet}>
+                    <SelectTrigger><SelectValue placeholder="Select vet..." /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="chen">Dr. Chen</SelectItem>
-                      <SelectItem value="patel">Dr. Patel</SelectItem>
-                      <SelectItem value="garcia">Dr. Garcia</SelectItem>
+                      {vets.map((v) => (
+                        <SelectItem key={v.id} value={v.name}>{v.name}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
                 <div>
                   <label className="text-[var(--text-primary)] mb-1.5 block" style={{ fontSize: '14px', fontWeight: 600 }}>Notes</label>
-                  <Textarea placeholder="Treatment notes..." />
+                  <Textarea placeholder="Treatment notes..." value={newTreatmentNotes} onChange={(e) => setNewTreatmentNotes(e.target.value)} />
                 </div>
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setTreatmentDialogOpen(false)}>Cancel</Button>
-                <Button onClick={() => setTreatmentDialogOpen(false)}>Save Treatment</Button>
+                <Button onClick={handleAddTreatment} disabled={!newTreatmentName.trim()}>Save Treatment</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -1071,6 +1660,128 @@ export default function ClientDetailPage() {
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* ─── Add Pet Dialog ─────────────────────────────── */}
+      <Dialog open={addPetOpen} onOpenChange={setAddPetOpen}>
+        <DialogContent
+          className="p-0 gap-0 overflow-hidden [&>button]:top-[14px] [&>button]:right-[14px] [&>button]:w-8 [&>button]:h-8 [&>button]:flex [&>button]:items-center [&>button]:justify-center [&>button]:rounded-[8px] [&>button]:!bg-white/15 [&>button]:!text-white [&>button]:!opacity-100 [&>button]:hover:!bg-white/25 [&>button]:transition-colors [&>button>svg]:w-4 [&>button>svg]:h-4"
+          style={{ maxWidth: '520px', width: '95vw', maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}
+        >
+          {/* Header */}
+          <div style={{ background: '#2D6A4F', padding: '18px 24px', flexShrink: 0 }}>
+            <div className="flex items-center gap-3">
+              <div style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: 'rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <PlusCircle style={{ width: '18px', height: '18px', color: '#fff' }} />
+              </div>
+              <div>
+                <DialogTitle style={{ fontSize: '17px', fontWeight: 700, color: '#fff', lineHeight: 1.2 }}>Add New Pet</DialogTitle>
+                <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginTop: '1px' }}>Add another pet for {ownerName}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Body */}
+          <div style={{ overflowY: 'auto', padding: '22px 24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            {/* Photo */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div
+                className="relative group cursor-pointer"
+                onClick={() => addPetPhotoRef.current?.click()}
+                style={{ width: '56px', height: '56px', borderRadius: '9999px', overflow: 'hidden', flexShrink: 0, backgroundColor: 'var(--surface-elevated)', border: '2px dashed var(--border-color)' }}
+              >
+                {addPetPhotoPreview ? (
+                  <img src={addPetPhotoPreview} alt="Pet" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ) : (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Camera style={{ width: '20px', height: '20px', color: 'var(--text-secondary)' }} />
+                  </div>
+                )}
+              </div>
+              <div>
+                <button type="button" onClick={() => addPetPhotoRef.current?.click()} style={{ fontSize: '13px', fontWeight: 600, color: 'var(--brand-green-text)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                  {addPetPhotoPreview ? 'Change photo' : 'Add pet photo'}
+                </button>
+                <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>JPG, PNG up to 5MB</p>
+              </div>
+              <input ref={addPetPhotoRef} type="file" accept="image/*" className="hidden" onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) { setAddPetPhoto(file); setAddPetPhotoPreview(URL.createObjectURL(file)); }
+              }} />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              <div>
+                <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Pet Name *</p>
+                <Input placeholder="e.g. Bella" value={addPetForm.name} onChange={e => setAddPetForm(f => ({ ...f, name: e.target.value }))} />
+              </div>
+              <div>
+                <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Species *</p>
+                <Select value={addPetForm.species} onValueChange={v => setAddPetForm(f => ({ ...f, species: v }))}>
+                  <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Dog">Dog</SelectItem>
+                    <SelectItem value="Cat">Cat</SelectItem>
+                    <SelectItem value="Rabbit">Rabbit</SelectItem>
+                    <SelectItem value="Bird">Bird</SelectItem>
+                    <SelectItem value="Other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Breed</p>
+                <Input placeholder="e.g. Poodle" value={addPetForm.breed} onChange={e => setAddPetForm(f => ({ ...f, breed: e.target.value }))} />
+              </div>
+              <div>
+                <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Sex</p>
+                <Select value={addPetForm.sex} onValueChange={v => setAddPetForm(f => ({ ...f, sex: v }))}>
+                  <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Male">Male</SelectItem>
+                    <SelectItem value="Female">Female</SelectItem>
+                    <SelectItem value="Male (Neutered)">Male (Neutered)</SelectItem>
+                    <SelectItem value="Female (Spayed)">Female (Spayed)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Date of Birth</p>
+                <Input type="date" value={addPetForm.dob} onChange={e => setAddPetForm(f => ({ ...f, dob: e.target.value }))} />
+              </div>
+              <div>
+                <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Weight</p>
+                <Input placeholder="e.g. 5.5 kg" value={addPetForm.weight} onChange={e => setAddPetForm(f => ({ ...f, weight: e.target.value }))} />
+              </div>
+              <div>
+                <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Microchip #</p>
+                <Input placeholder="e.g. 900118000123456" value={addPetForm.microchip} onChange={e => setAddPetForm(f => ({ ...f, microchip: e.target.value }))} />
+              </div>
+              <div>
+                <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Assigned Doctor</p>
+                <Select value={addPetForm.assignedVetId} onValueChange={v => setAddPetForm(f => ({ ...f, assignedVetId: v }))}>
+                  <SelectTrigger><SelectValue placeholder="Select doctor..." /></SelectTrigger>
+                  <SelectContent>
+                    {vets.map(v => (
+                      <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="border-t border-[var(--border-color)]" style={{ padding: '14px 24px', display: 'flex', justifyContent: 'flex-end', gap: '10px', flexShrink: 0 }}>
+            <Button variant="outline" onClick={() => setAddPetOpen(false)} disabled={addPetSaving}>Cancel</Button>
+            <Button
+              onClick={handleAddPet}
+              disabled={addPetSaving || !addPetForm.name.trim() || !addPetForm.species}
+              style={{ backgroundColor: '#2D6A4F', color: '#fff', minWidth: '110px' }}
+            >
+              {addPetSaving ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Saving...</> : 'Add Pet'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

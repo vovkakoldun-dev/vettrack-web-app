@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
-import { Search, Plus, Mail, Phone, ChevronDown, CheckCircle2, AlertCircle, AlertTriangle, Loader2, Users } from 'lucide-react';
+import { Search, Plus, Mail, Phone, ChevronDown, CheckCircle2, AlertCircle, AlertTriangle, Loader2, Users, Trash2 } from 'lucide-react';
 import { AddClientDialog } from '../components/AddClientDialog';
 import { useClients } from '../hooks/useClients';
+import { supabase } from '../../lib/supabase';
 import type { AddClientValues } from '../hooks/useClients';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
@@ -54,26 +55,50 @@ export default function ClientsPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [addClientOpen, setAddClientOpen] = useState(false);
-  const { clients, loading, addClient } = useClients();
+  const { clients, loading, addClient, deleteClient, refetch } = useClients();
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [statusOverrides, setStatusOverrides] = useState<Record<string, Status>>({});
 
-  const handleAddClient = async (values: AddClientValues) => {
-    const { error } = await addClient(values);
-    if (!error) setAddClientOpen(false);
+  const handleAddClient = async (values: AddClientValues): Promise<string | void> => {
+    const { data, error } = await addClient(values);
+    if (!error && data) {
+      // Refetch after a short delay to pick up the pet record created by AddClientDialog
+      setTimeout(() => refetch(), 500);
+      return (data as any).id as string;
+    }
   };
 
-  // Map Supabase rows to display shape
-  const displayClients = clients.map(c => ({
-    id: c.id,
-    petImage: c.pets?.[0]?.photo_url ?? '',
-    petName: c.pets?.[0]?.name ?? '—',
-    species: c.pets?.[0]?.species ?? '—',
-    breed: c.pets?.[0]?.breed ?? '—',
-    ownerName: `${c.first_name} ${c.last_name}`,
-    ownerEmail: c.email ?? '',
-    ownerPhone: c.phone ?? '',
-    lastVisit: '—',
-    status: ((['Healthy', 'Follow-up', 'Critical'].includes(c.portal_status ?? '')) ? c.portal_status : 'Healthy') as Status,
-  }));
+  const updateStatus = async (clientId: string, newStatus: Status) => {
+    setStatusOverrides((prev) => ({ ...prev, [clientId]: newStatus }));
+    await supabase.from('clients').update({ health_status: newStatus }).eq('id', clientId);
+  };
+
+  // Map Supabase rows to display shape — one row per pet
+  const displayClients = clients.flatMap(c => {
+    const initials = `${(c.first_name?.[0] ?? '').toUpperCase()}${(c.last_name?.[0] ?? '').toUpperCase()}`;
+    const ownerName = `${c.first_name} ${c.last_name}`;
+    const ownerEmail = c.email ?? '';
+    const ownerPhone = c.phone ?? '';
+    const status = (statusOverrides[c.id] || (c as any).health_status || 'Healthy') as Status;
+
+    const pets = c.pets && c.pets.length > 0 ? c.pets : [null];
+    return pets.map((pet, idx) => ({
+      id: c.id,
+      petId: pet?.id || null,
+      petCount: c.pets?.length || 0,
+      rowKey: pet ? `${c.id}-${pet.id}` : c.id,
+      petImage: pet?.photo_url || '',
+      petName: pet?.name ?? '—',
+      species: pet?.species ?? '—',
+      breed: pet?.breed ?? '—',
+      ownerName,
+      ownerEmail,
+      ownerPhone,
+      ownerInitials: initials,
+      lastVisit: '—',
+      status,
+    }));
+  });
 
   const filtered = displayClients.filter((c) => {
     const q = search.toLowerCase();
@@ -141,19 +166,20 @@ export default function ClientsPage() {
               <TableHead className="py-3 px-4" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>
                 Status
               </TableHead>
+              <TableHead className="py-3 px-4 w-12" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading && (
               <TableRow>
-                <TableCell colSpan={7} className="py-16 text-center">
+                <TableCell colSpan={8} className="py-16 text-center">
                   <Loader2 className="w-6 h-6 mx-auto animate-spin" style={{ color: 'var(--text-secondary)' }} />
                 </TableCell>
               </TableRow>
             )}
             {!loading && filtered.length === 0 && (
               <TableRow>
-                <TableCell colSpan={7} className="py-16 text-center">
+                <TableCell colSpan={8} className="py-16 text-center">
                   <Users className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--border-color)' }} />
                   <p style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>No clients yet</p>
                   <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>Add your first client using the button above</p>
@@ -165,19 +191,34 @@ export default function ClientsPage() {
               const StatusIcon = opt.icon;
               return (
                 <TableRow
-                  key={client.id}
+                  key={client.rowKey}
                   className="hover:bg-[var(--surface-elevated)] cursor-pointer transition-colors"
-                  onClick={() => navigate(`/clients/${client.id}`)}
+                  onClick={() => navigate(`/clients/${client.id}${client.petId ? `?petId=${client.petId}` : ''}`)}
                 >
                   {/* Pet */}
                   <TableCell className="py-4 px-4">
                     <div className="flex items-center gap-3">
-                      <img
-                        src={client.petImage}
-                        alt={client.petName}
-                        className="w-10 h-10 object-cover"
-                        style={{ borderRadius: '9999px' }}
-                      />
+                      {client.petImage ? (
+                        <img
+                          src={client.petImage}
+                          alt={client.petName}
+                          className="w-10 h-10 object-cover flex-shrink-0"
+                          style={{ borderRadius: '9999px' }}
+                        />
+                      ) : (
+                        <div
+                          className="w-10 h-10 flex-shrink-0 flex items-center justify-center"
+                          style={{
+                            borderRadius: '9999px',
+                            backgroundColor: 'var(--brand-green-bg, #74C69D20)',
+                            color: 'var(--brand-green-text, #2D6A4F)',
+                            fontSize: '14px',
+                            fontWeight: 700,
+                          }}
+                        >
+                          {client.ownerInitials}
+                        </div>
+                      )}
                       <span className="text-[var(--text-primary)]" style={{ fontSize: '16px', fontWeight: 600 }}>
                         {client.petName}
                       </span>
@@ -266,7 +307,7 @@ export default function ClientsPage() {
                           return (
                             <DropdownMenuItem
                               key={option.value}
-                              onClick={() => {}}
+                              onClick={() => updateStatus(client.id, option.value)}
                               className="flex items-start gap-3 cursor-pointer focus:bg-[var(--surface-elevated)] focus:text-[var(--text-primary)] data-[highlighted]:bg-[var(--surface-elevated)] data-[highlighted]:text-[var(--text-primary)]"
                               style={{ opacity: isCurrent ? 1 : undefined }}
                             >
@@ -293,6 +334,48 @@ export default function ClientsPage() {
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </TableCell>
+
+                  {/* Delete */}
+                  <TableCell className="py-4 px-4" onClick={(e) => e.stopPropagation()}>
+                    {deletingId === client.rowKey ? (
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          style={{ fontSize: '12px', padding: '2px 8px' }}
+                          onClick={async () => {
+                            if (client.petCount <= 1 || !client.petId) {
+                              // Only 1 pet (or no pet) — delete the whole client profile
+                              await deleteClient(client.id);
+                            } else {
+                              // Multiple pets — only delete this pet
+                              await supabase.from('pets').delete().eq('id', client.petId);
+                              refetch();
+                            }
+                            setDeletingId(null);
+                          }}
+                        >
+                          Confirm
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          style={{ fontSize: '12px', padding: '2px 8px' }}
+                          onClick={() => setDeletingId(null)}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setDeletingId(client.rowKey)}
+                        className="p-1.5 rounded-md hover:bg-red-50 transition-colors"
+                        title="Delete client"
+                      >
+                        <Trash2 className="w-4 h-4 text-[var(--text-secondary)] hover:text-red-500" />
+                      </button>
+                    )}
+                  </TableCell>
                 </TableRow>
               );
             })}
@@ -302,7 +385,7 @@ export default function ClientsPage() {
         {/* Footer */}
         <div className="px-6 py-4 border-t border-[var(--border-color)] flex items-center justify-between">
           <p className="text-[var(--text-secondary)]" style={{ fontSize: '14px', fontWeight: 400 }}>
-            Showing {filtered.length} of {clients.length} clients
+            Showing {filtered.length} of {displayClients.length} entries ({clients.length} clients)
           </p>
         </div>
       </div>

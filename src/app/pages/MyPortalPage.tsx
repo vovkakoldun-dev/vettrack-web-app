@@ -592,6 +592,36 @@ export default function MyPortalPage() {
   const navigate = useNavigate();
   const [selectedDate, setSelectedDate] = useState<Date>(new Date(2026, 2, 11));
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>(INITIAL_BLOCKS);
+
+  // Real clients from Supabase
+  const [realPatients, setRealPatients] = useState<any[]>([]);
+  const [addClientOpen, setAddClientOpen] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from('clients')
+        .select('id, first_name, last_name, portal_status, pets(id, name, species, breed, photo_url)')
+        .order('created_at', { ascending: false });
+      if (data) {
+        const rows = data.flatMap((c: any) => {
+          const pets = c.pets && c.pets.length > 0 ? c.pets : [null];
+          return pets.map((pet: any) => ({
+            clientId: c.id,
+            petId: pet?.id || null,
+            petImage: pet?.photo_url || '',
+            petName: pet?.name ?? '—',
+            ownerName: `${c.first_name} ${c.last_name}`,
+            species: pet?.species ?? '—',
+            breed: pet?.breed ?? '—',
+            lastVisit: '—',
+            status: (['Healthy', 'Follow-up', 'Critical'].includes(c.portal_status ?? '') ? c.portal_status : 'Healthy') as 'Healthy' | 'Follow-up' | 'Critical',
+          }));
+        });
+        setRealPatients(rows);
+      }
+    })();
+  }, []);
   const [blockDialogOpen, setBlockDialogOpen] = useState(false);
   const [blockType, setBlockType] = useState<BlockType>('Lunch Break');
   const [blockDateFrom, setBlockDateFrom] = useState('2026-03-11');
@@ -1005,9 +1035,19 @@ export default function MyPortalPage() {
         <div className="bg-[var(--surface-white)] border border-[var(--border-color)]" style={{ borderRadius: '12px' }}>
           <div className="p-5 border-b border-[var(--border-color)] flex items-center justify-between">
             <h3 className="text-[var(--text-primary)]" style={{ fontSize: '18px', fontWeight: 600 }}>My Patients</h3>
-            <Link to="/my-portal/patients" className="text-[var(--text-secondary)] flex items-center gap-1 hover:opacity-75 transition-opacity" style={{ fontSize: '12px', fontWeight: 600 }}>
-              View all <ChevronRight className="w-[13px] h-[13px]" />
-            </Link>
+            <div className="flex items-center gap-3">
+              <Button
+                size="sm"
+                onClick={() => navigate('/clients')}
+                variant="outline"
+                style={{ fontSize: '12px' }}
+              >
+                <Plus className="w-3.5 h-3.5" /> Add Client
+              </Button>
+              <Link to="/clients" className="text-[var(--text-secondary)] flex items-center gap-1 hover:opacity-75 transition-opacity" style={{ fontSize: '12px', fontWeight: 600 }}>
+                View all <ChevronRight className="w-[13px] h-[13px]" />
+              </Link>
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -1021,13 +1061,27 @@ export default function MyPortalPage() {
                 </tr>
               </thead>
               <tbody>
-                {MY_PATIENTS.map((p) => {
+                {(realPatients.length > 0 ? realPatients : MY_PATIENTS.map(p => ({ ...p, clientId: null, petId: null }))).map((p, idx) => {
                   const s = patientStatusStyles[p.status] || patientStatusStyles.Healthy;
                   return (
-                    <tr key={p.id} className="border-b border-[var(--border-color)] last:border-0 hover:bg-[var(--surface-elevated)] transition-colors cursor-pointer">
+                    <tr
+                      key={p.petId || p.clientId || idx}
+                      className="border-b border-[var(--border-color)] last:border-0 hover:bg-[var(--surface-elevated)] transition-colors cursor-pointer"
+                      onClick={() => {
+                        if (p.clientId) {
+                          navigate(`/clients/${p.clientId}${p.petId ? `?petId=${p.petId}` : ''}`);
+                        }
+                      }}
+                    >
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-3">
-                          <img src={p.petImage} alt={p.petName} className="w-8 h-8 object-cover" style={{ borderRadius: '9999px' }} />
+                          {p.petImage ? (
+                            <img src={p.petImage} alt={p.petName} className="w-8 h-8 object-cover" style={{ borderRadius: '9999px' }} />
+                          ) : (
+                            <div className="w-8 h-8 flex items-center justify-center bg-[var(--brand-green-bg)] text-[var(--brand-green-text)]" style={{ borderRadius: '9999px', fontSize: '11px', fontWeight: 700 }}>
+                              {(p.petName || '?')[0].toUpperCase()}
+                            </div>
+                          )}
                           <div>
                             <p className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 600 }}>{p.petName}</p>
                             <p className="text-[var(--text-secondary)]" style={{ fontSize: '11px' }}>{p.breed}</p>
@@ -1036,7 +1090,7 @@ export default function MyPortalPage() {
                       </td>
                       <td className="py-3 px-4"><span className="text-[var(--text-primary)]" style={{ fontSize: '14px' }}>{p.ownerName}</span></td>
                       <td className="py-3 px-4"><span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>{p.species}</span></td>
-                      <td className="py-3 px-4"><span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>{p.lastVisit}</span></td>
+                      <td className="py-3 px-4"><span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>{p.lastVisit || '—'}</span></td>
                       <td className="py-3 px-4">
                         <span className="inline-block px-2.5 py-1" style={{ backgroundColor: s.bg, color: s.text, borderRadius: '9999px', fontSize: '12px', fontWeight: 600 }}>{p.status}</span>
                       </td>

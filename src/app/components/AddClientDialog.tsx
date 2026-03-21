@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import { Users, Loader2 } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { Users, Loader2, Camera } from 'lucide-react';
 import type { AddClientValues } from '../hooks/useClients';
+import { supabase } from '../../lib/supabase';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from './ui/dialog';
@@ -13,23 +14,48 @@ import {
 interface AddClientDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSave?: (values: AddClientValues) => Promise<void>;
+  onSave?: (values: AddClientValues) => Promise<string | void>;
 }
 
 const EMPTY = {
   petName: '', species: '', breed: '', sex: '', dob: '', weight: '',
-  ownerName: '', email: '', phone: '', address: '',
+  ownerName: '', email: '', phone: '', address: '', assignedVetId: '',
 };
 
 export function AddClientDialog({ open, onOpenChange, onSave }: AddClientDialogProps) {
   const [form, setForm] = useState(EMPTY);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+
+  // Fetch vets for doctor assignment
+  const [vets, setVets] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from('staff')
+        .select('id, first_name, last_name, role')
+        .in('role', ['veterinarian', 'senior_veterinarian', 'specialist'])
+        .eq('status', 'Active')
+        .order('first_name');
+      if (data) setVets(data.map((s: any) => ({ id: s.id, name: `Dr. ${s.first_name} ${s.last_name}` })));
+    })();
+  }, []);
 
   const set = (field: keyof typeof EMPTY) => (val: string) =>
     setForm(prev => ({ ...prev, [field]: val }));
 
-  const handleClose = () => { setForm(EMPTY); setError(null); onOpenChange(false); };
+  const handleClose = () => { setForm(EMPTY); setError(null); setPhotoFile(null); setPhotoPreview(null); onOpenChange(false); };
+
+  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setPhotoFile(file);
+      setPhotoPreview(URL.createObjectURL(file));
+    }
+  };
 
   const handleSave = async () => {
     if (!form.ownerName.trim()) { setError('Owner name is required'); return; }
@@ -45,10 +71,43 @@ export function AddClientDialog({ open, onOpenChange, onSave }: AddClientDialogP
       email: form.email || undefined,
       phone: form.phone || undefined,
       address: form.address || undefined,
-      notes: form.petName ? `Pet: ${form.petName}${form.species ? ` (${form.species}${form.breed ? ', ' + form.breed : ''})` : ''}` : undefined,
     };
     try {
-      if (onSave) await onSave(values);
+      let clientId: string | undefined;
+      if (onSave) {
+        const result = await onSave(values);
+        if (typeof result === 'string') clientId = result;
+      }
+
+      // If pet info was filled, create the pet linked to the new client
+      if (form.petName.trim() && form.species && clientId) {
+        const weightNum = form.weight ? parseFloat(form.weight) : undefined;
+          // Upload photo if selected
+          let photoUrl: string | null = null;
+          if (photoFile) {
+            const ext = photoFile.name.split('.').pop() || 'jpg';
+            const path = `${clientId}/${Date.now()}.${ext}`;
+            const { error: uploadErr } = await supabase.storage.from('pet-photos').upload(path, photoFile, { upsert: true });
+            if (!uploadErr) {
+              const { data: urlData } = supabase.storage.from('pet-photos').getPublicUrl(path);
+              photoUrl = urlData.publicUrl;
+            }
+          }
+          const { error: petErr } = await supabase.from('pets').insert([{
+            client_id: clientId,
+            name: form.petName.trim(),
+            species: form.species,
+            breed: form.breed || null,
+            sex: form.sex || 'Unknown',
+            date_of_birth: form.dob || null,
+            weight_kg: (weightNum && !isNaN(weightNum)) ? weightNum : null,
+            photo_url: photoUrl,
+            is_active: true,
+            assigned_vet_id: form.assignedVetId || null,
+          }]);
+          if (petErr) console.error('[AddClientDialog] pet insert error:', petErr);
+      }
+
       handleClose();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to save');
@@ -81,6 +140,34 @@ export function AddClientDialog({ open, onOpenChange, onSave }: AddClientDialogP
           {/* Pet Information */}
           <div>
             <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '12px' }}>Pet Information</p>
+            {/* Pet Photo */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+              <div
+                className="relative group cursor-pointer"
+                onClick={() => photoInputRef.current?.click()}
+                style={{ width: '56px', height: '56px', borderRadius: '9999px', overflow: 'hidden', flexShrink: 0, backgroundColor: 'var(--surface-elevated)', border: '2px dashed var(--border-color)' }}
+              >
+                {photoPreview ? (
+                  <img src={photoPreview} alt="Pet" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ) : (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Camera style={{ width: '20px', height: '20px', color: 'var(--text-secondary)' }} />
+                  </div>
+                )}
+                {photoPreview && (
+                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" style={{ backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: '9999px' }}>
+                    <Camera style={{ width: '18px', height: '18px', color: '#fff' }} />
+                  </div>
+                )}
+              </div>
+              <div>
+                <button type="button" onClick={() => photoInputRef.current?.click()} style={{ fontSize: '13px', fontWeight: 600, color: 'var(--brand-green-text)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                  {photoPreview ? 'Change photo' : 'Add pet photo'}
+                </button>
+                <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>JPG, PNG up to 5MB</p>
+              </div>
+              <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoSelect} />
+            </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
               <div>
                 <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Pet Name *</p>
@@ -110,8 +197,8 @@ export function AddClientDialog({ open, onOpenChange, onSave }: AddClientDialogP
                   <SelectContent>
                     <SelectItem value="Male">Male</SelectItem>
                     <SelectItem value="Female">Female</SelectItem>
-                    <SelectItem value="Male (neutered)">Male (neutered)</SelectItem>
-                    <SelectItem value="Female (spayed)">Female (spayed)</SelectItem>
+                    <SelectItem value="Male (Neutered)">Male (Neutered)</SelectItem>
+                    <SelectItem value="Female (Spayed)">Female (Spayed)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -122,6 +209,17 @@ export function AddClientDialog({ open, onOpenChange, onSave }: AddClientDialogP
               <div>
                 <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Weight</p>
                 <Input placeholder="e.g. 12.5 kg" value={form.weight} onChange={e => set('weight')(e.target.value)} />
+              </div>
+              <div>
+                <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Assigned Doctor</p>
+                <Select value={form.assignedVetId} onValueChange={set('assignedVetId')}>
+                  <SelectTrigger><SelectValue placeholder="Select doctor..." /></SelectTrigger>
+                  <SelectContent>
+                    {vets.map(v => (
+                      <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </div>

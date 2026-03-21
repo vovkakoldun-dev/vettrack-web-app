@@ -244,6 +244,7 @@ function AdminApp() {
           <Route path="/payments" element={<AdminPaymentsPage />} />
           <Route path="/communications" element={<AdminCommunicationsPage />} />
           <Route path="/clients" element={<AdminClientsPage />} />
+          <Route path="/clients/:id" element={<ClientDetailPage />} />
           <Route path="/records" element={<RecordsPage />} />
           <Route path="/records/:id" element={<RecordDetailPage />} />
           <Route path="/my-portal" element={<AdminMyPortalPage />} />

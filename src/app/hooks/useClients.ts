@@ -21,6 +21,7 @@ export interface ClientRow {
   zip: string | null
   notes: string | null
   portal_status: string | null
+  health_status: string | null
   created_at: string
   pets?: ClientPet[]
 }
@@ -47,7 +48,7 @@ export function useClients() {
     setError(null)
     const { data, error: err } = await supabase
       .from('clients')
-      .select('id, first_name, last_name, email, phone, address, city, state, zip, notes, portal_status, created_at, pets(id, name, species, breed, photo_url)')
+      .select('id, first_name, last_name, email, phone, address, city, state, zip, notes, portal_status, health_status, created_at, pets(id, name, species, breed, photo_url)')
       .order('created_at', { ascending: false })
     if (err) {
       setError(err.message)
@@ -65,7 +66,7 @@ export function useClients() {
     const { data, error: err } = await supabase
       .from('clients')
       .insert([{ organization_id: '00000000-0000-0000-0000-000000000001', ...values }])
-      .select('id, first_name, last_name, email, phone, address, city, state, zip, notes, portal_status, created_at, pets(id, name, species, breed, photo_url)')
+      .select('id, first_name, last_name, email, phone, address, city, state, zip, notes, portal_status, health_status, created_at, pets(id, name, species, breed, photo_url)')
       .single()
     if (!err && data) {
       setClients(prev => [data as ClientRow, ...prev])
@@ -87,6 +88,9 @@ export function useClients() {
   }, [])
 
   const deleteClient = useCallback(async (id: string) => {
+    // Delete associated pets first (cascade)
+    await supabase.from('pets').delete().eq('client_id', id)
+    // Then delete the client
     const { error: err } = await supabase.from('clients').delete().eq('id', id)
     if (!err) {
       setClients(prev => prev.filter(c => c.id !== id))

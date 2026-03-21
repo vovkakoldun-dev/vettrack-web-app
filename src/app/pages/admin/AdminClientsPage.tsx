@@ -1,7 +1,9 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router';
-import { Search, Plus, Mail, Phone, ChevronDown, CheckCircle2, AlertCircle, AlertTriangle } from 'lucide-react';
+import { Search, Plus, Mail, Phone, ChevronDown, CheckCircle2, AlertCircle, AlertTriangle, Trash2 } from 'lucide-react';
+import { supabase } from '../../../lib/supabase';
 import { AddClientDialog } from '../../components/AddClientDialog';
+import type { AddClientValues } from '../../hooks/useClients';
 import { Input } from '../../components/ui/input';
 import { Button } from '../../components/ui/button';
 import { useClients } from '../../hooks/useClients';
@@ -78,37 +80,50 @@ const STATUS_OPTIONS: {
 export default function AdminClientsPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
-  const { clients: supabaseClients, loading } = useClients();
+  const { clients: supabaseClients, loading, addClient, deleteClient, refetch } = useClients();
   const [addClientOpen, setAddClientOpen] = useState(false);
   const [statusOverrides, setStatusOverrides] = useState<Record<string, Status>>({});
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const handleAddClient = async (values: AddClientValues): Promise<string | void> => {
+    const { data, error } = await addClient(values);
+    if (!error && data) {
+      setTimeout(() => refetch(), 500);
+      return (data as any).id as string;
+    }
+  };
 
   // Map Supabase ClientRow[] → Client[] for the existing UI
   const clientList: Client[] = useMemo(() =>
     supabaseClients.map((c, idx) => {
       const pet = c.pets?.[0];
+      const initials = `${(c.first_name?.[0] ?? '').toUpperCase()}${(c.last_name?.[0] ?? '').toUpperCase()}`;
       return {
         id: idx + 1,
-        petImage: pet?.photo_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(pet?.name || 'Pet')}&background=74C69D&color=fff`,
+        petImage: pet?.photo_url || '',
         petName: pet?.name || '—',
         species: pet?.species || '—',
         breed: pet?.breed || '—',
         ownerName: `${c.first_name} ${c.last_name}`,
+        ownerInitials: initials,
         ownerEmail: c.email || '—',
         ownerPhone: c.phone || '—',
         lastVisit: new Date(c.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
         nextAppointment: '—',
         balance: 0,
-        status: (statusOverrides[c.id] || 'Healthy') as Status,
+        status: (statusOverrides[c.id] || c.health_status || 'Healthy') as Status,
         _supaId: c.id,
       };
     }),
     [supabaseClients, statusOverrides],
   ) as (Client & { _supaId: string })[];
 
-  const updateStatus = (id: number, newStatus: Status) => {
+  const updateStatus = async (id: number, newStatus: Status) => {
     const entry = clientList.find((c) => c.id === id);
     if (entry) {
-      setStatusOverrides((prev) => ({ ...prev, [(entry as Client & { _supaId: string })._supaId]: newStatus }));
+      const supaId = (entry as Client & { _supaId: string })._supaId;
+      setStatusOverrides((prev) => ({ ...prev, [supaId]: newStatus }));
+      await supabase.from('clients').update({ health_status: newStatus }).eq('id', supaId);
     }
   };
 
@@ -180,6 +195,7 @@ export default function AdminClientsPage() {
               <TableHead className="py-3 px-4" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>
                 Status
               </TableHead>
+              <TableHead className="py-3 px-4 w-12" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -190,16 +206,32 @@ export default function AdminClientsPage() {
                 <TableRow
                   key={client.id}
                   className="hover:bg-[var(--surface-elevated)] cursor-pointer transition-colors"
+                  onClick={() => navigate(`/admin/clients/${(client as Client & { _supaId: string })._supaId}`)}
                 >
                   {/* Pet */}
                   <TableCell className="py-4 px-4">
                     <div className="flex items-center gap-3">
-                      <img
-                        src={client.petImage}
-                        alt={client.petName}
-                        className="w-10 h-10 object-cover flex-shrink-0"
-                        style={{ borderRadius: '9999px' }}
-                      />
+                      {client.petImage ? (
+                        <img
+                          src={client.petImage}
+                          alt={client.petName}
+                          className="w-10 h-10 object-cover flex-shrink-0"
+                          style={{ borderRadius: '9999px' }}
+                        />
+                      ) : (
+                        <div
+                          className="w-10 h-10 flex-shrink-0 flex items-center justify-center"
+                          style={{
+                            borderRadius: '9999px',
+                            backgroundColor: 'var(--brand-green-bg, #74C69D20)',
+                            color: 'var(--brand-green-text, #2D6A4F)',
+                            fontSize: '14px',
+                            fontWeight: 700,
+                          }}
+                        >
+                          {(client as any).ownerInitials}
+                        </div>
+                      )}
                       <span className="text-[var(--text-primary)]" style={{ fontSize: '15px', fontWeight: 600 }}>
                         {client.petName}
                       </span>
@@ -314,6 +346,41 @@ export default function AdminClientsPage() {
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </TableCell>
+
+                  {/* Delete */}
+                  <TableCell className="py-4 px-4" onClick={(e) => e.stopPropagation()}>
+                    {deletingId === (client as Client & { _supaId: string })._supaId ? (
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          style={{ fontSize: '12px', padding: '2px 8px' }}
+                          onClick={async () => {
+                            await deleteClient((client as Client & { _supaId: string })._supaId);
+                            setDeletingId(null);
+                          }}
+                        >
+                          Confirm
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          style={{ fontSize: '12px', padding: '2px 8px' }}
+                          onClick={() => setDeletingId(null)}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setDeletingId((client as Client & { _supaId: string })._supaId)}
+                        className="p-1.5 rounded-md hover:bg-red-50 transition-colors"
+                        title="Delete client"
+                      >
+                        <Trash2 className="w-4 h-4 text-[var(--text-secondary)] hover:text-red-500" />
+                      </button>
+                    )}
+                  </TableCell>
                 </TableRow>
               );
             })}
@@ -330,7 +397,7 @@ export default function AdminClientsPage() {
       </div>
     </div>
 
-      <AddClientDialog open={addClientOpen} onOpenChange={setAddClientOpen} />
+      <AddClientDialog open={addClientOpen} onOpenChange={setAddClientOpen} onSave={handleAddClient} />
     </>
   );
 }
