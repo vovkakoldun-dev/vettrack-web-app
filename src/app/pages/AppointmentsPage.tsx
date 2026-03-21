@@ -184,7 +184,7 @@ export default function AppointmentsPage() {
   const [newApptTime, setNewApptTime] = useState('09:00');
   const today = new Date().toISOString().split('T')[0];
   const [newApptDate, setNewApptDate] = useState(today);
-  const { appointments: dbAppts, loading: apptLoading, updateStatus: updateApptStatus, addAppointment } = useAppointments();
+  const { appointments: dbAppts, loading: apptLoading, updateStatus: updateApptStatus, addAppointment, deleteAppointment } = useAppointments();
   const { clients: allClients } = useClients();
   const { pets: allPets } = usePets();
   const appointments = dbAppts.map(adaptAppt);
@@ -419,6 +419,13 @@ export default function AppointmentsPage() {
   const handleCancelAppt = () => {
     if (!selectedAppt) return;
     updateApptStatus(selectedAppt.id, 'Cancelled');
+    setDetailOpen(false);
+  };
+
+  const handleDeleteAppt = async () => {
+    if (!selectedAppt) return;
+    if (!confirm('Are you sure you want to permanently delete this appointment? This cannot be undone.')) return;
+    await deleteAppointment(selectedAppt.id);
     setDetailOpen(false);
   };
 
@@ -1881,11 +1888,16 @@ export default function AppointmentsPage() {
                       )}
                     </div>
                     <div className="flex items-center justify-between gap-2 px-6 py-4 border-t border-[var(--border-color)] flex-shrink-0">
-                      {!isDone && (
-                        <Button variant="outline" size="sm" onClick={handleCancelAppt} className="text-[#d4183d] border-[#d4183d] hover:bg-[#d4183d10] hover:text-[#d4183d]">
-                          <Trash2 className="w-3.5 h-3.5 mr-1.5" />Cancel Visit
+                      <div className="flex gap-2">
+                        {!isDone && (
+                          <Button variant="outline" size="sm" onClick={handleCancelAppt} className="text-[#d4183d] border-[#d4183d] hover:bg-[#d4183d10] hover:text-[#d4183d]">
+                            <XCircle className="w-3.5 h-3.5 mr-1.5" />Cancel
+                          </Button>
+                        )}
+                        <Button variant="outline" size="sm" onClick={handleDeleteAppt} className="text-[#d4183d] border-[#d4183d] hover:bg-[#d4183d10] hover:text-[#d4183d]">
+                          <Trash2 className="w-3.5 h-3.5 mr-1.5" />Delete
                         </Button>
-                      )}
+                      </div>
                       <div className="flex gap-2 ml-auto">
                         <Button variant="outline" size="sm" onClick={() => setDetailMode('edit')}><Pencil className="w-3.5 h-3.5 mr-1.5" />Edit</Button>
                         {canCheckIn && (
