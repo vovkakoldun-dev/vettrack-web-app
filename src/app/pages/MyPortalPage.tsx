@@ -601,8 +601,9 @@ function GlowStatCard({
 export default function MyPortalPage() {
   const navigate = useNavigate();
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
-  const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>(INITIAL_BLOCKS);
+  const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
   const [blocksLoaded, setBlocksLoaded] = useState(false);
+  const [dataLoaded, setDataLoaded] = useState(false);
 
   // ── Vet profile from Supabase ──
   const [vetProfile, setVetProfile] = useState(VET_PROFILE);
@@ -714,6 +715,7 @@ export default function MyPortalPage() {
         }
         setBlocksLoaded(true);
       }
+      setDataLoaded(true);
     })();
   }, []);
   const [blockDialogOpen, setBlockDialogOpen] = useState(false);
@@ -727,7 +729,7 @@ export default function MyPortalPage() {
   const [nextBlockId, setNextBlockId] = useState(10);
 
   // Day data
-  const activeAppts = realAppointments.length > 0 ? realAppointments : MY_APPOINTMENTS;
+  const activeAppts = realAppointments;
   const dayAppts = activeAppts.filter((a) => isSameDay(a.date, selectedDate));
   const dayBlocks = timeBlocks.filter((b) => isSameDay(b.date, selectedDate));
   // Helper: convert 12h time to minutes since midnight
@@ -1332,7 +1334,7 @@ export default function MyPortalPage() {
                 </tr>
               </thead>
               <tbody>
-                {(realPatients.length > 0 ? realPatients : MY_PATIENTS.map(p => ({ ...p, clientId: null, petId: null }))).map((p, idx) => {
+                {realPatients.map((p, idx) => {
                   const s = patientStatusStyles[p.status] || patientStatusStyles.Healthy;
                   return (
                     <tr
