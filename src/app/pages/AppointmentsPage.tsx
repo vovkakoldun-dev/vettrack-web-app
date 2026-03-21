@@ -179,6 +179,7 @@ export default function AppointmentsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'schedule' | 'month'>('list');
+  const [showAllDates, setShowAllDates] = useState(false);
   const [monthViewDate, setMonthViewDate] = useState<Date>(new Date());
   const [newApptTime, setNewApptTime] = useState('09:00');
   const today = new Date().toISOString().split('T')[0];
@@ -254,8 +255,10 @@ export default function AppointmentsPage() {
 
   const datesWithAppointments = getDatesWithAppointments(appointments);
 
-  // Filter appointments for selected date
-  const dayAppointments = appointments.filter((a) => isSameDay(a.date, selectedDate));
+  // Filter appointments for selected date (or show all)
+  const dayAppointments = showAllDates
+    ? [...appointments].sort((a, b) => a.date.localeCompare(b.date) || a.timeStart.localeCompare(b.timeStart))
+    : appointments.filter((a) => isSameDay(a.date, selectedDate));
 
   // Apply status filter
   const filteredByStatus = dayAppointments.filter((a) => {
@@ -322,11 +325,11 @@ export default function AppointmentsPage() {
     next.setDate(next.getDate() + 1);
     setSelectedDate(next);
   };
-  const goToToday = () => setSelectedDate(new Date(2026, 2, 11));
+  const goToToday = () => setSelectedDate(new Date());
 
   const goToPrevMonth = () => setMonthViewDate((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
   const goToNextMonth = () => setMonthViewDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
-  const goToCurrentMonth = () => setMonthViewDate(new Date(2026, 2, 1));
+  const goToCurrentMonth = () => { const n = new Date(); setMonthViewDate(new Date(n.getFullYear(), n.getMonth(), 1)); };
 
   // Month calendar computed values
   const mvYear = monthViewDate.getFullYear();
@@ -341,7 +344,7 @@ export default function AppointmentsPage() {
     (acc[appt.date] = acc[appt.date] || []).push(appt);
     return acc;
   }, {});
-  const isCurrentMonthView = monthViewDate.getMonth() === new Date(2026, 2, 1).getMonth() && monthViewDate.getFullYear() === new Date(2026, 2, 1).getFullYear();
+  const isCurrentMonthView = monthViewDate.getMonth() === new Date().getMonth() && monthViewDate.getFullYear() === new Date().getFullYear();
   const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
   const openNewApptDialog = () => {
@@ -524,18 +527,26 @@ export default function AppointmentsPage() {
                   </>
                 ) : (
                   <>
-                    <button onClick={goToPrevDay} className="p-1 hover:bg-[var(--surface-elevated)] transition-colors" style={{ borderRadius: '6px' }}>
-                      <ChevronLeft className="w-5 h-5 text-[var(--text-secondary)]" />
-                    </button>
+                    {!showAllDates && (
+                      <button onClick={goToPrevDay} className="p-1 hover:bg-[var(--surface-elevated)] transition-colors" style={{ borderRadius: '6px' }}>
+                        <ChevronLeft className="w-5 h-5 text-[var(--text-secondary)]" />
+                      </button>
+                    )}
                     <CalendarIcon className="w-5 h-5 text-[var(--brand-green-text)]" />
                     <h2 className="text-[var(--text-primary)]" style={{ fontSize: '18px', fontWeight: 600 }}>
-                      {isToday(selectedDate) ? 'Today, ' : ''}
-                      {formatDate(selectedDate)}
+                      {showAllDates ? 'All Appointments' : (
+                        <>
+                          {isToday(selectedDate) ? 'Today, ' : ''}
+                          {formatDate(selectedDate)}
+                        </>
+                      )}
                     </h2>
-                    <button onClick={goToNextDay} className="p-1 hover:bg-[var(--surface-elevated)] transition-colors" style={{ borderRadius: '6px' }}>
-                      <ChevronRight className="w-5 h-5 text-[var(--text-secondary)]" />
-                    </button>
-                    {!isToday(selectedDate) && (
+                    {!showAllDates && (
+                      <button onClick={goToNextDay} className="p-1 hover:bg-[var(--surface-elevated)] transition-colors" style={{ borderRadius: '6px' }}>
+                        <ChevronRight className="w-5 h-5 text-[var(--text-secondary)]" />
+                      </button>
+                    )}
+                    {!isToday(selectedDate) && !showAllDates && (
                       <button
                         onClick={goToToday}
                         className="ml-2 px-3 py-1 text-[var(--brand-green-text)] border border-[#2D6A4F] hover:bg-[#2D6A4F10] transition-colors"
@@ -544,13 +555,31 @@ export default function AppointmentsPage() {
                         Today
                       </button>
                     )}
+                    <button
+                      onClick={() => {
+                        const next = !showAllDates;
+                        setShowAllDates(next);
+                        if (next && viewMode !== 'list') setViewMode('list');
+                      }}
+                      className="ml-2 px-3 py-1 transition-colors"
+                      style={{
+                        borderRadius: '6px',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        backgroundColor: showAllDates ? 'var(--brand-green-text)' : 'transparent',
+                        color: showAllDates ? '#fff' : 'var(--brand-green-text)',
+                        border: showAllDates ? '1px solid var(--brand-green-text)' : '1px solid #2D6A4F',
+                      }}
+                    >
+                      {showAllDates ? '← Back to Day' : 'View All'}
+                    </button>
                   </>
                 )}
               </div>
               <div className="flex items-center gap-3">
                 {viewMode !== 'month' && (
                   <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>
-                    {totalToday} appointment{totalToday !== 1 ? 's' : ''}
+                    {totalToday} appointment{totalToday !== 1 ? 's' : ''}{showAllDates ? ' total' : ''}
                   </span>
                 )}
                 <div className="flex gap-1 p-1 bg-[var(--surface-elevated)]" style={{ borderRadius: '8px' }}>
@@ -644,19 +673,29 @@ export default function AppointmentsPage() {
                 </p>
                 <p className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>
                   {dayAppointments.length === 0
-                    ? 'No appointments scheduled for this date.'
+                    ? (showAllDates ? 'No appointments found.' : 'No appointments scheduled for this date.')
                     : 'Try adjusting your filters or search.'}
                 </p>
               </div>
             ) : (
               <div className="space-y-3">
-                {filteredAppointments.map((appt) => {
+                {filteredAppointments.map((appt, idx) => {
                   const s = statusStyles[appt.status];
                   const StatusIcon = s.icon;
                   const serviceColor = serviceColors[appt.service] || serviceColors.Other;
+                  // Show date header when in "All" mode and date changes
+                  const showDateHeader = showAllDates && (idx === 0 || filteredAppointments[idx - 1].date !== appt.date);
+                  const dateLabel = showDateHeader ? new Date(appt.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : '';
                   return (
+                    <div key={appt.id}>
+                    {showDateHeader && (
+                      <div className="flex items-center gap-2 mb-2 mt-4" style={{ ...(idx === 0 ? { marginTop: 0 } : {}) }}>
+                        <CalendarIcon className="w-4 h-4 text-[var(--brand-green-text)]" />
+                        <span className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 600 }}>{dateLabel}</span>
+                        <div className="flex-1 h-px bg-[var(--border-color)]" />
+                      </div>
+                    )}
                     <div
-                      key={appt.id}
                       className="bg-[var(--surface-white)] border border-[var(--border-color)] p-4 hover:border-[#2D6A4F] transition-colors cursor-pointer"
                       style={{ borderRadius: '12px' }}
                       onClick={() => openApptDetail(appt)}
@@ -733,6 +772,7 @@ export default function AppointmentsPage() {
                           {appt.notes}
                         </p>
                       )}
+                    </div>
                     </div>
                   );
                 })}
@@ -864,7 +904,7 @@ export default function AppointmentsPage() {
               {/* Stats Cards */}
               <div className="grid grid-cols-4 gap-4 mb-4">
                 {[
-                  { label: 'Total Today', value: totalToday, color: 'var(--brand-green-text)' },
+                  { label: showAllDates ? 'Total' : 'Total Today', value: totalToday, color: 'var(--brand-green-text)' },
                   { label: 'Completed', value: completedToday, color: '#74C69D' },
                   { label: 'In Progress', value: remainingToday, color: '#F4A261' },
                   { label: 'Scheduled', value: scheduledCount, color: 'var(--brand-green-text)' },
