@@ -202,6 +202,8 @@ export default function AppointmentsPage() {
   const [newApptClientId, setNewApptClientId] = useState('');
   const [newApptPetId, setNewApptPetId] = useState('');
   const [newApptPet, setNewApptPet] = useState('');
+  const [ownerSearch, setOwnerSearch] = useState('');
+  const [ownerDropdownOpen, setOwnerDropdownOpen] = useState(false);
   const [newApptService, setNewApptService] = useState('');
   const [newApptVetId, setNewApptVetId] = useState('');
   const [newApptVetName, setNewApptVetName] = useState('');
@@ -1128,18 +1130,68 @@ export default function AppointmentsPage() {
               {visitType === 'returning' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Patient</p>
-                  {/* Client dropdown */}
-                  <div>
+                  {/* Client search */}
+                  <div style={{ position: 'relative' }}>
                     <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Owner</p>
-                    <Select value={newApptClientId} onValueChange={(val) => { setNewApptClientId(val); setNewApptPetId(''); }}>
-                      <SelectTrigger><SelectValue placeholder="Select owner…" /></SelectTrigger>
-                      <SelectContent>
-                        {allClients.map(c => (
-                          <SelectItem key={c.id} value={c.id}>{c.first_name} {c.last_name}{c.phone ? ` · ${c.phone}` : ''}</SelectItem>
-                        ))}
-                        {allClients.length === 0 && <SelectItem value="__none" disabled>No clients yet</SelectItem>}
-                      </SelectContent>
-                    </Select>
+                    <div style={{ position: 'relative' }}>
+                      <Search className="w-4 h-4" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)', pointerEvents: 'none' }} />
+                      <Input
+                        placeholder="Search by name or phone…"
+                        value={ownerSearch}
+                        onChange={(e) => { setOwnerSearch(e.target.value); setOwnerDropdownOpen(true); if (!e.target.value) { setNewApptClientId(''); setNewApptPetId(''); } }}
+                        onFocus={() => setOwnerDropdownOpen(true)}
+                        style={{ paddingLeft: '34px' }}
+                      />
+                      {newApptClientId && (
+                        <button onClick={() => { setOwnerSearch(''); setNewApptClientId(''); setNewApptPetId(''); }} style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '16px', lineHeight: 1 }}>×</button>
+                      )}
+                    </div>
+                    {ownerDropdownOpen && ownerSearch.length > 0 && !newApptClientId && (() => {
+                      const q = ownerSearch.toLowerCase();
+                      const filtered = allClients.filter(c =>
+                        `${c.first_name} ${c.last_name}`.toLowerCase().includes(q) ||
+                        (c.phone && c.phone.includes(q)) ||
+                        (c.email && c.email.toLowerCase().includes(q))
+                      ).slice(0, 8);
+                      return (
+                        <div style={{
+                          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
+                          backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)',
+                          borderRadius: '8px', marginTop: '4px', boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                          maxHeight: '200px', overflowY: 'auto',
+                        }}>
+                          {filtered.length === 0 && (
+                            <div style={{ padding: '12px 14px', fontSize: '13px', color: 'var(--text-secondary)' }}>No clients found</div>
+                          )}
+                          {filtered.map(c => (
+                            <button
+                              key={c.id}
+                              onClick={() => {
+                                setNewApptClientId(c.id);
+                                setOwnerSearch(`${c.first_name} ${c.last_name}`);
+                                setNewApptPetId('');
+                                setOwnerDropdownOpen(false);
+                              }}
+                              style={{
+                                width: '100%', padding: '10px 14px', border: 'none', background: 'none',
+                                cursor: 'pointer', textAlign: 'left', fontSize: '13px',
+                                display: 'flex', alignItems: 'center', gap: '10px',
+                                borderBottom: '1px solid var(--border-color)',
+                              }}
+                              className="hover:bg-[var(--surface-elevated)] transition-colors"
+                            >
+                              <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#2D6A4F20', color: '#2D6A4F', fontSize: '10px', fontWeight: 700 }}>
+                                {(c.first_name?.[0] || '').toUpperCase()}{(c.last_name?.[0] || '').toUpperCase()}
+                              </div>
+                              <div>
+                                <p style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{c.first_name} {c.last_name}</p>
+                                {c.phone && <p style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{c.phone}</p>}
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      );
+                    })()}
                   </div>
                   {/* Pet dropdown — filtered by selected client */}
                   {newApptClientId && (
@@ -1300,29 +1352,41 @@ export default function AppointmentsPage() {
                 </div>
               </div>
 
-              {/* Date + Time */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div>
-                  <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Date</p>
-                  <Input type="date" value={newApptDate} onChange={e => setNewApptDate(e.target.value)} />
-                </div>
-                <div>
-                  <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Time</p>
-                  <Select value={newApptTime} onValueChange={setNewApptTime}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent className="max-h-60">
-                      {getSlotAvailability(newApptDate).map(slot => (
-                        <SelectItem key={slot.time24} value={slot.time24} disabled={!!slot.booked || !!slot.blocked}>
-                          <span className="flex items-center gap-2">
-                            <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: slot.booked ? '#d4183d' : slot.blocked ? '#F4A261' : '#2D6A4F' }} />
-                            <span style={{ color: slot.blocked ? 'var(--text-secondary)' : undefined }}>{slot.time}</span>
-                            {slot.booked && <span className="text-[var(--text-secondary)]" style={{ fontSize: '12px' }}>— {slot.booked.petName}</span>}
-                            {slot.blocked && <span style={{ fontSize: '12px', color: '#F4A261' }}>— {slot.blocked} (blocked)</span>}
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+              {/* Date */}
+              <div>
+                <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Date</p>
+                <Input type="date" value={newApptDate} onChange={e => setNewApptDate(e.target.value)} />
+              </div>
+
+              {/* Time — visual slot grid */}
+              <div>
+                <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Time</p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
+                  {getSlotAvailability(newApptDate).map(slot => {
+                    const isActive = newApptTime === slot.time24;
+                    const isUnavailable = !!slot.booked || !!slot.blocked;
+                    return (
+                      <button
+                        key={slot.time24}
+                        disabled={isUnavailable}
+                        onClick={() => setNewApptTime(slot.time24)}
+                        style={{
+                          padding: '8px 4px', borderRadius: '8px', fontSize: '12px', fontWeight: isActive ? 700 : 500,
+                          border: `1.5px solid ${isActive ? '#2D6A4F' : isUnavailable ? 'var(--border-color)' : 'var(--border-color)'}`,
+                          backgroundColor: isActive ? '#2D6A4F' : isUnavailable ? 'var(--surface-elevated)' : 'transparent',
+                          color: isActive ? '#fff' : isUnavailable ? 'var(--text-secondary)' : 'var(--text-primary)',
+                          cursor: isUnavailable ? 'not-allowed' : 'pointer',
+                          opacity: isUnavailable ? 0.5 : 1,
+                          transition: 'all 0.15s',
+                          textDecoration: isUnavailable ? 'line-through' : 'none',
+                          position: 'relative',
+                        }}
+                        title={slot.booked ? `Booked: ${slot.booked.petName}` : slot.blocked ? `Blocked: ${slot.blocked}` : slot.time}
+                      >
+                        {slot.time}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
