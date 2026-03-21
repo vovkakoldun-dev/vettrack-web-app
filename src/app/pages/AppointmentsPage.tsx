@@ -214,6 +214,7 @@ export default function AppointmentsPage() {
   const [reminderMethod, setReminderMethod] = useState('Email');
   const [reminderTiming, setReminderTiming] = useState('1 day');
   const [savingAppt, setSavingAppt] = useState(false);
+  const [vetTimeBlocks, setVetTimeBlocks] = useState<{ date: string; time_start: string; time_end: string; type: string }[]>([]);
 
   // ── New Patient (first-visit) form state ───────────────────
   const [visitType, setVisitType] = useState<'returning' | 'new'>('returning');
@@ -416,15 +417,59 @@ export default function AppointmentsPage() {
     setDetailOpen(false);
   };
 
+  // Fetch vet time blocks when vet is selected
+  const fetchVetTimeBlocks = async (vetId: string) => {
+    if (!vetId) { setVetTimeBlocks([]); return; }
+    const { data } = await supabase
+      .from('staff_time_blocks')
+      .select('date, time_start, time_end, type')
+      .eq('staff_id', vetId);
+    setVetTimeBlocks(data || []);
+  };
+
   const getSlotAvailability = (dateStr: string, excludeId?: string) => {
     const dateAppts = appointments.filter(
       (a) => a.date === dateStr && a.status !== 'Cancelled' && (excludeId == null || a.id !== excludeId),
     );
     const bookedTimes = new Map(dateAppts.map((a) => [a.timeStart, a]));
+
+    // Check vet time blocks for this date
+    const dateBlocks = vetTimeBlocks.filter((b) => b.date === dateStr);
+    const blockedSlots = new Set<string>();
+    dateBlocks.forEach((b) => {
+      if (!b.time_start || !b.time_end) return;
+      const [bsH, bsM] = b.time_start.split(':').map(Number);
+      const [beH, beM] = b.time_end.split(':').map(Number);
+      const bStartMin = bsH * 60 + bsM;
+      const bEndMin = beH * 60 + beM;
+      SCHEDULE_SLOTS.forEach((slot) => {
+        const t24 = to24Hour(slot);
+        const [sh, sm] = t24.split(':').map(Number);
+        const slotMin = sh * 60 + sm;
+        // Block overlaps this slot's 30-min window
+        if (bStartMin < slotMin + 30 && bEndMin > slotMin) {
+          blockedSlots.add(slot);
+        }
+      });
+    });
+
     return SCHEDULE_SLOTS.map((slot) => ({
       time: slot,
       time24: to24Hour(slot),
       booked: bookedTimes.get(slot) || null,
+      blocked: blockedSlots.has(slot)
+        ? dateBlocks.find((b) => {
+            if (!b.time_start || !b.time_end) return false;
+            const [bsH, bsM] = b.time_start.split(':').map(Number);
+            const [beH, beM] = b.time_end.split(':').map(Number);
+            const bStartMin = bsH * 60 + bsM;
+            const bEndMin = beH * 60 + beM;
+            const t24 = to24Hour(slot);
+            const [sh, sm] = t24.split(':').map(Number);
+            const slotMin = sh * 60 + sm;
+            return bStartMin < slotMin + 30 && bEndMin > slotMin;
+          })?.type || null
+        : null,
     }));
   };
 
@@ -1226,6 +1271,35 @@ export default function AppointmentsPage() {
                 </div>
               </div>
 
+              {/* Veterinarian — moved above Date/Time so user picks vet first to see availability */}
+              <div>
+                <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Veterinarian</p>
+                <div className="flex gap-2 flex-wrap">
+                  {staffList.length === 0 && <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>No vets found</span>}
+                  {staffList.map((v, i) => {
+                    const colors = ['#2D6A4F', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261'];
+                    const color = colors[i % colors.length];
+                    const active = newApptVetId === v.id;
+                    return (
+                      <button key={v.id} onClick={() => { setNewApptVetId(v.id); setNewApptVetName(v.name); fetchVetTimeBlocks(v.id); }} style={{
+                        padding: '7px 14px', borderRadius: '8px', fontSize: '13px',
+                        fontWeight: active ? 700 : 500,
+                        border: `1.5px solid ${active ? color : 'var(--border-color)'}`,
+                        backgroundColor: active ? `${color}18` : 'transparent',
+                        color: active ? color : 'var(--text-secondary)',
+                        cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '7px',
+                        transition: 'all 0.15s',
+                      }}>
+                        <span style={{ width: '22px', height: '22px', borderRadius: '50%', backgroundColor: `${color}20`, color: color, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', fontWeight: 700, flexShrink: 0 }}>
+                          {v.initials}
+                        </span>
+                        {v.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               {/* Date + Time */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div>
@@ -1238,11 +1312,12 @@ export default function AppointmentsPage() {
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent className="max-h-60">
                       {getSlotAvailability(newApptDate).map(slot => (
-                        <SelectItem key={slot.time24} value={slot.time24} disabled={!!slot.booked}>
+                        <SelectItem key={slot.time24} value={slot.time24} disabled={!!slot.booked || !!slot.blocked}>
                           <span className="flex items-center gap-2">
-                            <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: slot.booked ? '#d4183d' : '#2D6A4F' }} />
-                            <span>{slot.time}</span>
+                            <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: slot.booked ? '#d4183d' : slot.blocked ? '#F4A261' : '#2D6A4F' }} />
+                            <span style={{ color: slot.blocked ? 'var(--text-secondary)' : undefined }}>{slot.time}</span>
                             {slot.booked && <span className="text-[var(--text-secondary)]" style={{ fontSize: '12px' }}>— {slot.booked.petName}</span>}
+                            {slot.blocked && <span style={{ fontSize: '12px', color: '#F4A261' }}>— {slot.blocked} (blocked)</span>}
                           </span>
                         </SelectItem>
                       ))}
@@ -1266,35 +1341,6 @@ export default function AppointmentsPage() {
                         color: active ? 'var(--brand-green-text)' : 'var(--text-secondary)',
                         cursor: 'pointer', transition: 'all 0.15s',
                       }}>{d}</button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Veterinarian */}
-              <div>
-                <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Veterinarian</p>
-                <div className="flex gap-2 flex-wrap">
-                  {staffList.length === 0 && <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>No vets found</span>}
-                  {staffList.map((v, i) => {
-                    const colors = ['#2D6A4F', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261'];
-                    const color = colors[i % colors.length];
-                    const active = newApptVetId === v.id;
-                    return (
-                      <button key={v.id} onClick={() => { setNewApptVetId(v.id); setNewApptVetName(v.name); }} style={{
-                        padding: '7px 14px', borderRadius: '8px', fontSize: '13px',
-                        fontWeight: active ? 700 : 500,
-                        border: `1.5px solid ${active ? color : 'var(--border-color)'}`,
-                        backgroundColor: active ? `${color}18` : 'transparent',
-                        color: active ? color : 'var(--text-secondary)',
-                        cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '7px',
-                        transition: 'all 0.15s',
-                      }}>
-                        <span style={{ width: '22px', height: '22px', borderRadius: '50%', backgroundColor: `${color}20`, color: color, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', fontWeight: 700, flexShrink: 0 }}>
-                          {v.initials}
-                        </span>
-                        {v.name}
-                      </button>
                     );
                   })}
                 </div>
