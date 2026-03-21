@@ -1068,7 +1068,9 @@ export default function MyPortalPage() {
                   )}
                   {/* Time Label */}
                   <div className="w-24 flex-shrink-0 px-3 py-3 flex items-center justify-end">
-                    <span style={{ fontSize: '13px', color: isCurrent ? '#ef4444' : 'var(--text-secondary)', fontWeight: isCurrent ? 600 : 500 }}>{slot}</span>
+                    <span style={{ fontSize: '13px', color: isCurrent ? '#ef4444' : 'var(--text-secondary)', fontWeight: isCurrent ? 600 : 500 }}>
+                      {isCurrent ? to12Hour(`${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`) : slot}
+                    </span>
                   </div>
 
                   {/* Slot Content */}
