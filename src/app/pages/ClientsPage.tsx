@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Search, Plus, Mail, Phone, ChevronDown, CheckCircle2, AlertCircle, AlertTriangle, Loader2, Users, Trash2 } from 'lucide-react';
 import { AddClientDialog } from '../components/AddClientDialog';
@@ -58,6 +58,14 @@ export default function ClientsPage() {
   const { clients, loading, addClient, deleteClient, refetch } = useClients();
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [statusOverrides, setStatusOverrides] = useState<Record<string, Status>>({});
+  const [vets, setVets] = useState<{ id: string; name: string }[]>([]);
+  const [vetOverrides, setVetOverrides] = useState<Record<string, { id: string; name: string } | null>>({});
+
+  useEffect(() => {
+    supabase.from('staff').select('id, first_name, last_name').then(({ data }) => {
+      if (data) setVets(data.map((v: any) => ({ id: v.id, name: `Dr. ${v.first_name} ${v.last_name}` })));
+    });
+  }, []);
 
   const handleAddClient = async (values: AddClientValues): Promise<string | void> => {
     const { data, error } = await addClient(values);
@@ -95,7 +103,8 @@ export default function ClientsPage() {
       ownerEmail,
       ownerPhone,
       ownerInitials: initials,
-      lastVisit: '—',
+      assignedVetId: pet?.assigned_vet_id || null,
+      assignedVetName: pet?.assigned_vet ? `Dr. ${(pet.assigned_vet as any).first_name} ${(pet.assigned_vet as any).last_name}` : null,
       status,
     }));
   });
@@ -158,7 +167,7 @@ export default function ClientsPage() {
                 Breed
               </TableHead>
               <TableHead className="py-3 px-4" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                Last Visit
+                Assigned Doctor
               </TableHead>
               <TableHead className="py-3 px-4" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>
                 Phone
@@ -258,11 +267,60 @@ export default function ClientsPage() {
                     </span>
                   </TableCell>
 
-                  {/* Last Visit */}
-                  <TableCell className="py-4 px-4">
-                    <span className="text-[var(--text-secondary)]" style={{ fontSize: '16px', fontWeight: 400 }}>
-                      {client.lastVisit}
-                    </span>
+                  {/* Assigned Doctor */}
+                  <TableCell className="py-4 px-4" onClick={(e) => e.stopPropagation()}>
+                    {(() => {
+                      const currentVet = vetOverrides[client.petId || ''] !== undefined
+                        ? vetOverrides[client.petId || '']
+                        : (client.assignedVetName ? { id: client.assignedVetId!, name: client.assignedVetName } : null);
+                      return (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              className="flex items-center gap-1.5 hover:bg-[var(--surface-elevated)] px-2 py-1 transition-colors"
+                              style={{ fontSize: '14px', fontWeight: 500, color: currentVet ? 'var(--text-primary)' : 'var(--text-secondary)', borderRadius: '6px', border: 'none', background: 'none', cursor: 'pointer' }}
+                            >
+                              {currentVet?.name || 'Unassigned'}
+                              <ChevronDown className="w-3 h-3 opacity-50" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="start" className="w-48">
+                            <DropdownMenuLabel>Assign Doctor</DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            {vets.map((v) => (
+                              <DropdownMenuItem
+                                key={v.id}
+                                onClick={async () => {
+                                  if (client.petId) {
+                                    setVetOverrides((prev) => ({ ...prev, [client.petId!]: v }));
+                                    await supabase.from('pets').update({ assigned_vet_id: v.id }).eq('id', client.petId);
+                                  }
+                                }}
+                              >
+                                <span style={{ fontWeight: currentVet?.id === v.id ? 600 : 400 }}>
+                                  {v.name}
+                                </span>
+                              </DropdownMenuItem>
+                            ))}
+                            {currentVet && (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  onClick={async () => {
+                                    if (client.petId) {
+                                      setVetOverrides((prev) => ({ ...prev, [client.petId!]: null }));
+                                      await supabase.from('pets').update({ assigned_vet_id: null }).eq('id', client.petId);
+                                    }
+                                  }}
+                                >
+                                  <span style={{ color: 'var(--text-secondary)' }}>Unassign</span>
+                                </DropdownMenuItem>
+                              </>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      );
+                    })()}
                   </TableCell>
 
                   {/* Phone */}

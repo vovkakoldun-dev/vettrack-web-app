@@ -7,6 +7,8 @@ export interface ClientPet {
   species: string
   breed: string | null
   photo_url: string | null
+  assigned_vet_id: string | null
+  assigned_vet: { id: string; first_name: string; last_name: string } | null
 }
 
 export interface ClientRow {
@@ -48,7 +50,7 @@ export function useClients() {
     setError(null)
     const { data, error: err } = await supabase
       .from('clients')
-      .select('id, first_name, last_name, email, phone, address, city, state, zip, notes, portal_status, health_status, created_at, pets(id, name, species, breed, photo_url)')
+      .select('id, first_name, last_name, email, phone, address, city, state, zip, notes, portal_status, health_status, created_at, pets(id, name, species, breed, photo_url, assigned_vet_id, assigned_vet:staff!pets_assigned_vet_id_fkey(id, first_name, last_name))')
       .order('created_at', { ascending: false })
     if (err) {
       setError(err.message)
@@ -66,7 +68,7 @@ export function useClients() {
     const { data, error: err } = await supabase
       .from('clients')
       .insert([{ organization_id: '00000000-0000-0000-0000-000000000001', ...values }])
-      .select('id, first_name, last_name, email, phone, address, city, state, zip, notes, portal_status, health_status, created_at, pets(id, name, species, breed, photo_url)')
+      .select('id, first_name, last_name, email, phone, address, city, state, zip, notes, portal_status, health_status, created_at, pets(id, name, species, breed, photo_url, assigned_vet_id, assigned_vet:staff!pets_assigned_vet_id_fkey(id, first_name, last_name))')
       .single()
     if (!err && data) {
       setClients(prev => [data as ClientRow, ...prev])
