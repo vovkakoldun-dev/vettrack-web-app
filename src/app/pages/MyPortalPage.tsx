@@ -592,6 +592,7 @@ export default function MyPortalPage() {
   const navigate = useNavigate();
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>(INITIAL_BLOCKS);
+  const [blocksLoaded, setBlocksLoaded] = useState(false);
 
   // ── Vet profile from Supabase ──
   const [vetProfile, setVetProfile] = useState(VET_PROFILE);
@@ -680,13 +681,42 @@ export default function MyPortalPage() {
           }));
           setRealPatients(rows);
         }
+
+        // Fetch time blocks for this vet from DB
+        const { data: blockData } = await supabase
+          .from('staff_time_blocks')
+          .select('id, type, date, time_start, time_end, notes, status')
+          .eq('staff_id', staffData.id)
+          .order('date', { ascending: true });
+        if (blockData && blockData.length > 0) {
+          const from12 = (t24: string) => {
+            let [h, m] = t24.split(':').map(Number);
+            const ap = h >= 12 ? 'PM' : 'AM';
+            if (h > 12) h -= 12;
+            if (h === 0) h = 12;
+            return `${h}:${m.toString().padStart(2, '0')} ${ap}`;
+          };
+          const dbBlocks: TimeBlock[] = blockData.map((b: any, i: number) => ({
+            id: 1000 + i,
+            type: b.type as BlockType,
+            date: b.date,
+            timeStart: b.time_start ? from12(b.time_start) : '8:00 AM',
+            timeEnd: b.time_end ? from12(b.time_end) : '5:00 PM',
+            notes: b.notes || '',
+            status: (b.status || 'Confirmed') as BlockStatus,
+          }));
+          setTimeBlocks(dbBlocks);
+          setNextBlockId(2000);
+        }
+        setBlocksLoaded(true);
       }
     })();
   }, []);
   const [blockDialogOpen, setBlockDialogOpen] = useState(false);
   const [blockType, setBlockType] = useState<BlockType>('Lunch Break');
-  const [blockDateFrom, setBlockDateFrom] = useState('2026-03-11');
-  const [blockDateTo, setBlockDateTo] = useState('2026-03-11');
+  const todayStr = `${new Date().getFullYear()}-${(new Date().getMonth()+1).toString().padStart(2,'0')}-${new Date().getDate().toString().padStart(2,'0')}`;
+  const [blockDateFrom, setBlockDateFrom] = useState(todayStr);
+  const [blockDateTo, setBlockDateTo] = useState(todayStr);
   const [blockTimeStart, setBlockTimeStart] = useState('12:00');
   const [blockTimeEnd, setBlockTimeEnd] = useState('13:00');
   const [blockNotes, setBlockNotes] = useState('');
@@ -698,6 +728,39 @@ export default function MyPortalPage() {
   const dayBlocks = timeBlocks.filter((b) => isSameDay(b.date, selectedDate));
   const apptByTime = new Map(dayAppts.map((a) => [a.timeStart, a]));
   const blockByTime = new Map(dayBlocks.map((b) => [b.timeStart, b]));
+
+  // Helper: convert 12h time to minutes since midnight
+  const slotToMin = (slot12: string) => {
+    const t24 = to24Hour(slot12);
+    const [h, m] = t24.split(':').map(Number);
+    return h * 60 + m;
+  };
+
+  // Build busy-appointment map: appointments spanning multiple slots
+  const busyApptSlots = new Map<string, Appointment>();
+  dayAppts.forEach((a) => {
+    const startMin = slotToMin(a.timeStart);
+    const endMin = slotToMin(a.timeEnd);
+    SCHEDULE_SLOTS.forEach((slot) => {
+      const sm = slotToMin(slot);
+      if (sm > startMin && sm < endMin) {
+        busyApptSlots.set(slot, a);
+      }
+    });
+  });
+
+  // Build busy-block map: blocks spanning multiple slots show on intermediate slots too
+  const busyBlockSlots = new Map<string, TimeBlock>();
+  dayBlocks.forEach((b) => {
+    const startMin = slotToMin(b.timeStart);
+    const endMin = slotToMin(b.timeEnd);
+    SCHEDULE_SLOTS.forEach((slot) => {
+      const sm = slotToMin(slot);
+      if (sm > startMin && sm < endMin) {
+        busyBlockSlots.set(slot, b);
+      }
+    });
+  });
 
   // Dates with events (for calendar dots)
   const eventDates = new Set<string>();
@@ -763,6 +826,7 @@ export default function MyPortalPage() {
       dbRows.push({
         organization_id: '00000000-0000-0000-0000-000000000001',
         clinic_id: '00000000-0000-0000-0000-000000000002',
+        staff_id: vetId,
         type: blockType,
         date: dateStr,
         time_start: blockTimeStart || null,
@@ -863,6 +927,7 @@ export default function MyPortalPage() {
           <div className="bg-[var(--surface-white)] border border-[var(--border-color)] overflow-hidden" style={{ borderRadius: '12px' }}>
             {SCHEDULE_SLOTS.map((slot, idx) => {
               const appt = apptByTime.get(slot);
+              const busyAppt = busyApptSlots.get(slot);
               const block = blockByTime.get(slot);
               const isLast = idx === SCHEDULE_SLOTS.length - 1;
 
@@ -951,6 +1016,21 @@ export default function MyPortalPage() {
                         <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{appt.timeStart} – {appt.timeEnd}</span>
                       </div>
                     )
+                  ) : busyAppt ? (
+                    <div
+                      className="flex-1 m-1 px-3 py-2.5 flex items-center gap-3"
+                      style={{ backgroundColor: '#2D6A4F08', borderLeft: '4px solid #2D6A4F60', borderRadius: '8px', opacity: 0.7 }}
+                    >
+                      {busyAppt.petImage ? (
+                        <img src={busyAppt.petImage} alt={busyAppt.petName} className="w-7 h-7 object-cover flex-shrink-0" style={{ borderRadius: '9999px' }} />
+                      ) : (
+                        <div className="w-7 h-7 flex-shrink-0 flex items-center justify-center text-white font-semibold" style={{ borderRadius: '9999px', backgroundColor: '#2D6A4F', fontSize: '11px' }}>{busyAppt.petName.slice(0, 2).toUpperCase()}</div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-secondary)' }}>{busyAppt.petName} · {busyAppt.service} (cont.)</p>
+                      </div>
+                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{busyAppt.timeStart} – {busyAppt.timeEnd}</span>
+                    </div>
                   ) : block ? (
                     <div
                       className="flex-1 m-1 px-3 py-2.5 flex items-center gap-3"
@@ -967,6 +1047,27 @@ export default function MyPortalPage() {
                       </div>
                       <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{block.timeStart} – {block.timeEnd}</span>
                     </div>
+                  ) : busyBlockSlots.has(slot) ? (
+                    (() => {
+                      const bb = busyBlockSlots.get(slot)!;
+                      return (
+                        <div
+                          className="flex-1 m-1 px-3 py-2.5 flex items-center gap-3"
+                          style={{
+                            backgroundColor: blockStyles[bb.type].bg,
+                            borderLeft: `4px solid ${blockStyles[bb.type].border}`,
+                            borderRadius: '8px',
+                            opacity: 0.7,
+                          }}
+                        >
+                          {(() => { const Icon = blockStyles[bb.type].icon; return <Icon className="w-4 h-4 flex-shrink-0" style={{ color: blockStyles[bb.type].text }} />; })()}
+                          <div className="flex-1 min-w-0">
+                            <p style={{ fontSize: '13px', fontWeight: 500, color: blockStyles[bb.type].text }}>{bb.type} (cont.)</p>
+                          </div>
+                          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{bb.timeStart} – {bb.timeEnd}</span>
+                        </div>
+                      );
+                    })()
                   ) : (
                     <div
                       className="flex-1 m-1 px-3 py-3 cursor-pointer hover:bg-[var(--surface-elevated)] transition-colors flex items-center"
