@@ -240,10 +240,10 @@ export default function ClientsPage() {
                       <p className="text-[var(--text-primary)]" style={{ fontSize: '16px', fontWeight: 400 }}>
                         {client.ownerName}
                       </p>
-                      <div className="flex items-center gap-1 mt-1" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center gap-1 mt-1">
                         <Mail className="w-3 h-3 text-[var(--text-secondary)]" />
                         <button
-                          onClick={() => navigate('/communications')}
+                          onClick={(e) => { e.stopPropagation(); navigate('/communications'); }}
                           className="hover:underline"
                           style={{ fontSize: '12px', color: 'var(--brand-green-text)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
                         >
