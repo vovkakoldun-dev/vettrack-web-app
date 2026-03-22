@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
-import { Search, Plus, Mail, Phone, ChevronDown, CheckCircle2, AlertCircle, AlertTriangle, Loader2, Users, Trash2 } from 'lucide-react';
+import { Search, Plus, Mail, Phone, ChevronDown, CheckCircle2, AlertCircle, AlertTriangle, Loader2, Users, Trash2, Filter, X } from 'lucide-react';
 import { AddClientDialog } from '../components/AddClientDialog';
 import { useClients } from '../hooks/useClients';
 import { supabase } from '../../lib/supabase';
@@ -60,6 +60,9 @@ export default function ClientsPage() {
   const [statusOverrides, setStatusOverrides] = useState<Record<string, Status>>({});
   const [vets, setVets] = useState<{ id: string; name: string }[]>([]);
   const [vetOverrides, setVetOverrides] = useState<Record<string, { id: string; name: string } | null>>({});
+  const [filterSpecies, setFilterSpecies] = useState<string>('All');
+  const [filterStatus, setFilterStatus] = useState<string>('All');
+  const [filterVet, setFilterVet] = useState<string>('All');
 
   useEffect(() => {
     supabase.from('staff').select('id, first_name, last_name').then(({ data }) => {
@@ -109,15 +112,27 @@ export default function ClientsPage() {
     }));
   });
 
+  // Get unique species from data for filter options
+  const speciesOptions = Array.from(new Set(displayClients.map(c => c.species).filter(s => s && s !== '—')));
+
   const filtered = displayClients.filter((c) => {
     const q = search.toLowerCase();
-    return (
+    const matchesSearch = !q || (
       c.petName.toLowerCase().includes(q) ||
       c.ownerName.toLowerCase().includes(q) ||
       c.breed.toLowerCase().includes(q) ||
       c.ownerEmail.toLowerCase().includes(q)
     );
+    const matchesSpecies = filterSpecies === 'All' || c.species === filterSpecies;
+    const matchesStatus = filterStatus === 'All' || c.status === filterStatus;
+    const currentVetName = vetOverrides[c.petId || ''] !== undefined
+      ? vetOverrides[c.petId || '']?.name || ''
+      : c.assignedVetName || '';
+    const matchesVet = filterVet === 'All' || currentVetName === filterVet;
+    return matchesSearch && matchesSpecies && matchesStatus && matchesVet;
   });
+
+  const hasActiveFilters = filterSpecies !== 'All' || filterStatus !== 'All' || filterVet !== 'All';
 
   return (
     <>
@@ -137,8 +152,8 @@ export default function ClientsPage() {
       </div>
 
       {/* Search + Filters */}
-      <div className="mb-6">
-        <div className="relative max-w-sm">
+      <div className="mb-6 flex items-center gap-3 flex-wrap">
+        <div className="relative" style={{ minWidth: '280px' }}>
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-secondary)]" />
           <Input
             placeholder="Search by pet, owner, or breed..."
@@ -147,6 +162,92 @@ export default function ClientsPage() {
             className="pl-9"
           />
         </div>
+
+        <div className="flex items-center gap-1 p-1 bg-[var(--surface-elevated)]" style={{ borderRadius: '8px' }}>
+          <Filter className="w-3.5 h-3.5 text-[var(--text-secondary)] ml-2" />
+          {/* Species Filter */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="flex items-center gap-1 px-3 py-1.5 transition-colors" style={{
+                borderRadius: '6px', fontSize: '13px', fontWeight: filterSpecies !== 'All' ? 600 : 400,
+                backgroundColor: filterSpecies !== 'All' ? 'var(--surface-white)' : 'transparent',
+                color: filterSpecies !== 'All' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                boxShadow: filterSpecies !== 'All' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+              }}>
+                {filterSpecies === 'All' ? 'Species' : filterSpecies}
+                <ChevronDown className="w-3 h-3" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onClick={() => setFilterSpecies('All')}>All Species</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              {speciesOptions.map(s => (
+                <DropdownMenuItem key={s} onClick={() => setFilterSpecies(s)}>{s}</DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Status Filter */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="flex items-center gap-1 px-3 py-1.5 transition-colors" style={{
+                borderRadius: '6px', fontSize: '13px', fontWeight: filterStatus !== 'All' ? 600 : 400,
+                backgroundColor: filterStatus !== 'All' ? 'var(--surface-white)' : 'transparent',
+                color: filterStatus !== 'All' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                boxShadow: filterStatus !== 'All' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+              }}>
+                {filterStatus === 'All' ? 'Status' : filterStatus}
+                <ChevronDown className="w-3 h-3" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onClick={() => setFilterStatus('All')}>All Statuses</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              {STATUS_OPTIONS.map(s => {
+                const Icon = s.icon;
+                return (
+                  <DropdownMenuItem key={s.value} onClick={() => setFilterStatus(s.value)}>
+                    <Icon className="w-3.5 h-3.5 mr-2" style={{ color: s.text }} />
+                    {s.value}
+                  </DropdownMenuItem>
+                );
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Vet Filter */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="flex items-center gap-1 px-3 py-1.5 transition-colors" style={{
+                borderRadius: '6px', fontSize: '13px', fontWeight: filterVet !== 'All' ? 600 : 400,
+                backgroundColor: filterVet !== 'All' ? 'var(--surface-white)' : 'transparent',
+                color: filterVet !== 'All' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                boxShadow: filterVet !== 'All' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+              }}>
+                {filterVet === 'All' ? 'Doctor' : filterVet}
+                <ChevronDown className="w-3 h-3" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onClick={() => setFilterVet('All')}>All Doctors</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              {vets.map(v => (
+                <DropdownMenuItem key={v.id} onClick={() => setFilterVet(v.name)}>{v.name}</DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
+        {hasActiveFilters && (
+          <button
+            onClick={() => { setFilterSpecies('All'); setFilterStatus('All'); setFilterVet('All'); }}
+            className="flex items-center gap-1 px-2 py-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+            style={{ fontSize: '12px', fontWeight: 500 }}
+          >
+            <X className="w-3 h-3" />
+            Clear filters
+          </button>
+        )}
       </div>
 
       {/* Table */}
