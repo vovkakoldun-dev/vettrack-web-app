@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
-import { Search, Plus, Mail, Phone, ChevronDown, CheckCircle2, AlertCircle, AlertTriangle, Loader2, Users, Trash2, Filter, X } from 'lucide-react';
+import { Search, Plus, Mail, Phone, ChevronDown, CheckCircle2, AlertCircle, AlertTriangle, Loader2, Users, Trash2, Filter, X, ArrowUpDown } from 'lucide-react';
 import { AddClientDialog } from '../components/AddClientDialog';
 import { useClients } from '../hooks/useClients';
 import { supabase } from '../../lib/supabase';
@@ -63,6 +63,7 @@ export default function ClientsPage() {
   const [filterSpecies, setFilterSpecies] = useState<string>('All');
   const [filterStatus, setFilterStatus] = useState<string>('All');
   const [filterVet, setFilterVet] = useState<string>('All');
+  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest' | 'name-az' | 'name-za'>('newest');
 
   useEffect(() => {
     supabase.from('staff').select('id, first_name, last_name').then(({ data }) => {
@@ -109,6 +110,7 @@ export default function ClientsPage() {
       assignedVetId: pet?.assigned_vet_id || null,
       assignedVetName: pet?.assigned_vet ? `Dr. ${(pet.assigned_vet as any).first_name} ${(pet.assigned_vet as any).last_name}` : null,
       status,
+      createdAt: c.created_at,
     }));
   });
 
@@ -130,6 +132,17 @@ export default function ClientsPage() {
       : c.assignedVetName || '';
     const matchesVet = filterVet === 'All' || currentVetName === filterVet;
     return matchesSearch && matchesSpecies && matchesStatus && matchesVet;
+  });
+
+  // Sort results
+  filtered.sort((a, b) => {
+    switch (sortOrder) {
+      case 'oldest': return (a.createdAt || '').localeCompare(b.createdAt || '');
+      case 'newest': return (b.createdAt || '').localeCompare(a.createdAt || '');
+      case 'name-az': return a.petName.localeCompare(b.petName);
+      case 'name-za': return b.petName.localeCompare(a.petName);
+      default: return 0;
+    }
   });
 
   const hasActiveFilters = filterSpecies !== 'All' || filterStatus !== 'All' || filterVet !== 'All';
@@ -237,6 +250,39 @@ export default function ClientsPage() {
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
+
+        {/* Sort */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="flex items-center gap-1.5 px-3 py-1.5 border border-[var(--border-color)] transition-colors hover:bg-[var(--surface-elevated)]" style={{
+              borderRadius: '8px', fontSize: '13px', fontWeight: 500, color: 'var(--text-secondary)',
+            }}>
+              <ArrowUpDown className="w-3.5 h-3.5" />
+              {sortOrder === 'newest' ? 'Newest first' : sortOrder === 'oldest' ? 'Oldest first' : sortOrder === 'name-az' ? 'Name A–Z' : 'Name Z–A'}
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuLabel>Sort by</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => setSortOrder('newest')}>
+              {sortOrder === 'newest' && <CheckCircle2 className="w-3.5 h-3.5 mr-2" style={{ color: 'var(--brand-green-text)' }} />}
+              Newest first
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setSortOrder('oldest')}>
+              {sortOrder === 'oldest' && <CheckCircle2 className="w-3.5 h-3.5 mr-2" style={{ color: 'var(--brand-green-text)' }} />}
+              Oldest first
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => setSortOrder('name-az')}>
+              {sortOrder === 'name-az' && <CheckCircle2 className="w-3.5 h-3.5 mr-2" style={{ color: 'var(--brand-green-text)' }} />}
+              Name A–Z
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setSortOrder('name-za')}>
+              {sortOrder === 'name-za' && <CheckCircle2 className="w-3.5 h-3.5 mr-2" style={{ color: 'var(--brand-green-text)' }} />}
+              Name Z–A
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         {hasActiveFilters && (
           <button
