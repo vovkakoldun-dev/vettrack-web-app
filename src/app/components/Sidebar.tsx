@@ -77,16 +77,17 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
     });
   }, []);
 
-  // Listen for photo updates from My Portal page
+  // Refetch staff photo when page regains focus (e.g. after uploading on My Portal)
   useEffect(() => {
-    const channel = supabase.channel('staff-photo-changes')
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'staff' }, (payload) => {
-        if (payload.new?.photo_url !== undefined) {
-          setStaffPhoto(payload.new.photo_url || '');
-        }
-      })
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    const handleFocus = () => {
+      supabase.from('staff').select('photo_url').limit(1).single().then(({ data }) => {
+        if (data) setStaffPhoto(data.photo_url || '');
+      });
+    };
+    window.addEventListener('focus', handleFocus);
+    // Also poll every 3 seconds to catch same-tab updates
+    const interval = setInterval(handleFocus, 3000);
+    return () => { window.removeEventListener('focus', handleFocus); clearInterval(interval); };
   }, []);
 
   // Drag state for sections
