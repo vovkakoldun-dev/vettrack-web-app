@@ -1403,7 +1403,16 @@ export default function ClientDetailPage() {
               <Button
                 variant="outline"
                 className="w-full mt-4 border-[#2D6A4F] text-[var(--brand-green-text)] hover:bg-[#2D6A4F10]"
-                onClick={() => navigate(appointmentsPath, { state: { openNewAppt: true } })}
+                onClick={() => {
+                  const pet = client.pets[selectedPetIdx];
+                  navigate(appointmentsPath, { state: {
+                    openNewAppt: true,
+                    prefillClientId: id,
+                    prefillClientName: client.owner.name,
+                    prefillPetId: pet?.dbId || '',
+                    prefillPetName: pet?.name || '',
+                  }});
+                }}
               >
                 Schedule New Appointment
               </Button>

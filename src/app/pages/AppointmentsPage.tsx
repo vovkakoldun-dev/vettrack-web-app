@@ -245,9 +245,28 @@ export default function AppointmentsPage() {
 
   // ── Auto-open appointment detail from dashboard navigation ──
   useEffect(() => {
-    const state = location.state as { openApptId?: string; openNewAppt?: boolean } | null;
+    const state = location.state as {
+      openApptId?: string;
+      openNewAppt?: boolean;
+      prefillClientId?: string;
+      prefillClientName?: string;
+      prefillPetId?: string;
+      prefillPetName?: string;
+    } | null;
     if (state?.openNewAppt) {
-      setTimeout(() => openNewApptDialog(), 0);
+      setTimeout(() => {
+        openNewApptDialog();
+        // Pre-fill client/pet if passed from client detail page
+        if (state.prefillClientId) {
+          setNewApptClientId(state.prefillClientId);
+          setOwnerSearch(state.prefillClientName || '');
+          setOwnerDropdownOpen(false);
+        }
+        if (state.prefillPetId) {
+          setNewApptPetId(state.prefillPetId);
+          setNewApptPet(state.prefillPetName || '');
+        }
+      }, 0);
     }
     window.history.replaceState({}, '');
   // eslint-disable-next-line react-hooks/exhaustive-deps
