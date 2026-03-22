@@ -65,14 +65,28 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
   const [staffName, setStaffName] = useState('Dr. Sarah Chen');
   const [staffRole, setStaffRole] = useState('Veterinarian');
   const [staffEmail, setStaffEmail] = useState('sarah.chen@vettrack.com');
+  const [staffPhoto, setStaffPhoto] = useState('');
   useEffect(() => {
-    supabase.from('staff').select('first_name, last_name, role, email').limit(1).single().then(({ data }) => {
+    supabase.from('staff').select('first_name, last_name, role, email, photo_url').limit(1).single().then(({ data }) => {
       if (data) {
         setStaffName(`Dr. ${data.first_name} ${data.last_name}`);
         setStaffRole((data.role || 'veterinarian').replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()));
         setStaffEmail(data.email || '—');
+        setStaffPhoto(data.photo_url || '');
       }
     });
+  }, []);
+
+  // Listen for photo updates from My Portal page
+  useEffect(() => {
+    const channel = supabase.channel('staff-photo-changes')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'staff' }, (payload) => {
+        if (payload.new?.photo_url !== undefined) {
+          setStaffPhoto(payload.new.photo_url || '');
+        }
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
   }, []);
 
   // Drag state for sections
@@ -367,12 +381,21 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
               {/* Mini header */}
               <div className="border-b border-[var(--border-color)]" style={{ padding: '14px 16px' }}>
                 <div className="flex items-center gap-3">
-                  <img
-                    src="https://images.unsplash.com/photo-1640161415278-a5ac46f82d04?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjB2ZXRlcmluYXJpYW4lMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyODYxNTB8MA&ixlib=rb-4.1.0&q=80&w=1080"
-                    alt={staffName}
-                    className="w-10 h-10 object-cover flex-shrink-0"
-                    style={{ borderRadius: '50%' }}
-                  />
+                  {staffPhoto ? (
+                    <img
+                      src={staffPhoto}
+                      alt={staffName}
+                      className="w-10 h-10 object-cover flex-shrink-0"
+                      style={{ borderRadius: '50%' }}
+                    />
+                  ) : (
+                    <div
+                      className="w-10 h-10 flex-shrink-0 flex items-center justify-center"
+                      style={{ borderRadius: '50%', backgroundColor: '#2D6A4F20', color: '#2D6A4F', fontSize: '14px', fontWeight: 700 }}
+                    >
+                      {staffName.split(' ').filter(w => w[0] && w[0] === w[0].toUpperCase()).map(w => w[0]).join('').slice(0, 2)}
+                    </div>
+                  )}
                   <div className="min-w-0">
                     <p className="text-[var(--text-primary)] truncate" style={{ fontSize: '14px', fontWeight: 600 }}>
                       {staffName}
@@ -419,12 +442,21 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
               gap:            collapsed ? 0 : '10px',
             }}
           >
-            <img
-              src="https://images.unsplash.com/photo-1640161415278-a5ac46f82d04?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjB2ZXRlcmluYXJpYW4lMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyODYxNTB8MA&ixlib=rb-4.1.0&q=80&w=1080"
-              alt={staffName}
-              className="w-9 h-9 object-cover flex-shrink-0"
-              style={{ borderRadius: '50%' }}
-            />
+            {staffPhoto ? (
+              <img
+                src={staffPhoto}
+                alt={staffName}
+                className="w-9 h-9 object-cover flex-shrink-0"
+                style={{ borderRadius: '50%' }}
+              />
+            ) : (
+              <div
+                className="w-9 h-9 flex-shrink-0 flex items-center justify-center"
+                style={{ borderRadius: '50%', backgroundColor: '#2D6A4F20', color: '#2D6A4F', fontSize: '13px', fontWeight: 700 }}
+              >
+                {staffName.split(' ').filter(w => w[0] && w[0] === w[0].toUpperCase()).map(w => w[0]).join('').slice(0, 2)}
+              </div>
+            )}
             {!collapsed && (
               <>
                 <div className="flex-1 min-w-0 text-left">

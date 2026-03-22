@@ -551,6 +551,49 @@ export default function MyPortalPage() {
   const [vetProfile, setVetProfile] = useState(VET_PROFILE);
   const [vetId, setVetId] = useState<string | null>(null);
 
+  // ── Photo upload ──
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !vetId) return;
+    setUploadingPhoto(true);
+    try {
+      const ext = file.name.split('.').pop();
+      const path = `${vetId}.${ext}`;
+      // Remove old photo first
+      await supabase.storage.from('staff-photos').remove([path]);
+      // Upload new photo
+      const { error: uploadErr } = await supabase.storage.from('staff-photos').upload(path, file, { upsert: true });
+      if (uploadErr) { alert('Upload failed: ' + uploadErr.message); return; }
+      const { data: urlData } = supabase.storage.from('staff-photos').getPublicUrl(path);
+      const publicUrl = urlData.publicUrl + '?t=' + Date.now(); // cache bust
+      // Save to staff record
+      await supabase.from('staff').update({ photo_url: publicUrl }).eq('id', vetId);
+      setVetProfile(prev => ({ ...prev, image: publicUrl }));
+    } finally {
+      setUploadingPhoto(false);
+      if (photoInputRef.current) photoInputRef.current.value = '';
+    }
+  };
+
+  const handleDeletePhoto = async () => {
+    if (!vetId) return;
+    if (!confirm('Remove your profile photo?')) return;
+    // Remove from storage
+    const { data: staffRow } = await supabase.from('staff').select('photo_url').eq('id', vetId).single();
+    if (staffRow?.photo_url) {
+      const urlParts = staffRow.photo_url.split('/staff-photos/');
+      if (urlParts[1]) {
+        const filePath = urlParts[1].split('?')[0];
+        await supabase.storage.from('staff-photos').remove([filePath]);
+      }
+    }
+    await supabase.from('staff').update({ photo_url: null }).eq('id', vetId);
+    setVetProfile(prev => ({ ...prev, image: '' }));
+  };
+
   // ── Real appointments from Supabase ──
   const [realAppointments, setRealAppointments] = useState<Appointment[]>([]);
 
@@ -563,7 +606,7 @@ export default function MyPortalPage() {
       // Fetch vet profile (first staff member)
       const { data: staffData } = await supabase
         .from('staff')
-        .select('id, first_name, last_name, role, email, phone, created_at')
+        .select('id, first_name, last_name, role, email, phone, created_at, photo_url')
         .limit(1)
         .single();
       if (staffData) {
@@ -577,7 +620,7 @@ export default function MyPortalPage() {
           phone: staffData.phone || '—',
           licenseNo: `DVM-${joinDate.getFullYear()}-${staffData.id.slice(0, 5).toUpperCase()}`,
           joinedDate: joinDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
-          image: '',
+          image: staffData.photo_url || '',
         });
 
         // Fetch appointments for this vet
@@ -958,12 +1001,20 @@ export default function MyPortalPage() {
       >
         <div className="flex items-center gap-6">
           <div style={{ position: 'relative', flexShrink: 0 }}>
-            <Avatar className="w-16 h-16">
+            <Avatar className="w-16 h-16" style={{ opacity: uploadingPhoto ? 0.5 : 1, transition: '0.2s' }}>
               <AvatarImage src={vetProfile.image} alt={vetProfile.name} className="object-cover" />
               <AvatarFallback>{vetProfile.name.split(' ').filter(w => w[0] && w[0] === w[0].toUpperCase()).map(w => w[0]).join('').slice(0, 2)}</AvatarFallback>
             </Avatar>
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handlePhotoUpload}
+            />
             <button
               title="Change photo"
+              onClick={() => photoInputRef.current?.click()}
               style={{
                 position: 'absolute', bottom: 0, right: 0,
                 width: 22, height: 22, borderRadius: '50%',
@@ -974,6 +1025,21 @@ export default function MyPortalPage() {
             >
               <Camera style={{ width: 11, height: 11, color: '#fff' }} />
             </button>
+            {vetProfile.image && (
+              <button
+                title="Remove photo"
+                onClick={handleDeletePhoto}
+                style={{
+                  position: 'absolute', top: -4, right: -4,
+                  width: 18, height: 18, borderRadius: '50%',
+                  backgroundColor: '#d4183d', border: '2px solid var(--surface-white)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: 'pointer', padding: 0,
+                }}
+              >
+                <Trash2 style={{ width: 9, height: 9, color: '#fff' }} />
+              </button>
+            )}
           </div>
           <div className="flex-1">
             <h1 className="text-[var(--text-primary)]" style={{ fontSize: '26px', fontWeight: 700 }}>{vetProfile.name}</h1>
