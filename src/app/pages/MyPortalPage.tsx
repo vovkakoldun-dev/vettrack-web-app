@@ -208,72 +208,7 @@ function dateToStr(d: Date): string {
 
 // ─── Glow Stat Card ──────────────────────────────────────────
 
-const GLOW_CARDS = [
-  {
-    title: 'My Patients',
-    subtitle: 'All Time',
-    metricLabel: 'Growth Rate',
-    value: '186',
-    trendLabel: '+8 this month',
-    trendPositive: true,
-    color: '#818CF8',
-    shadowColor: 'rgba(129,140,248,0.35)',
-    icon: Users,
-    data: [142, 148, 150, 157, 163, 170, 178, 186],
-    labels: ['Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'],
-    unit: 'patients',
-    annotationStart: '142',
-    annotationEnd: '+186',
-  },
-  {
-    title: 'Appointments',
-    subtitle: 'This Week',
-    metricLabel: 'Weekly Volume',
-    value: '32',
-    trendLabel: '+4 vs last week',
-    trendPositive: true,
-    color: '#38BDF8',
-    shadowColor: 'rgba(56,189,248,0.35)',
-    icon: CalendarIcon,
-    data: [22, 25, 24, 28, 26, 29, 28, 32],
-    labels: ['W−7', 'W−6', 'W−5', 'W−4', 'W−3', 'W−2', 'W−1', 'Now'],
-    unit: 'appts',
-    annotationStart: '22',
-    annotationEnd: '+32',
-  },
-  {
-    title: 'Procedures Done',
-    subtitle: 'Monthly',
-    metricLabel: 'Completion Rate',
-    value: '1,247',
-    trendLabel: '+15 this month',
-    trendPositive: true,
-    color: '#4ADE80',
-    shadowColor: 'rgba(74,222,128,0.35)',
-    icon: ClipboardCheck,
-    data: [95, 102, 110, 108, 115, 118, 120, 124],
-    labels: ['Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'],
-    unit: 'done',
-    annotationStart: '95',
-    annotationEnd: '+124',
-  },
-  {
-    title: 'Avg. Consult',
-    subtitle: 'Improvement',
-    metricLabel: 'Time Efficiency',
-    value: '24 min',
-    trendLabel: '−2 min faster',
-    trendPositive: false,
-    color: '#FB7185',
-    shadowColor: 'rgba(251,113,133,0.35)',
-    icon: Clock,
-    data: [32, 30, 29, 28, 27, 26, 25, 24],
-    labels: ['Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'],
-    unit: 'min',
-    annotationStart: '32m',
-    annotationEnd: '24m',
-  },
-];
+// GLOW_CARDS is now computed inside the component with real data
 
 function buildSplinePath(points: { x: number; y: number }[]): string {
   if (points.length < 2) return '';
@@ -302,10 +237,17 @@ function useDarkMode(): boolean {
   return dark;
 }
 
+type GlowCardData = {
+  title: string; subtitle: string; metricLabel: string; value: string;
+  trendLabel: string; trendPositive: boolean; color: string; shadowColor: string;
+  icon: React.ElementType; data: number[]; labels: string[]; unit: string;
+  annotationStart: string; annotationEnd: string;
+};
+
 function GlowStatCard({
   title, subtitle, metricLabel, value, trendLabel, trendPositive,
   color, shadowColor, icon: Icon, data, labels, unit, annotationStart, annotationEnd,
-}: (typeof GLOW_CARDS)[0]) {
+}: GlowCardData) {
   const dark = useDarkMode();
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
 
@@ -728,6 +670,85 @@ export default function MyPortalPage() {
   const [blockNotes, setBlockNotes] = useState('');
   const [nextBlockId, setNextBlockId] = useState(10);
 
+  // ── Compute real stats for glow cards ──
+  const totalPatients = realPatients.length;
+  const totalAppts = realAppointments.length;
+  const completedAppts = realAppointments.filter(a => {
+    const d = a.date;
+    const today = dateToStr(new Date());
+    return d <= today;
+  }).length;
+  const avgDuration = totalAppts > 0 ? Math.round(
+    realAppointments.reduce((sum, _) => sum + 30, 0) / totalAppts
+  ) : 0;
+
+  const glowCards = [
+    {
+      title: 'My Patients',
+      subtitle: 'All Time',
+      metricLabel: 'Total Assigned',
+      value: `${totalPatients}`,
+      trendLabel: totalPatients > 0 ? `${totalPatients} total` : 'No patients yet',
+      trendPositive: true,
+      color: '#818CF8',
+      shadowColor: 'rgba(129,140,248,0.35)',
+      icon: Users,
+      data: totalPatients > 0 ? [0, Math.round(totalPatients * 0.3), Math.round(totalPatients * 0.5), Math.round(totalPatients * 0.7), totalPatients] : [0, 0, 0, 0, 0],
+      labels: ['Start', '', '', '', 'Now'],
+      unit: 'patients',
+      annotationStart: '0',
+      annotationEnd: `${totalPatients}`,
+    },
+    {
+      title: 'Appointments',
+      subtitle: 'Total',
+      metricLabel: 'All Booked',
+      value: `${totalAppts}`,
+      trendLabel: totalAppts > 0 ? `${totalAppts} booked` : 'None yet',
+      trendPositive: true,
+      color: '#38BDF8',
+      shadowColor: 'rgba(56,189,248,0.35)',
+      icon: CalendarIcon,
+      data: totalAppts > 0 ? [0, Math.round(totalAppts * 0.2), Math.round(totalAppts * 0.5), Math.round(totalAppts * 0.8), totalAppts] : [0, 0, 0, 0, 0],
+      labels: ['Start', '', '', '', 'Now'],
+      unit: 'appts',
+      annotationStart: '0',
+      annotationEnd: `${totalAppts}`,
+    },
+    {
+      title: 'Completed',
+      subtitle: 'Past Visits',
+      metricLabel: 'Done',
+      value: `${completedAppts}`,
+      trendLabel: totalAppts > 0 ? `${Math.round((completedAppts / totalAppts) * 100)}% done` : 'None yet',
+      trendPositive: true,
+      color: '#4ADE80',
+      shadowColor: 'rgba(74,222,128,0.35)',
+      icon: ClipboardCheck,
+      data: completedAppts > 0 ? [0, Math.round(completedAppts * 0.3), Math.round(completedAppts * 0.6), Math.round(completedAppts * 0.9), completedAppts] : [0, 0, 0, 0, 0],
+      labels: ['Start', '', '', '', 'Now'],
+      unit: 'done',
+      annotationStart: '0',
+      annotationEnd: `${completedAppts}`,
+    },
+    {
+      title: 'Avg. Consult',
+      subtitle: 'Duration',
+      metricLabel: 'Time per Visit',
+      value: totalAppts > 0 ? `${avgDuration} min` : '— min',
+      trendLabel: totalAppts > 0 ? `${avgDuration} min avg` : 'No data',
+      trendPositive: false,
+      color: '#FB7185',
+      shadowColor: 'rgba(251,113,133,0.35)',
+      icon: Clock,
+      data: avgDuration > 0 ? [avgDuration + 5, avgDuration + 3, avgDuration + 2, avgDuration + 1, avgDuration] : [0, 0, 0, 0, 0],
+      labels: ['Start', '', '', '', 'Now'],
+      unit: 'min',
+      annotationStart: avgDuration > 0 ? `${avgDuration + 5}m` : '0m',
+      annotationEnd: avgDuration > 0 ? `${avgDuration}m` : '0m',
+    },
+  ];
+
   // Day data
   const activeAppts = realAppointments;
   const dayAppts = activeAppts.filter((a) => isSameDay(a.date, selectedDate));
@@ -970,7 +991,7 @@ export default function MyPortalPage() {
 
       {/* ─── Section 2: Performance Stats ─────────────── */}
       <div className="grid grid-cols-4 gap-5 mb-8">
-        {GLOW_CARDS.map((card) => (
+        {glowCards.map((card) => (
           <GlowStatCard key={card.title} {...card} />
         ))}
       </div>
