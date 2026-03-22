@@ -1526,72 +1526,7 @@ export default function AppointmentsPage() {
                 </div>
               </div>
 
-              {/* Status + Priority */}
-              <div style={{ backgroundColor: 'var(--surface-white)', borderRadius: '10px', padding: '14px', border: '1px solid var(--border-color)' }}>
-                <p style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '12px' }}>Status & Priority</p>
-
-                <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>Status</p>
-                <div className="flex gap-1.5" style={{ marginBottom: '12px' }}>
-                  {[{ label: 'Confirmed', color: '#2D6A4F' }, { label: 'Pending', color: '#F4A261' }].map(s => {
-                    const active = newApptStatus === s.label;
-                    return (
-                      <button key={s.label} onClick={() => setNewApptStatus(s.label)} style={{
-                        flex: 1, padding: '5px 8px', borderRadius: '6px', fontSize: '12px',
-                        fontWeight: active ? 700 : 500,
-                        border: `1.5px solid ${active ? s.color : 'var(--border-color)'}`,
-                        backgroundColor: active ? `${s.color}15` : 'transparent',
-                        color: active ? s.color : 'var(--text-secondary)',
-                        cursor: 'pointer',
-                      }}>{s.label}</button>
-                    );
-                  })}
-                </div>
-
-                <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>Priority</p>
-                <div className="flex gap-1.5" style={{ marginBottom: '14px' }}>
-                  {[
-                    { label: 'Normal',    color: '#2D6A4F' },
-                    { label: 'Urgent',    color: '#F4A261' },
-                    { label: 'Emergency', color: '#d4183d' },
-                  ].map(p => {
-                    const active = newApptPriority === p.label;
-                    return (
-                      <button key={p.label} onClick={() => setNewApptPriority(p.label)} style={{
-                        flex: 1, padding: '5px 4px', borderRadius: '6px', fontSize: '11px',
-                        fontWeight: active ? 700 : 500,
-                        border: `1.5px solid ${active ? p.color : 'var(--border-color)'}`,
-                        backgroundColor: active ? `${p.color}15` : 'transparent',
-                        color: active ? p.color : 'var(--text-secondary)',
-                        cursor: 'pointer',
-                      }}>{p.label}</button>
-                    );
-                  })}
-                </div>
-
-                <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>Pet Health Status</p>
-                <div className="flex gap-1.5">
-                  {([
-                    { label: 'Healthy' as const,   color: '#2D6A4F', emoji: '✅' },
-                    { label: 'Follow-up' as const, color: '#F4A261', emoji: '🔔' },
-                    { label: 'Critical' as const,  color: '#d4183d', emoji: '🚨' },
-                  ]).map(s => {
-                    const active = newApptPetHealth === s.label;
-                    return (
-                      <button key={s.label} onClick={() => setNewApptPetHealth(s.label)} style={{
-                        flex: 1, padding: '5px 4px', borderRadius: '6px', fontSize: '11px',
-                        fontWeight: active ? 700 : 500,
-                        border: `1.5px solid ${active ? s.color : 'var(--border-color)'}`,
-                        backgroundColor: active ? `${s.color}15` : 'transparent',
-                        color: active ? s.color : 'var(--text-secondary)',
-                        cursor: 'pointer',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '3px',
-                      }}>
-                        <span style={{ fontSize: '10px' }}>{s.emoji}</span> {s.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+              {/* Status & Priority removed — defaults to Confirmed/Normal/Healthy */}
 
               {/* Notifications */}
               <div style={{ backgroundColor: 'var(--surface-white)', borderRadius: '10px', padding: '14px', border: '1px solid var(--border-color)' }}>
