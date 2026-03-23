@@ -61,6 +61,14 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
   const [profileOpen, setProfileOpen] = useState(false);
   const [sections, setSections]       = useState<NavSection[]>(INITIAL_SECTIONS);
 
+  // Selected clinic context from system admin
+  const [clinicName] = useState(() => {
+    try {
+      const c = JSON.parse(localStorage.getItem('selected_clinic') || '{}');
+      return c.name || '';
+    } catch { return ''; }
+  });
+
   // Dynamic notification badge count
   const [notifCount, setNotifCount] = useState(() => {
     try { return parseInt(localStorage.getItem('notif_unread_count') || '0', 10); } catch { return 0; }
@@ -328,6 +336,22 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
           )}
         </Link>
       </div>
+
+      {/* ── Clinic name indicator ──────────────────────────────────────────── */}
+      {clinicName && !collapsed && (
+        <div
+          className="flex items-center gap-2 border-b border-[var(--border-color)]"
+          style={{ padding: '8px 24px', minHeight: '36px' }}
+        >
+          <div style={{
+            width: 6, height: 6, borderRadius: '50%',
+            backgroundColor: '#22c55e', flexShrink: 0,
+          }} />
+          <span className="text-[var(--text-secondary)] truncate" style={{ fontSize: 12, fontWeight: 600 }}>
+            {clinicName}
+          </span>
+        </div>
+      )}
 
       {/* ── Collapse toggle ──────────────────────────────────────────────────── */}
       <button

@@ -518,6 +518,14 @@ export default function DashboardPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // ── Selected clinic context ────────────────────────────────
+  const [selectedClinic] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('selected_clinic') || '{}');
+    } catch { return {}; }
+  });
+  const isDevClinic = selectedClinic.is_dev !== false; // default to dev if not set
+
   // ── Vet name from Supabase (cached to avoid flash) ─────────
   const [vetName, setVetName] = useState(() => {
     try {
@@ -581,7 +589,9 @@ export default function DashboardPage() {
       <div className="mb-6">
         <h1 className="text-[var(--text-primary)] mb-2">Welcome back, {vetName || 'Doctor'} 👋</h1>
         <p className="text-[var(--text-secondary)]" style={{ fontSize: '16px', fontWeight: 400 }}>
-          Here's what's happening with your clinic today.
+          {selectedClinic.name
+            ? `${selectedClinic.name} — Here's what's happening today.`
+            : "Here's what's happening with your clinic today."}
         </p>
       </div>
 

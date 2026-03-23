@@ -178,6 +178,14 @@ export default function SystemAdminPage() {
             {clinics.map(clinic => (
               <div
                 key={clinic.id}
+                onClick={() => {
+                  localStorage.setItem('selected_clinic', JSON.stringify({
+                    id: clinic.id,
+                    name: clinic.name,
+                    is_dev: clinic.is_dev,
+                  }));
+                  navigate('/');
+                }}
                 style={{
                   background: cardBg,
                   border: `1px solid ${clinic.is_dev ? 'rgba(236,72,153,0.3)' : cardBorder}`,
@@ -185,6 +193,18 @@ export default function SystemAdminPage() {
                   padding: 24,
                   backdropFilter: 'blur(12px)',
                   position: 'relative',
+                  cursor: 'pointer',
+                  transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+                }}
+                onMouseEnter={e => {
+                  (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)';
+                  (e.currentTarget as HTMLElement).style.boxShadow = isDark
+                    ? '0 8px 24px rgba(0,0,0,0.3)'
+                    : '0 8px 24px rgba(0,0,0,0.08)';
+                }}
+                onMouseLeave={e => {
+                  (e.currentTarget as HTMLElement).style.transform = 'translateY(0)';
+                  (e.currentTarget as HTMLElement).style.boxShadow = 'none';
                 }}
               >
                 {/* Dev badge */}
@@ -266,7 +286,7 @@ export default function SystemAdminPage() {
 
                 {/* Actions */}
                 {!clinic.is_dev && (
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
                     <button
                       onClick={() => handleSync(clinic.id)}
                       disabled={syncing === clinic.id}
