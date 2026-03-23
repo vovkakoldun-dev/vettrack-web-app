@@ -2,11 +2,10 @@ import { useState, useEffect } from 'react';
 import {
   CheckSquare, Clock, AlertTriangle, CheckCircle2, Search,
   Phone, Calendar, Pill, FlaskConical, FileText, Bell,
-  Filter, ChevronDown, User, Stethoscope, X, Plus,
+  Filter, ChevronDown, User, Stethoscope, X, Trash2,
   ArrowUpRight, MoreHorizontal, Circle,
 } from 'lucide-react';
 import { Input } from '../../components/ui/input';
-import { Button } from '../../components/ui/button';
 import { StatCard } from '../../components/StatCard';
 import { supabase } from '../../../lib/supabase';
 
@@ -119,9 +118,11 @@ function formatDate(d: string) {
 function TaskCard({
   task,
   onStatusChange,
+  onDelete,
 }: {
   task: Task;
   onStatusChange: (id: string, status: TaskStatus) => void;
+  onDelete: (id: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const TypeIcon = TYPE_CONFIG[task.type].icon;
@@ -284,6 +285,17 @@ function TaskCard({
                 }}
               />
             </button>
+            <button
+              onClick={() => onDelete(task.id)}
+              title="Delete task"
+              className="flex items-center justify-center transition-colors hover:bg-red-50 dark:hover:bg-red-950/30"
+              style={{
+                width: 30, height: 30, borderRadius: 8, border: '1px solid var(--border-color)',
+                backgroundColor: 'transparent', cursor: 'pointer',
+              }}
+            >
+              <Trash2 style={{ width: 14, height: 14, color: '#d4183d' }} />
+            </button>
           </div>
         </div>
       </div>
@@ -377,6 +389,11 @@ export default function AdminTasksPage() {
     }).eq('id', id);
   };
 
+  const handleDelete = async (id: string) => {
+    setTasks(prev => prev.filter(t => t.id !== id));
+    await supabase.from('tasks').delete().eq('id', id);
+  };
+
   // Stats
   const total     = tasks.length;
   const urgent    = tasks.filter(t => t.priority === 'Urgent' && t.status !== 'Completed').length;
@@ -409,21 +426,13 @@ export default function AdminTasksPage() {
     <div style={{ padding: '32px 32px 48px', maxWidth: '1100px', margin: '0 auto' }}>
 
       {/* Header */}
-      <div className="flex items-start justify-between" style={{ marginBottom: '28px' }}>
-        <div>
-          <h1 className="text-[var(--text-primary)]" style={{ fontSize: '28px', fontWeight: 700, marginBottom: '4px' }}>
-            Tasks
-          </h1>
-          <p className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>
-            Follow-up tasks and action items assigned by doctors
-          </p>
-        </div>
-        <Button
-          style={{ backgroundColor: '#2D6A4F', color: '#fff', gap: '6px', display: 'flex', alignItems: 'center' }}
-        >
-          <Plus style={{ width: 15, height: 15 }} />
-          New Task
-        </Button>
+      <div style={{ marginBottom: '28px' }}>
+        <h1 className="text-[var(--text-primary)]" style={{ fontSize: '28px', fontWeight: 700, marginBottom: '4px' }}>
+          Tasks
+        </h1>
+        <p className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>
+          Follow-up tasks and action items assigned by doctors
+        </p>
       </div>
 
       {/* Stat cards */}
@@ -558,7 +567,7 @@ export default function AdminTasksPage() {
             <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: 4 }}>Try adjusting your filters</p>
           </div>
         ) : sorted.map(task => (
-          <TaskCard key={task.id} task={task} onStatusChange={handleStatusChange} />
+          <TaskCard key={task.id} task={task} onStatusChange={handleStatusChange} onDelete={handleDelete} />
         ))}
       </div>
 
