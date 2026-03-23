@@ -8,6 +8,7 @@ import {
 import { Input } from '../../components/ui/input';
 import { Button } from '../../components/ui/button';
 import { StatCard } from '../../components/StatCard';
+import { supabase } from '../../../lib/supabase';
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -42,202 +43,28 @@ interface Task {
   tags?: string[];
 }
 
-// ─── Mock Data ────────────────────────────────────────────────
+// ─── Supabase row → Task mapper ───────────────────────────────
 
-const TASKS: Task[] = [
-  {
-    id: 'T-001',
-    type: 'Follow-up Call',
-    priority: 'Urgent',
-    status: 'Pending',
-    dueDate: '2026-03-15',
-    dueTime: '10:00 AM',
-    petName: 'Max',
-    petSpecies: 'Dog',
-    ownerName: 'John Smith',
-    ownerPhone: '(555) 234-5678',
-    assignedBy: 'Dr. Sarah Chen',
-    visitDate: '2026-03-14',
-    doctorNotes: 'Max showed signs of lethargy post-vaccination. Please call owner tomorrow morning to check on his condition. If symptoms persist — vomiting or extreme fatigue — advise them to come in immediately.',
-    tags: ['Post-vaccination', 'Monitor'],
-  },
-  {
-    id: 'T-002',
-    type: 'Medication Refill',
-    priority: 'High',
-    status: 'In Progress',
-    dueDate: '2026-03-15',
-    dueTime: '2:00 PM',
-    petName: 'Bella',
-    petSpecies: 'Cat',
-    ownerName: 'Sarah Williams',
-    ownerPhone: '(555) 345-6789',
-    assignedBy: 'Dr. James Miller',
-    visitDate: '2026-03-13',
-    doctorNotes: 'Bella is on thyroid medication (Methimazole 2.5mg). Owner requested a 90-day refill. Prescription is pre-approved. Call pharmacy to prepare and notify owner for pickup.',
-    assignedTo: 'Sarah Mitchell',
-    tags: ['Thyroid', 'Chronic medication'],
-  },
-  {
-    id: 'T-003',
-    type: 'Lab Follow-up',
-    priority: 'Urgent',
-    status: 'Pending',
-    dueDate: '2026-03-15',
-    dueTime: '11:30 AM',
-    petName: 'Cooper',
-    petSpecies: 'Dog',
-    ownerName: 'Michael Brown',
-    ownerPhone: '(555) 456-7890',
-    assignedBy: 'Dr. Sarah Chen',
-    visitDate: '2026-03-14',
-    doctorNotes: 'CBC panel came back with elevated WBC (18.4 K/μL). Needs owner notification ASAP. Schedule a recheck appointment for next week. Also confirm the urine culture results from the lab — should be ready today.',
-    tags: ['CBC', 'Elevated WBC', 'Recheck needed'],
-  },
-  {
-    id: 'T-004',
-    type: 'Schedule Appointment',
-    priority: 'Normal',
-    status: 'Pending',
-    dueDate: '2026-03-16',
-    petName: 'Daisy',
-    petSpecies: 'Dog',
-    ownerName: 'Emily Davis',
-    ownerPhone: '(555) 567-8901',
-    assignedBy: 'Dr. James Miller',
-    visitDate: '2026-03-14',
-    doctorNotes: 'Annual dental cleaning is overdue by 3 months. Please schedule a dental appointment within the next 2 weeks. Morning slots preferred. Remind owner to fast Daisy 8 hours before the procedure.',
-    tags: ['Dental', 'Annual care'],
-  },
-  {
-    id: 'T-005',
-    type: 'Owner Notification',
-    priority: 'High',
-    status: 'Completed',
-    dueDate: '2026-03-14',
-    dueTime: '3:00 PM',
-    petName: 'Milo',
-    petSpecies: 'Cat',
-    ownerName: 'Robert Johnson',
-    ownerPhone: '(555) 678-9012',
-    assignedBy: 'Dr. Sarah Chen',
-    visitDate: '2026-03-14',
-    doctorNotes: "Milo's X-ray confirmed a small bladder stone (3mm). Not requiring surgery at this point. Owner needs to be informed and given the prescription diet instructions (Hills C/D). Provide printed dietary guide.",
-    assignedTo: 'Sarah Mitchell',
-    completedAt: '2026-03-14 2:45 PM',
-    tags: ['Bladder stone', 'Dietary change'],
-  },
-  {
-    id: 'T-006',
-    type: 'Prescription Ready',
-    priority: 'Normal',
-    status: 'Completed',
-    dueDate: '2026-03-14',
-    petName: 'Luna',
-    petSpecies: 'Cat',
-    ownerName: 'Jennifer Lee',
-    ownerPhone: '(555) 789-0123',
-    assignedBy: 'Dr. James Miller',
-    visitDate: '2026-03-13',
-    doctorNotes: 'Flea/tick prevention (Bravecto) and ear drops (Otomax) are ready for pickup. Owner should be notified via call. If no answer, send a text message reminder.',
-    assignedTo: 'Sarah Mitchell',
-    completedAt: '2026-03-14 10:20 AM',
-    tags: ['Pickup ready'],
-  },
-  {
-    id: 'T-007',
-    type: 'Follow-up Call',
-    priority: 'High',
-    status: 'Pending',
-    dueDate: '2026-03-16',
-    petName: 'Charlie',
-    petSpecies: 'Dog',
-    ownerName: 'David Wilson',
-    ownerPhone: '(555) 890-1234',
-    assignedBy: 'Dr. Sarah Chen',
-    visitDate: '2026-03-12',
-    doctorNotes: 'Post-surgery recovery check. Charlie had a soft tissue mass removed from left hind leg. Stitches should be inspected — ask owner to send a photo if possible. Schedule suture removal in 5 days if healing well.',
-    tags: ['Post-surgery', 'Suture check'],
-  },
-  {
-    id: 'T-008',
-    type: 'Home Care Check',
-    priority: 'Normal',
-    status: 'In Progress',
-    dueDate: '2026-03-17',
-    petName: 'Rocky',
-    petSpecies: 'Dog',
-    ownerName: 'Lisa Martinez',
-    ownerPhone: '(555) 901-2345',
-    assignedBy: 'Dr. James Miller',
-    visitDate: '2026-03-13',
-    doctorNotes: 'Rocky was diagnosed with mild hip dysplasia. Owner was given a home exercise plan and joint supplement regime (Cosequin DS). Follow up to confirm they started the protocol and answer any questions about the exercises.',
-    assignedTo: 'Sarah Mitchell',
-    tags: ['Hip dysplasia', 'Rehab'],
-  },
-  {
-    id: 'T-009',
-    type: 'Referral',
-    priority: 'High',
-    status: 'Pending',
-    dueDate: '2026-03-16',
-    dueTime: '9:00 AM',
-    petName: 'Whiskers',
-    petSpecies: 'Cat',
-    ownerName: 'Karen Thompson',
-    ownerPhone: '(555) 012-3456',
-    assignedBy: 'Dr. Sarah Chen',
-    visitDate: '2026-03-14',
-    doctorNotes: 'Whiskers needs a cardiology referral. Echo showed possible HCM (hypertrophic cardiomyopathy). Please contact Animal Cardiology Specialists at (555) 300-4400 and schedule an appointment within this week. Send medical records in advance.',
-    tags: ['Cardiology', 'HCM', 'Urgent referral'],
-  },
-  {
-    id: 'T-010',
-    type: 'Lab Follow-up',
-    priority: 'Normal',
-    status: 'Pending',
-    dueDate: '2026-03-18',
-    petName: 'Nala',
-    petSpecies: 'Dog',
-    ownerName: 'Marcus Davis',
-    ownerPhone: '(555) 123-4567',
-    assignedBy: 'Dr. James Miller',
-    visitDate: '2026-03-14',
-    doctorNotes: 'Thyroid panel and cortisol test results expected Thursday. Once in, review with Dr. Miller and then contact owner with results. If cortisol is elevated, we may need to discuss Cushing\'s disease management options.',
-    tags: ['Thyroid', 'Cortisol', 'Awaiting results'],
-  },
-  {
-    id: 'T-011',
-    type: 'Schedule Appointment',
-    priority: 'Low',
-    status: 'Pending',
-    dueDate: '2026-03-20',
-    petName: 'Peanut',
-    petSpecies: 'Rabbit',
-    ownerName: 'Amy Chen',
-    ownerPhone: '(555) 234-5670',
-    assignedBy: 'Dr. Sarah Chen',
-    visitDate: '2026-03-10',
-    doctorNotes: 'Peanut is due for a 6-month wellness check. No urgent issues but preventive care is important for rabbits. Please reach out to owner and schedule sometime in the next 3–4 weeks.',
-    tags: ['Wellness', 'Preventive care'],
-  },
-  {
-    id: 'T-012',
-    type: 'Medication Refill',
-    priority: 'Urgent',
-    status: 'Pending',
-    dueDate: '2026-03-15',
-    dueTime: '12:00 PM',
-    petName: 'Shadow',
-    petSpecies: 'Dog',
-    ownerName: 'Tom Baker',
-    ownerPhone: '(555) 345-6780',
-    assignedBy: 'Dr. James Miller',
-    visitDate: '2026-03-13',
-    doctorNotes: 'Shadow is on Phenobarbital for seizure management. Owner is down to 2 days of medication — CRITICAL that this is refilled today. Contact pharmacy immediately. Owner can pick up or we can arrange delivery.',
-    tags: ['Seizure', 'Critical medication', 'URGENT'],
-  },
-];
+function mapRow(r: any): Task {
+  return {
+    id: r.id,
+    type: r.type,
+    priority: r.priority,
+    status: r.status,
+    dueDate: r.due_date,
+    dueTime: r.due_time || undefined,
+    petName: r.pet_name,
+    petSpecies: r.pet_species || '',
+    ownerName: r.owner_name,
+    ownerPhone: r.owner_phone || '',
+    assignedBy: r.assigned_by,
+    visitDate: r.visit_date,
+    doctorNotes: r.doctor_notes || '',
+    assignedTo: r.assigned_to || undefined,
+    completedAt: r.completed_at || undefined,
+    tags: r.tags || [],
+  };
+}
 
 // ─── Config Maps ──────────────────────────────────────────────
 
@@ -524,32 +351,30 @@ export default function AdminTasksPage() {
   const [priorityOpen, setPriorityOpen] = useState(false);
   const [typeOpen, setTypeOpen] = useState(false);
 
-  // Load tasks from localStorage on mount
+  // Load tasks from Supabase on mount
   useEffect(() => {
-    try {
-      const stored: Task[] = JSON.parse(localStorage.getItem('front_desk_tasks') || '[]');
-      // Merge localStorage tasks (real) with TASKS (demo/seed data if no real tasks)
-      if (stored.length > 0) {
-        setTasks(stored);
-      } else {
-        setTasks(TASKS);
-      }
-    } catch {
-      setTasks(TASKS);
-    }
+    (async () => {
+      const { data } = await supabase
+        .from('tasks')
+        .select('*')
+        .order('due_date', { ascending: true });
+      if (data) setTasks(data.map(mapRow));
+    })();
   }, []);
 
-  const handleStatusChange = (id: string, status: TaskStatus) => {
-    setTasks(prev => {
-      const updated = prev.map(t =>
-        t.id === id
-          ? { ...t, status, completedAt: status === 'Completed' ? new Date().toLocaleString() : t.completedAt }
-          : t
-      );
-      // Persist status changes back to localStorage
-      try { localStorage.setItem('front_desk_tasks', JSON.stringify(updated)); } catch {}
-      return updated;
-    });
+  const handleStatusChange = async (id: string, status: TaskStatus) => {
+    const completedAt = status === 'Completed' ? new Date().toLocaleString() : null;
+    // Update locally immediately
+    setTasks(prev => prev.map(t =>
+      t.id === id
+        ? { ...t, status, completedAt: completedAt || t.completedAt }
+        : t
+    ));
+    // Persist to Supabase
+    await supabase.from('tasks').update({
+      status,
+      completed_at: completedAt,
+    }).eq('id', id);
   };
 
   // Stats
