@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
-  Stethoscope, ShieldCheck, Crown, PawPrint,
+  Stethoscope, ShieldCheck, Crown, PawPrint, Code2,
   Eye, EyeOff, ArrowLeft, ChevronRight, Sun, Moon,
 } from 'lucide-react';
 import { useTheme } from '../hooks/useTheme';
 
-type Role = 'doctor' | 'admin' | 'superadmin' | 'patient';
+type Role = 'doctor' | 'admin' | 'superadmin' | 'patient' | 'sysadmin';
 
 type RoleCard = {
   id: Role;
@@ -70,6 +70,18 @@ const ROLES: RoleCard[] = [
     ring: 'rgba(139,92,246,0.4)',
     defaultEmail: 'john.smith@email.com',
   },
+  {
+    id: 'sysadmin',
+    label: 'System Admin',
+    subtitle: 'Developer',
+    description: 'Manage clinics, deploy updates, and oversee the entire platform infrastructure.',
+    icon: Code2,
+    color: '#EC4899',
+    bg: 'rgba(236,72,153,0.08)',
+    border: 'rgba(236,72,153,0.25)',
+    ring: 'rgba(236,72,153,0.4)',
+    defaultEmail: 'dev@hugory.com',
+  },
 ];
 
 export default function LoginPage() {
@@ -101,7 +113,9 @@ export default function LoginPage() {
     setLoading(true);
     // Simulate auth delay, then navigate to the appropriate portal
     setTimeout(() => {
-      if (selected === 'superadmin') {
+      if (selected === 'sysadmin') {
+        navigate('/sysadmin');
+      } else if (selected === 'superadmin') {
         navigate('/superadmin');
       } else if (selected === 'admin') {
         navigate('/admin');

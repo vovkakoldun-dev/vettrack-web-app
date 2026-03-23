@@ -48,6 +48,7 @@ import AdminMyPortalPage from './pages/admin/AdminMyPortalPage';
 import AdminTasksPage from './pages/admin/AdminTasksPage';
 import AdminSettingsPage from './pages/admin/AdminSettingsPage';
 import AdminChatPage from './pages/admin/AdminChatPage';
+import SystemAdminPage from './pages/sysadmin/SystemAdminPage';
 import { ActiveVisitProvider, useActiveVisit } from './context/ActiveVisitContext';
 import { AppointmentStatusProvider } from './context/AppointmentStatusContext';
 import { Avatar, AvatarImage, AvatarFallback } from './components/ui/avatar';
@@ -366,6 +367,7 @@ export default function App() {
     <ActiveVisitProvider>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/sysadmin" element={<SystemAdminPage />} />
         <Route path="/superadmin/*" element={<SuperAdminApp />} />
         <Route path="/admin/*" element={<AdminApp />} />
         <Route path="/owner/*" element={<OwnerApp />} />
