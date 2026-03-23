@@ -51,8 +51,15 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
 
   const [collapsed, setCollapsed]     = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [adminPhoto, setAdminPhoto]   = useState('');
-  const [adminName, setAdminName]     = useState('Sarah Mitchell');
+  const [adminPhoto, setAdminPhoto]   = useState(() => {
+    try { return localStorage.getItem('admin_profile_photo') || ''; } catch { return ''; }
+  });
+  const [adminName, setAdminName]     = useState(() => {
+    try {
+      const cached = JSON.parse(localStorage.getItem('admin_profile_settings') || '{}');
+      return (cached.firstName && cached.lastName) ? `${cached.firstName} ${cached.lastName}` : '';
+    } catch { return ''; }
+  });
   const [sections, setSections]       = useState<NavSection[]>(NAV_SECTIONS);
 
   // ── Chat unread badge from Supabase (timestamp-based) ─────
