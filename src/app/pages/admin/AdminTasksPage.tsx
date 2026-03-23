@@ -255,20 +255,6 @@ function TaskCard({
                 Done
               </button>
             )}
-            {task.status === 'Pending' && (
-              <button
-                onClick={() => onStatusChange(task.id, 'In Progress')}
-                className="flex items-center gap-1.5 transition-colors hover:opacity-80"
-                style={{
-                  fontSize: 12, fontWeight: 600, padding: '5px 10px', borderRadius: 8,
-                  backgroundColor: 'var(--surface-elevated)', color: 'var(--text-primary)',
-                  border: '1px solid var(--border-color)', cursor: 'pointer',
-                }}
-              >
-                <Circle style={{ width: 13, height: 13 }} />
-                Start
-              </button>
-            )}
             <button
               onClick={() => setExpanded(e => !e)}
               className="flex items-center justify-center transition-colors hover:bg-[var(--surface-elevated)]"
@@ -442,7 +428,7 @@ export default function AdminTasksPage() {
           trend={urgent > 0 ? { value: `${urgent} need immediate action`, isPositive: false } : undefined} />
         <StatCard title="Due Today"       value={dueToday}  icon={Clock}          iconColor="#F4A261" />
         <StatCard title="Completed"       value={completed} icon={CheckCircle2}   iconColor="#3B82F6"
-          trend={{ value: `${Math.round(completed / total * 100)}% completion rate`, isPositive: true }} />
+          trend={total > 0 ? { value: `${Math.round(completed / total * 100)}% completion rate`, isPositive: true } : undefined} />
       </div>
 
       {/* Filters */}
