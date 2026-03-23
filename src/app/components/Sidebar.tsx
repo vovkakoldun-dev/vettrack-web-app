@@ -7,7 +7,7 @@ import {
   ChevronLeft, ChevronRight, LogOut, ChevronUp, MessageSquare,
 } from 'lucide-react';
 
-export const UNREAD_NOTIFICATION_COUNT = 5;
+export const UNREAD_NOTIFICATION_COUNT = 0; // updated dynamically
 
 type NavItem = {
   name: string;
@@ -29,7 +29,7 @@ const INITIAL_SECTIONS: NavSection[] = [
     items: [
       { name: 'Dashboard',     icon: Home,          path: '/' },
       { name: 'My Portal',     icon: UserCircle,    path: '/my-portal' },
-      { name: 'Team Chat',     icon: MessageSquare, path: '/chat',          badge: 4 },
+      { name: 'Team Chat',     icon: MessageSquare, path: '/chat' },
       { name: 'Notifications', icon: Bell,          path: '/notifications', badge: UNREAD_NOTIFICATION_COUNT },
     ],
   },
@@ -61,13 +61,178 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
   const [profileOpen, setProfileOpen] = useState(false);
   const [sections, setSections]       = useState<NavSection[]>(INITIAL_SECTIONS);
 
+  // Dynamic notification badge count
+  const [notifCount, setNotifCount] = useState(() => {
+    try { return parseInt(localStorage.getItem('notif_unread_count') || '0', 10); } catch { return 0; }
+  });
+
+  // Compute notification count from Supabase
+  const computeNotifCount = async () => {
+    try {
+      const n = new Date();
+      const today = `${n.getFullYear()}-${(n.getMonth() + 1).toString().padStart(2, '0')}-${n.getDate().toString().padStart(2, '0')}`;
+      const weekAgo = new Date(Date.now() - 7 * 86400000);
+      const weekAgoStr = `${weekAgo.getFullYear()}-${(weekAgo.getMonth() + 1).toString().padStart(2, '0')}-${weekAgo.getDate().toString().padStart(2, '0')}`;
+
+      const [apptTodayRes, clientRes, vacRes, completedRes, cancelledRes] = await Promise.all([
+        supabase.from('appointments').select('id, scheduled_at')
+          .gte('scheduled_at', `${today}T00:00:00`).lte('scheduled_at', `${today}T23:59:59`)
+          .in('status', ['Scheduled', 'Confirmed']),
+        supabase.from('clients').select('id, created_at')
+          .gte('created_at', `${weekAgoStr}T00:00:00`),
+        supabase.from('vaccinations').select('id, next_due_date')
+          .lte('next_due_date', today),
+        supabase.from('appointments').select('id')
+          .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Completed'),
+        supabase.from('appointments').select('id')
+          .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Cancelled'),
+      ]);
+
+      // Collect all notification IDs (must match NotificationsPage)
+      const allIds: string[] = [];
+
+      (apptTodayRes.data || []).forEach((a) => allIds.push(`appt-today-${a.id}`));
+      (completedRes.data || []).forEach((a) => allIds.push(`appt-done-${a.id}`));
+      (cancelledRes.data || []).forEach((a) => allIds.push(`appt-cancel-${a.id}`));
+      (vacRes.data || []).forEach((v) => allIds.push(`vax-${v.id}`));
+      (clientRes.data || []).forEach((c) => allIds.push(`client-${c.id}`));
+
+      // Count assignment events from localStorage
+      try {
+        const assignEvents = JSON.parse(localStorage.getItem('vet_assign_events') || '[]');
+        const sevenDaysAgoMs = Date.now() - 7 * 86400000;
+        for (const evt of assignEvents) {
+          if (new Date(evt.timestamp).getTime() >= sevenDaysAgoMs) {
+            allIds.push(evt.id);
+          }
+        }
+      } catch {}
+
+      // Count vet unassignment events
+      try {
+        const unassignEvents = JSON.parse(localStorage.getItem('vet_unassign_events') || '[]');
+        const sevenDaysAgoMs = Date.now() - 7 * 86400000;
+        for (const evt of unassignEvents) {
+          if (new Date(evt.timestamp).getTime() >= sevenDaysAgoMs) {
+            allIds.push(evt.id);
+          }
+        }
+      } catch {}
+
+      // Count appointment assignment events
+      try {
+        const apptEvents = JSON.parse(localStorage.getItem('appt_assign_events') || '[]');
+        const sevenDaysAgoMs = Date.now() - 7 * 86400000;
+        for (const evt of apptEvents) {
+          if (new Date(evt.timestamp).getTime() >= sevenDaysAgoMs) {
+            allIds.push(evt.id);
+          }
+        }
+      } catch {}
+
+      const readIds: string[] = JSON.parse(localStorage.getItem('notif_read') || '[]');
+      const dismissedIds: string[] = JSON.parse(localStorage.getItem('notif_dismissed') || '[]');
+      const readSet = new Set(readIds);
+      const dismissedSet = new Set(dismissedIds);
+
+      const unread = allIds.filter(id => !dismissedSet.has(id) && !readSet.has(id)).length;
+
+      setNotifCount(unread);
+      localStorage.setItem('notif_unread_count', String(unread));
+    } catch {}
+  };
+
+  // Compute on mount
+  useEffect(() => { computeNotifCount(); }, []);
+
+  // Listen for count changes — either with explicit count or re-compute
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail && typeof detail.count === 'number') {
+        setNotifCount(detail.count);
+      } else {
+        // Re-compute from DB (e.g. after adding a client)
+        computeNotifCount();
+      }
+    };
+    window.addEventListener('notifCountChanged', handler);
+    return () => window.removeEventListener('notifCountChanged', handler);
+  }, []);
+
+  // ── Chat unread badge from Supabase (timestamp-based) ─────
+  const [chatUnread, setChatUnread] = useState(0);
+  const doctorStaffIdRef = useRef('');
+  const chatReadAtRef = useRef('1970-01-01T00:00:00Z');
+
+  useEffect(() => {
+    let mounted = true;
+    let interval: ReturnType<typeof setInterval>;
+
+    async function checkChatUnread() {
+      if (!mounted) return;
+      const { count } = await supabase
+        .from('chat_messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('conversation', 'admin-doctor')
+        .neq('sender_name', 'Dr. Volodymyr Koldun')
+        .gt('created_at', chatReadAtRef.current);
+      // Show 1 if any unread messages exist (1 conversation), not total message count
+      if (mounted) setChatUnread((count && count > 0) ? 1 : 0);
+    }
+
+    // Fetch doctor staff ID + chat_read_at FIRST, then start polling
+    (async () => {
+      const { data } = await supabase
+        .from('staff')
+        .select('id, chat_read_at')
+        .in('role', ['veterinarian', 'senior_veterinarian', 'lead_vet_tech'])
+        .limit(1)
+        .single();
+      if (data && mounted) {
+        doctorStaffIdRef.current = data.id;
+        chatReadAtRef.current = data.chat_read_at || '1970-01-01T00:00:00Z';
+      }
+      if (!mounted) return;
+      checkChatUnread();
+      interval = setInterval(checkChatUnread, 3000);
+    })();
+
+    return () => { mounted = false; if (interval) clearInterval(interval); };
+  }, [pathname]);
+
+  // Listen for chat read events from ChatPage
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.chat_read_at) {
+        chatReadAtRef.current = detail.chat_read_at;
+        setChatUnread(0);
+      }
+    };
+    window.addEventListener('doctorChatRead', handler);
+    return () => window.removeEventListener('doctorChatRead', handler);
+  }, []);
+
+  // Update sections when notifCount or chatUnread changes
+  useEffect(() => {
+    setSections(prev => prev.map(s => s.id === 'overview' ? {
+      ...s,
+      items: s.items.map(item => {
+        if (item.path === '/notifications') return { ...item, badge: notifCount };
+        if (item.path === '/chat') return { ...item, badge: chatUnread || undefined };
+        return item;
+      }),
+    } : s));
+  }, [notifCount, chatUnread]);
+
   // Fetch staff profile from Supabase
   const [staffName, setStaffName] = useState('Dr. Sarah Chen');
   const [staffRole, setStaffRole] = useState('Veterinarian');
   const [staffEmail, setStaffEmail] = useState('sarah.chen@vettrack.com');
   const [staffPhoto, setStaffPhoto] = useState('');
   useEffect(() => {
-    supabase.from('staff').select('first_name, last_name, role, email, photo_url').limit(1).single().then(({ data }) => {
+    supabase.from('staff').select('first_name, last_name, role, email, photo_url').in('role', ['veterinarian', 'senior_veterinarian', 'lead_vet_tech']).limit(1).single().then(({ data }) => {
       if (data) {
         setStaffName(`Dr. ${data.first_name} ${data.last_name}`);
         setStaffRole((data.role || 'veterinarian').replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()));
@@ -77,17 +242,14 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
     });
   }, []);
 
-  // Refetch staff photo when page regains focus (e.g. after uploading on My Portal)
+  // Listen for instant photo change events from My Portal
   useEffect(() => {
-    const handleFocus = () => {
-      supabase.from('staff').select('photo_url').limit(1).single().then(({ data }) => {
-        if (data) setStaffPhoto(data.photo_url || '');
-      });
+    const handlePhotoChanged = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      setStaffPhoto(detail?.photo_url || '');
     };
-    window.addEventListener('focus', handleFocus);
-    // Also poll every 3 seconds to catch same-tab updates
-    const interval = setInterval(handleFocus, 3000);
-    return () => { window.removeEventListener('focus', handleFocus); clearInterval(interval); };
+    window.addEventListener('staffPhotoChanged', handlePhotoChanged);
+    return () => window.removeEventListener('staffPhotoChanged', handlePhotoChanged);
   }, []);
 
   // Drag state for sections
@@ -159,19 +321,10 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
         }}
       >
         <Link to="/" className="flex items-center gap-2 flex-shrink-0">
-          <div
-            className="w-10 h-10 bg-[#2D6A4F] flex items-center justify-center flex-shrink-0"
-            style={{ borderRadius: '10px' }}
-          >
-            <PawPrint className="w-6 h-6 text-white" />
-          </div>
-          {!collapsed && (
-            <span
-              className="text-[var(--text-primary)] whitespace-nowrap"
-              style={{ fontSize: '20px', fontWeight: 700 }}
-            >
-              Hugory
-            </span>
+          {collapsed ? (
+            <img src="/logo-mini.svg" alt="HugoIT" className="flex-shrink-0" style={{ width: '32px', height: '32px' }} />
+          ) : (
+            <img src={isDark ? '/logo-full-dark.svg' : '/logo-full.svg'} alt="HugoIT" className="flex-shrink-0" style={{ height: '52px' }} />
           )}
         </Link>
       </div>

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../../../lib/supabase';
 import {
   MessageSquare,
   Send,
@@ -7,7 +7,7 @@ import {
   Smile,
   Check,
 } from 'lucide-react';
-import { Input } from '../components/ui/input';
+import { Input } from '../../components/ui/input';
 
 // ─── Emoji picker data ────────────────────────────────────────────────────────
 
@@ -37,13 +37,13 @@ type Message = {
 
 const TODAY = new Date();
 
-function getAdminDisplayName(): string {
+function getAdminName(): string {
   try {
     const p = JSON.parse(localStorage.getItem('admin_profile_settings') || '{}');
     if (p.firstName && p.lastName) return `${p.firstName} ${p.lastName}`;
     if (p.firstName) return p.firstName;
   } catch { /* ignore */ }
-  return 'Front Desk Admin';
+  return 'Admin';
 }
 
 function getInitials(name: string): string {
@@ -102,45 +102,16 @@ function DateSeparator({ label }: { label: string }) {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function ChatPage() {
-  const [adminName, setAdminName] = useState(getAdminDisplayName);
-  const [adminPhoto, setAdminPhoto] = useState('');
+export default function AdminChatPage() {
+  const adminName = useRef(getAdminName());
+  const adminStaffId = useRef('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [unreadCount, setUnreadCount] = useState(0);
   const [selected, setSelected] = useState(false);
-  const doctorStaffId = useRef('');
   const chatReadAtRef = useRef('1970-01-01T00:00:00Z');
   const [chatReadAtLoaded, setChatReadAtLoaded] = useState(false);
-
-  // Fetch admin photo + doctor staff ID + chat_read_at on mount
-  useEffect(() => {
-    (async () => {
-      // Get admin info
-      const { data: adminData } = await supabase
-        .from('staff')
-        .select('photo_url, first_name, last_name')
-        .in('role', ['front_desk_manager', 'receptionist', 'clinic_manager', 'superadmin'])
-        .limit(1)
-        .single();
-      if (adminData) {
-        if (adminData.photo_url) setAdminPhoto(adminData.photo_url);
-        if (adminData.first_name && adminData.last_name) setAdminName(`${adminData.first_name} ${adminData.last_name}`);
-      }
-      // Get doctor staff record for chat_read_at
-      const { data: docData } = await supabase
-        .from('staff')
-        .select('id, chat_read_at')
-        .in('role', ['veterinarian', 'senior_veterinarian', 'lead_vet_tech'])
-        .limit(1)
-        .single();
-      if (docData) {
-        doctorStaffId.current = docData.id;
-        chatReadAtRef.current = docData.chat_read_at || '1970-01-01T00:00:00Z';
-      }
-      setChatReadAtLoaded(true);
-    })();
-  }, []);
+  const [doctorPhoto, setDoctorPhoto] = useState('');
 
   // Emoji picker
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -148,6 +119,33 @@ export default function ChatPage() {
   const emojiRef = useRef<HTMLDivElement>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Fetch admin staff ID + chat_read_at on mount, and doctor photo
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from('staff')
+        .select('id, chat_read_at')
+        .in('role', ['front_desk_manager', 'receptionist', 'clinic_manager', 'superadmin'])
+        .limit(1)
+        .single();
+      if (data) {
+        adminStaffId.current = data.id;
+        chatReadAtRef.current = data.chat_read_at || '1970-01-01T00:00:00Z';
+      }
+      setChatReadAtLoaded(true);
+    })();
+    // Fetch doctor photo
+    (async () => {
+      const { data } = await supabase
+        .from('staff')
+        .select('photo_url')
+        .in('role', ['veterinarian', 'senior_veterinarian', 'lead_vet_tech'])
+        .limit(1)
+        .single();
+      if (data?.photo_url) setDoctorPhoto(data.photo_url);
+    })();
+  }, []);
 
   // ── Fetch messages from Supabase ──────────────────────────
   async function fetchMessages() {
@@ -158,24 +156,21 @@ export default function ChatPage() {
       .order('created_at', { ascending: true });
 
     if (data) {
+      const myName = adminName.current;
       const mapped: Message[] = data.map((m: any) => ({
         id: m.id,
-        from: m.sender_name === DOCTOR_NAME ? 'me' as const : 'them' as const,
+        from: m.sender_name === myName ? 'me' as const : 'them' as const,
         text: m.content,
         timestamp: new Date(m.created_at),
       }));
       setMessages(mapped);
 
-      // Update admin display name from the latest "them" message
-      const lastThemMsg = [...data].reverse().find((m: any) => m.sender_name !== DOCTOR_NAME);
-      if (lastThemMsg) setAdminName(lastThemMsg.sender_name);
-
-      // Track unread — count admin messages newer than chat_read_at
+      // Track unread — count doctor messages newer than chat_read_at
       if (selected) {
         setUnreadCount(0);
       } else {
         const readAt = new Date(chatReadAtRef.current).getTime();
-        const unread = data.filter((m: any) => m.sender_name !== DOCTOR_NAME && new Date(m.created_at).getTime() > readAt).length;
+        const unread = data.filter((m: any) => m.sender_name !== myName && new Date(m.created_at).getTime() > readAt).length;
         setUnreadCount(unread);
       }
     }
@@ -211,11 +206,11 @@ export default function ChatPage() {
     // Update chat_read_at in Supabase
     const now = new Date().toISOString();
     chatReadAtRef.current = now;
-    if (doctorStaffId.current) {
-      supabase.from('staff').update({ chat_read_at: now }).eq('id', doctorStaffId.current).then();
+    if (adminStaffId.current) {
+      supabase.from('staff').update({ chat_read_at: now }).eq('id', adminStaffId.current).then();
     }
-    // Notify Sidebar to clear badge instantly
-    window.dispatchEvent(new CustomEvent('doctorChatRead', { detail: { chat_read_at: now } }));
+    // Notify AdminSidebar to clear badge instantly
+    window.dispatchEvent(new CustomEvent('adminChatRead', { detail: { chat_read_at: now } }));
   }
 
   function insertEmoji(emoji: string) {
@@ -241,7 +236,7 @@ export default function ChatPage() {
     await supabase.from('chat_messages').insert([{
       organization_id: ORG_ID,
       conversation: CONVERSATION_KEY,
-      sender_name: DOCTOR_NAME,
+      sender_name: adminName.current,
       content: text,
     }]);
   }
@@ -300,12 +295,12 @@ export default function ChatPage() {
             onMouseEnter={(e) => { if (!selected) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--surface-elevated)'; }}
             onMouseLeave={(e) => { if (!selected) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}
           >
-            <Avatar name={adminName} color="#7C3AED" size={40} online photoUrl={adminPhoto} />
+            <Avatar name={DOCTOR_NAME} color="#2D6A4F" size={40} online photoUrl={doctorPhoto} />
 
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
                 <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '160px' }}>
-                  {adminName}
+                  {DOCTOR_NAME}
                 </span>
                 <span style={{ fontSize: '11px', color: 'var(--text-secondary)', flexShrink: 0, marginLeft: '8px' }}>
                   {previewTime}
@@ -313,7 +308,7 @@ export default function ChatPage() {
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '1px', display: 'block' }}>Front Desk Admin</span>
+                <span style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '1px', display: 'block' }}>Veterinarian</span>
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -338,11 +333,11 @@ export default function ChatPage() {
             {/* Chat header */}
             <div style={{ height: '64px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--surface-white)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <Avatar name={adminName} color="#7C3AED" size={40} online photoUrl={adminPhoto} />
+                <Avatar name={DOCTOR_NAME} color="#2D6A4F" size={40} online photoUrl={doctorPhoto} />
                 <div>
-                  <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.3 }}>{adminName}</div>
+                  <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.3 }}>{DOCTOR_NAME}</div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Front Desk Admin</span>
+                    <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Veterinarian</span>
                     <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>·</span>
                     <span style={{ fontSize: '12px', fontWeight: 500, color: '#22c55e' }}>Online</span>
                   </div>
@@ -374,7 +369,7 @@ export default function ChatPage() {
                         <div key={msg.id} style={{ display: 'flex', flexDirection: isMe ? 'row-reverse' : 'row', alignItems: 'flex-end', gap: '8px', marginBottom: '8px' }}>
                           {!isMe && (
                             <div style={{ flexShrink: 0, marginBottom: isLastMine ? '20px' : '0' }}>
-                              <Avatar name={adminName} color="#7C3AED" size={28} photoUrl={adminPhoto} />
+                              <Avatar name={DOCTOR_NAME} color="#2D6A4F" size={28} photoUrl={doctorPhoto} />
                             </div>
                           )}
 
@@ -508,7 +503,7 @@ export default function ChatPage() {
                 Select a conversation
               </h3>
               <p style={{ fontSize: '14px', color: 'var(--text-secondary)', margin: 0 }}>
-                Click on {adminName} to start messaging
+                Click on Dr. Volodymyr Koldun to start messaging
               </p>
             </div>
           </div>

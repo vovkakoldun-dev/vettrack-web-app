@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   CheckSquare, Clock, AlertTriangle, CheckCircle2, Search,
   Phone, Calendar, Pill, FlaskConical, FileText, Bell,
@@ -267,14 +267,18 @@ const TYPE_CONFIG: Record<TaskType, { icon: React.ElementType; color: string }> 
 
 // ─── Helpers ──────────────────────────────────────────────────
 
+function getTodayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function isOverdue(task: Task) {
   if (task.status === 'Completed') return false;
-  const today = '2026-03-15';
-  return task.dueDate < today;
+  return task.dueDate < getTodayStr();
 }
 
 function isDueToday(task: Task) {
-  return task.dueDate === '2026-03-15' && task.status !== 'Completed';
+  return task.dueDate === getTodayStr() && task.status !== 'Completed';
 }
 
 function formatDate(d: string) {
@@ -512,7 +516,7 @@ const TYPE_OPTIONS: Array<TaskType | 'All'> = [
 ];
 
 export default function AdminTasksPage() {
-  const [tasks, setTasks] = useState<Task[]>(TASKS);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<'All' | TaskStatus>('All');
   const [priority, setPriority] = useState<Priority | 'All'>('All');
@@ -520,12 +524,32 @@ export default function AdminTasksPage() {
   const [priorityOpen, setPriorityOpen] = useState(false);
   const [typeOpen, setTypeOpen] = useState(false);
 
+  // Load tasks from localStorage on mount
+  useEffect(() => {
+    try {
+      const stored: Task[] = JSON.parse(localStorage.getItem('front_desk_tasks') || '[]');
+      // Merge localStorage tasks (real) with TASKS (demo/seed data if no real tasks)
+      if (stored.length > 0) {
+        setTasks(stored);
+      } else {
+        setTasks(TASKS);
+      }
+    } catch {
+      setTasks(TASKS);
+    }
+  }, []);
+
   const handleStatusChange = (id: string, status: TaskStatus) => {
-    setTasks(prev => prev.map(t =>
-      t.id === id
-        ? { ...t, status, completedAt: status === 'Completed' ? '2026-03-15 now' : t.completedAt }
-        : t
-    ));
+    setTasks(prev => {
+      const updated = prev.map(t =>
+        t.id === id
+          ? { ...t, status, completedAt: status === 'Completed' ? new Date().toLocaleString() : t.completedAt }
+          : t
+      );
+      // Persist status changes back to localStorage
+      try { localStorage.setItem('front_desk_tasks', JSON.stringify(updated)); } catch {}
+      return updated;
+    });
   };
 
   // Stats

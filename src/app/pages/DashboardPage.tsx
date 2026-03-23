@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router';
 import { Users, Calendar, Syringe, PawPrint, ChevronRight, ArrowUpRight, Search, X, Clock } from 'lucide-react';
 import { ClientRow } from '../components/ClientRow';
@@ -6,6 +6,102 @@ import { AppointmentCard } from '../components/AppointmentCard';
 import { useDashboardStats } from '../hooks/useDashboardStats';
 import { useAppointments } from '../hooks/useAppointments';
 import { useClients } from '../hooks/useClients';
+import { supabase } from '../../lib/supabase';
+
+// ─── Search result types ────────────────────────────────────
+
+interface SearchResultClient {
+  id: string;
+  first_name: string;
+  last_name: string;
+  email: string | null;
+  phone: string | null;
+}
+
+interface SearchResultPet {
+  id: string;
+  name: string;
+  species: string;
+  breed: string | null;
+  photo_url: string | null;
+  client_id: string;
+  clients: { id: string; first_name: string; last_name: string } | null;
+}
+
+interface SearchResultAppointment {
+  id: string;
+  scheduled_at: string;
+  status: string;
+  reason: string | null;
+  pets: { id: string; name: string } | null;
+  clients: { id: string; first_name: string; last_name: string } | null;
+  services: { id: string; name: string } | null;
+}
+
+interface SearchResults {
+  clients: SearchResultClient[];
+  pets: SearchResultPet[];
+  appointments: SearchResultAppointment[];
+}
+
+function useGlobalSearch(query: string, debounceMs = 300) {
+  const [results, setResults] = useState<SearchResults>({ clients: [], pets: [], appointments: [] });
+  const [loading, setLoading] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const search = useCallback(async (q: string) => {
+    const term = q.trim();
+    if (!term) {
+      setResults({ clients: [], pets: [], appointments: [] });
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    const pattern = `%${term}%`;
+
+    const [clientsRes, petsRes, appointmentsRes] = await Promise.all([
+      supabase
+        .from('clients')
+        .select('id, first_name, last_name, email, phone')
+        .or(`first_name.ilike.${pattern},last_name.ilike.${pattern},email.ilike.${pattern},phone.ilike.${pattern}`)
+        .limit(6),
+      supabase
+        .from('pets')
+        .select('id, name, species, breed, photo_url, client_id, clients(id, first_name, last_name)')
+        .or(`name.ilike.${pattern},species.ilike.${pattern},breed.ilike.${pattern}`)
+        .limit(6),
+      supabase
+        .from('appointments')
+        .select('id, scheduled_at, status, reason, pets(id, name), clients(id, first_name, last_name), services(id, name)')
+        .or(`reason.ilike.${pattern}`)
+        .order('scheduled_at', { ascending: false })
+        .limit(6),
+    ]);
+
+    setResults({
+      clients: (clientsRes.data as SearchResultClient[]) ?? [],
+      pets: (petsRes.data as SearchResultPet[]) ?? [],
+      appointments: (appointmentsRes.data as SearchResultAppointment[]) ?? [],
+    });
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    const term = query.trim();
+    if (!term) {
+      setResults({ clients: [], pets: [], appointments: [] });
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    timerRef.current = setTimeout(() => search(term), debounceMs);
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+  }, [query, debounceMs, search]);
+
+  const totalResults = results.clients.length + results.pets.length + results.appointments.length;
+  return { results, loading, totalResults };
+}
 
 // ─── Glow Card Config (values injected at runtime) ────────────
 
@@ -406,11 +502,44 @@ function GlowStatCard({
 export default function DashboardPage() {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
+  const { results: searchResults, loading: searchLoading, totalResults } = useGlobalSearch(searchQuery);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
+        setSearchOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // ── Vet name from Supabase (cached to avoid flash) ─────────
+  const [vetName, setVetName] = useState(() => {
+    try {
+      const cached = localStorage.getItem('doctor_dashboard_name');
+      return cached || '';
+    } catch { return ''; }
+  });
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from('staff').select('first_name, last_name').in('role', ['veterinarian', 'senior_veterinarian', 'lead_vet_tech']).limit(1).single();
+      if (data) {
+        const name = `Dr. ${data.last_name}`;
+        setVetName(name);
+        localStorage.setItem('doctor_dashboard_name', name);
+      }
+    })();
+  }, []);
 
   // ── Real data from Supabase ─────────────────────────────────
   const stats = useDashboardStats();
-  const today = new Date().toISOString().split('T')[0];
+  const now = new Date();
+  const today = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}`;
   const { appointments: todayAppointments } = useAppointments(today);
   const { clients: allClients } = useClients();
 
@@ -436,7 +565,7 @@ export default function DashboardPage() {
     ownerName: `${c.first_name} ${c.last_name}`,
     breed: c.pets?.[0]?.breed ?? c.pets?.[0]?.species ?? '—',
     lastVisit: new Date(c.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-    status: (c.portal_status ?? 'Healthy') as 'Healthy' | 'Follow-up' | 'Critical',
+    status: (['Healthy', 'Follow-up', 'Critical'].includes((c as any).health_status) ? (c as any).health_status : 'Healthy') as 'Healthy' | 'Follow-up' | 'Critical',
   }));
 
   // Today's upcoming appointments
@@ -444,48 +573,30 @@ export default function DashboardPage() {
     .filter(a => a.status !== 'Cancelled' && a.status !== 'Completed')
     .slice(0, 4);
 
-  // ── Search ──────────────────────────────────────────────────
-  const q = searchQuery.trim().toLowerCase();
-  const matchedClients = q
-    ? recentClients.filter(
-        (c) =>
-          c.petName.toLowerCase().includes(q) ||
-          c.ownerName.toLowerCase().includes(q) ||
-          c.breed.toLowerCase().includes(q)
-      )
-    : [];
-  const matchedAppointments = q
-    ? todayAppointments.filter(
-        (a) =>
-          (a.pets?.name ?? '').toLowerCase().includes(q) ||
-          (a.clients ? `${a.clients.first_name} ${a.clients.last_name}` : '').toLowerCase().includes(q) ||
-          (a.services?.name ?? '').toLowerCase().includes(q)
-      )
-    : [];
-  const hasResults = matchedClients.length > 0 || matchedAppointments.length > 0;
-  const isSearching = q.length > 0;
+  const isSearching = searchQuery.trim().length > 0;
 
   return (
     <div className="max-w-[1440px] mx-auto p-8">
       {/* Welcome Header */}
       <div className="mb-6">
-        <h1 className="text-[var(--text-primary)] mb-2">Welcome back, Dr. Chen 👋</h1>
+        <h1 className="text-[var(--text-primary)] mb-2">Welcome back, {vetName || 'Doctor'} 👋</h1>
         <p className="text-[var(--text-secondary)]" style={{ fontSize: '16px', fontWeight: 400 }}>
           Here's what's happening with your clinic today.
         </p>
       </div>
 
       {/* ── Global Search ── */}
-      <div className="relative mb-8">
+      <div className="relative mb-8" ref={searchContainerRef}>
         <Search
           className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"
-          style={{ color: 'var(--text-secondary)' }}
+          style={{ color: 'var(--text-secondary)', zIndex: 1 }}
         />
         <input
           ref={searchRef}
           type="text"
           value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
+          onChange={(e) => { setSearchQuery(e.target.value); setSearchOpen(true); }}
+          onFocus={() => { if (searchQuery.trim()) setSearchOpen(true); }}
           placeholder="Search clients, pets, appointments, services…"
           className="w-full bg-[var(--surface-white)] border border-[var(--border-color)] text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] transition-shadow focus:outline-none"
           style={{
@@ -494,116 +605,157 @@ export default function DashboardPage() {
             paddingLeft: '44px',
             paddingRight: searchQuery ? '44px' : '16px',
             fontSize: '15px',
-            boxShadow: isSearching ? '0 0 0 2px #2D6A4F40' : undefined,
-            borderColor: isSearching ? '#2D6A4F60' : undefined,
+            boxShadow: isSearching && searchOpen ? '0 0 0 2px #2D6A4F40' : undefined,
+            borderColor: isSearching && searchOpen ? '#2D6A4F60' : undefined,
           }}
         />
         {searchQuery && (
           <button
-            onClick={() => { setSearchQuery(''); searchRef.current?.focus(); }}
+            onClick={() => { setSearchQuery(''); setSearchOpen(false); searchRef.current?.focus(); }}
             className="absolute right-3 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center rounded-full hover:bg-[var(--surface-elevated)] transition-colors"
+            style={{ zIndex: 1 }}
           >
             <X className="w-4 h-4" style={{ color: 'var(--text-secondary)' }} />
           </button>
         )}
+
+        {/* ── Search Dropdown ── */}
+        {isSearching && searchOpen && (
+          <div
+            className="absolute left-0 right-0 bg-[var(--surface-white)] border border-[var(--border-color)] overflow-hidden"
+            style={{
+              top: 'calc(100% + 6px)',
+              borderRadius: '12px',
+              boxShadow: '0 12px 40px -8px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.04)',
+              zIndex: 50,
+              maxHeight: '420px',
+              overflowY: 'auto',
+            }}
+          >
+            {searchLoading ? (
+              <div className="px-5 py-8 text-center">
+                <p style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>Searching...</p>
+              </div>
+            ) : totalResults === 0 ? (
+              <div className="px-5 py-8 text-center">
+                <Search className="w-8 h-8 mx-auto mb-2" style={{ color: 'var(--border-color)' }} />
+                <p className="text-[var(--text-primary)] mb-1" style={{ fontSize: '15px', fontWeight: 600 }}>No results found</p>
+                <p className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>Try searching for a pet name, owner, or service</p>
+              </div>
+            ) : (
+              <>
+                {/* Client results */}
+                {searchResults.clients.length > 0 && (
+                  <div>
+                    <div className="px-4 py-2.5 border-b border-[var(--border-color)] flex items-center gap-2" style={{ backgroundColor: 'var(--surface-elevated)' }}>
+                      <Users className="w-3.5 h-3.5" style={{ color: 'var(--brand-green-text)' }} />
+                      <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                        Clients · {searchResults.clients.length}
+                      </span>
+                    </div>
+                    {searchResults.clients.map((c) => (
+                      <div
+                        key={c.id}
+                        onClick={() => { navigate(`/clients/${c.id}`); setSearchOpen(false); setSearchQuery(''); }}
+                        className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-[var(--surface-elevated)] transition-colors border-b border-[var(--border-color)]"
+                      >
+                        <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center" style={{ background: '#2D6A4F18' }}>
+                          <Users className="w-4 h-4" style={{ color: 'var(--brand-green-text)' }} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{c.first_name} {c.last_name}</p>
+                          <p className="truncate" style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{c.email || c.phone || 'No contact info'}</p>
+                        </div>
+                        <ChevronRight className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--text-secondary)' }} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Pet results */}
+                {searchResults.pets.length > 0 && (
+                  <div>
+                    <div className="px-4 py-2.5 border-b border-[var(--border-color)] flex items-center gap-2" style={{ backgroundColor: 'var(--surface-elevated)' }}>
+                      <PawPrint className="w-3.5 h-3.5" style={{ color: '#4ADE80' }} />
+                      <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                        Pets · {searchResults.pets.length}
+                      </span>
+                    </div>
+                    {searchResults.pets.map((p) => (
+                      <div
+                        key={p.id}
+                        onClick={() => { navigate(`/clients/${p.client_id}`); setSearchOpen(false); setSearchQuery(''); }}
+                        className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-[var(--surface-elevated)] transition-colors border-b border-[var(--border-color)]"
+                      >
+                        {p.photo_url ? (
+                          <img src={p.photo_url} alt={p.name} className="w-8 h-8 object-cover flex-shrink-0 rounded-full" />
+                        ) : (
+                          <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center" style={{ background: '#4ADE8018' }}>
+                            <PawPrint className="w-4 h-4" style={{ color: '#4ADE80' }} />
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{p.name}</p>
+                          <p className="truncate" style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                            {p.breed || p.species}{p.clients ? ` · ${p.clients.first_name} ${p.clients.last_name}` : ''}
+                          </p>
+                        </div>
+                        <ChevronRight className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--text-secondary)' }} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Appointment results */}
+                {searchResults.appointments.length > 0 && (
+                  <div>
+                    <div className="px-4 py-2.5 border-b border-[var(--border-color)] flex items-center gap-2" style={{ backgroundColor: 'var(--surface-elevated)' }}>
+                      <Calendar className="w-3.5 h-3.5" style={{ color: '#F4A261' }} />
+                      <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                        Appointments · {searchResults.appointments.length}
+                      </span>
+                    </div>
+                    {searchResults.appointments.map((a) => (
+                      <div
+                        key={a.id}
+                        onClick={() => { navigate('/appointments', { state: { openApptId: a.id } }); setSearchOpen(false); setSearchQuery(''); }}
+                        className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-[var(--surface-elevated)] transition-colors border-b border-[var(--border-color)]"
+                      >
+                        <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center" style={{ background: '#F4A26118' }}>
+                          <Calendar className="w-4 h-4" style={{ color: '#F4A261' }} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{a.pets?.name ?? 'Unknown pet'}</p>
+                          <p className="truncate" style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                            {a.clients ? `${a.clients.first_name} ${a.clients.last_name}` : '—'} · {a.services?.name ?? a.reason ?? '—'}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-shrink-0" style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>
+                          <Clock className="w-3 h-3" />
+                          {new Date(a.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        </div>
+                        <span
+                          className="flex-shrink-0 px-2 py-0.5"
+                          style={{
+                            fontSize: '11px', fontWeight: 600, borderRadius: '9999px',
+                            backgroundColor: a.status === 'Confirmed' ? '#2D6A4F18' : a.status === 'Completed' ? '#3B82F618' : a.status === 'Cancelled' ? '#d4183d18' : '#F4A26118',
+                            color: a.status === 'Confirmed' ? 'var(--brand-green-text)' : a.status === 'Completed' ? '#3B82F6' : a.status === 'Cancelled' ? '#d4183d' : '#F4A261',
+                          }}
+                        >
+                          {a.status}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* ── Search Results ── */}
-      {isSearching ? (
-        <div className="space-y-6">
-          {!hasResults ? (
-            <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-12 text-center" style={{ borderRadius: '12px' }}>
-              <Search className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--border-color)' }} />
-              <p className="text-[var(--text-primary)] mb-1" style={{ fontSize: '16px', fontWeight: 600 }}>No results found</p>
-              <p className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>Try searching for a pet name, owner, or service</p>
-            </div>
-          ) : (
-            <>
-              {/* Client results */}
-              {matchedClients.length > 0 && (
-                <div className="bg-[var(--surface-white)] border border-[var(--border-color)]" style={{ borderRadius: '12px', overflow: 'hidden' }}>
-                  <div className="px-5 py-3 border-b border-[var(--border-color)] flex items-center gap-2">
-                    <Users className="w-4 h-4" style={{ color: 'var(--brand-green-text)' }} />
-                    <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-                      Clients · {matchedClients.length}
-                    </span>
-                  </div>
-                  {matchedClients.map((c, i) => (
-                    <div
-                      key={c.id}
-                      onClick={() => navigate(`/clients/${c.id}`)}
-                      className="flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-[var(--surface-elevated)] transition-colors"
-                      style={{ borderTop: i > 0 ? '1px solid var(--border-color)' : undefined }}
-                    >
-                      <img src={c.petImage} alt={c.petName} className="w-10 h-10 object-cover flex-shrink-0" style={{ borderRadius: '9999px' }} />
-                      <div className="flex-1 min-w-0">
-                        <p style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>{c.petName}</p>
-                        <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{c.ownerName} · {c.breed}</p>
-                      </div>
-                      <span
-                        className="flex-shrink-0 px-2.5 py-0.5"
-                        style={{
-                          fontSize: '12px', fontWeight: 600, borderRadius: '9999px',
-                          backgroundColor: c.status === 'Healthy' ? '#2D6A4F18' : '#F4A26118',
-                          color: c.status === 'Healthy' ? 'var(--brand-green-text)' : '#F4A261',
-                        }}
-                      >
-                        {c.status}
-                      </span>
-                      <ArrowRight className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--text-secondary)' }} />
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Appointment results */}
-              {matchedAppointments.length > 0 && (
-                <div className="bg-[var(--surface-white)] border border-[var(--border-color)]" style={{ borderRadius: '12px', overflow: 'hidden' }}>
-                  <div className="px-5 py-3 border-b border-[var(--border-color)] flex items-center gap-2">
-                    <Calendar className="w-4 h-4" style={{ color: '#F4A261' }} />
-                    <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-                      Appointments · {matchedAppointments.length}
-                    </span>
-                  </div>
-                  {matchedAppointments.map((a, i) => (
-                    <div
-                      key={a.id}
-                      onClick={() => navigate('/appointments', { state: { openApptId: a.id } })}
-                      className="flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-[var(--surface-elevated)] transition-colors"
-                      style={{ borderTop: i > 0 ? '1px solid var(--border-color)' : undefined }}
-                    >
-                      <div className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center" style={{ background: '#2D6A4F18' }}>
-                        <PawPrint className="w-5 h-5" style={{ color: 'var(--brand-green-text)' }} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>{a.pets?.name ?? '—'}</p>
-                        <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                          {a.clients ? `${a.clients.first_name} ${a.clients.last_name}` : '—'} · {a.services?.name ?? '—'}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1.5 flex-shrink-0" style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>
-                        <Clock className="w-3.5 h-3.5" />
-                        {new Date(a.scheduled_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-                      </div>
-                      <span
-                        className="flex-shrink-0 px-2.5 py-0.5"
-                        style={{
-                          fontSize: '12px', fontWeight: 600, borderRadius: '9999px',
-                          backgroundColor: a.status === 'Confirmed' ? '#2D6A4F18' : a.status === 'Completed' ? '#3B82F618' : a.status === 'Cancelled' ? '#d4183d18' : '#F4A26118',
-                          color: a.status === 'Confirmed' ? 'var(--brand-green-text)' : a.status === 'Completed' ? '#3B82F6' : a.status === 'Cancelled' ? '#d4183d' : '#F4A261',
-                        }}
-                      >
-                        {a.status}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      ) : (
-        <>
+      {/* Dashboard content — hidden while searching */}
+      {!isSearching && (<>
       {/* Glow Stat Cards */}
       <div className="grid grid-cols-4 gap-5 mb-8">
         {GLOW_CARDS.map(card => (
@@ -692,8 +844,7 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
-        </>
-      )}
+      </>)}
     </div>
   );
 }

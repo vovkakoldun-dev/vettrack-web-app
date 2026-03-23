@@ -47,6 +47,7 @@ import AdminClientsPage from './pages/admin/AdminClientsPage';
 import AdminMyPortalPage from './pages/admin/AdminMyPortalPage';
 import AdminTasksPage from './pages/admin/AdminTasksPage';
 import AdminSettingsPage from './pages/admin/AdminSettingsPage';
+import AdminChatPage from './pages/admin/AdminChatPage';
 import { ActiveVisitProvider, useActiveVisit } from './context/ActiveVisitContext';
 import { AppointmentStatusProvider } from './context/AppointmentStatusContext';
 import { Avatar, AvatarImage, AvatarFallback } from './components/ui/avatar';
@@ -243,12 +244,13 @@ function AdminApp() {
           <Route path="/bookings" element={<AdminBookingsPage />} />
           <Route path="/payments" element={<AdminPaymentsPage />} />
           <Route path="/communications" element={<AdminCommunicationsPage />} />
+          <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/clients" element={<AdminClientsPage />} />
           <Route path="/clients/:id" element={<ClientDetailPage />} />
           <Route path="/records" element={<RecordsPage />} />
           <Route path="/records/:id" element={<RecordDetailPage />} />
           <Route path="/my-portal" element={<AdminMyPortalPage />} />
-          <Route path="/chat" element={<ChatPage />} />
+          <Route path="/chat" element={<AdminChatPage />} />
           <Route path="/tasks" element={<AdminTasksPage />} />
           <Route path="/settings" element={<AdminSettingsPage />} />
         </Routes>

@@ -9,6 +9,8 @@ import {
   AlertCircle, CheckCircle2, Send, ArrowUpRight, Camera, Pencil, Trash2,
 } from 'lucide-react';
 import { Avatar, AvatarImage, AvatarFallback } from '../components/ui/avatar';
+import { AddClientDialog } from '../components/AddClientDialog';
+import { useClients } from '../hooks/useClients';
 import { Calendar } from '../components/ui/calendar';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -38,6 +40,7 @@ interface TimeBlock {
 
 interface Appointment {
   id: number;
+  dbId?: string;
   date: string;
   timeStart: string;
   timeEnd: string;
@@ -51,15 +54,14 @@ interface Appointment {
 // ─── Mock Data ───────────────────────────────────────────────
 
 const VET_PROFILE = {
-  name: 'Dr. Sarah Chen',
-  role: 'Lead Veterinarian',
-  specialization: 'Small Animal Medicine',
-  email: 'sarah.chen@vettrack.com',
-  phone: '(555) 234-5678',
-  licenseNo: 'DVM-2018-04521',
-  joinedDate: 'March 2018',
-  image:
-    'https://images.unsplash.com/photo-1640161415278-a5ac46f82d04?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjB2ZXRlcmluYXJpYW4lMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyODYxNTB8MA&ixlib=rb-4.1.0&q=80&w=1080',
+  name: '',
+  role: '',
+  specialization: '',
+  email: '',
+  phone: '',
+  licenseNo: '',
+  joinedDate: '',
+  image: '',
 };
 
 const MY_APPOINTMENTS: Appointment[] = [
@@ -158,8 +160,8 @@ const patientStatusStyles: Record<string, { bg: string; text: string }> = {
 
 // ─── Helpers ─────────────────────────────────────────────────
 
-const SCHEDULE_SLOTS = Array.from({ length: 20 }, (_, i) => {
-  const totalMin = 8 * 60 + i * 30;
+const SCHEDULE_SLOTS = Array.from({ length: 48 }, (_, i) => {
+  const totalMin = i * 30;
   const h = Math.floor(totalMin / 60);
   const m = totalMin % 60;
   const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
@@ -242,11 +244,13 @@ type GlowCardData = {
   trendLabel: string; trendPositive: boolean; color: string; shadowColor: string;
   icon: React.ElementType; data: number[]; labels: string[]; unit: string;
   annotationStart: string; annotationEnd: string;
+  onArrowClick?: () => void;
 };
 
 function GlowStatCard({
   title, subtitle, metricLabel, value, trendLabel, trendPositive,
   color, shadowColor, icon: Icon, data, labels, unit, annotationStart, annotationEnd,
+  onArrowClick,
 }: GlowCardData) {
   const dark = useDarkMode();
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
@@ -340,7 +344,7 @@ function GlowStatCard({
               </p>
             </div>
           </div>
-          <button style={{
+          <button onClick={onArrowClick} style={{
             width: '30px', height: '30px', borderRadius: '8px',
             border: `1px solid ${btnBorder}`,
             backgroundColor: btnBg,
@@ -550,23 +554,67 @@ export default function MyPortalPage() {
   // ── Vet profile from Supabase ──
   const [vetProfile, setVetProfile] = useState(VET_PROFILE);
   const [vetId, setVetId] = useState<string | null>(null);
+  const [profileImage, setProfileImage] = useState('');
 
   // ── Photo upload ──
   const photoInputRef = useRef<HTMLInputElement>(null);
+  const scheduleRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll schedule to current time slot on mount
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (scheduleRef.current) {
+        const now = new Date();
+        const nowMin = now.getHours() * 60 + now.getMinutes();
+        const slotIdx = Math.floor(nowMin / 30);
+        const slotHeight = scheduleRef.current.scrollHeight / 48;
+        const targetScroll = Math.max(0, slotIdx * slotHeight - scheduleRef.current.clientHeight / 3);
+        scheduleRef.current.scrollTop = targetScroll;
+      }
+    }, 100);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Helper to get staff ID (avoids stale state after HMR)
+  const getStaffId = async () => {
+    if (vetId) return vetId;
+    const { data } = await supabase.from('staff').select('id')
+      .in('role', ['veterinarian', 'senior_veterinarian', 'lead_vet_tech'])
+      .limit(1).single();
+    if (data) { setVetId(data.id); return data.id; }
+    return null;
+  };
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !vetId) return;
+    if (!file) return;
+    const staffId = await getStaffId();
+    if (!staffId) { alert('Could not find staff record'); return; }
     try {
+      // 1) Remove old files for this vet from storage (best-effort)
+      const { data: existingFiles } = await supabase.storage.from('staff-photos').list('', { search: staffId });
+      if (existingFiles && existingFiles.length > 0) {
+        await supabase.storage.from('staff-photos').remove(existingFiles.map(f => f.name));
+      }
+
+      // 2) Upload with unique timestamped filename to avoid caching
       const ext = file.name.split('.').pop() || 'jpg';
-      const path = `${vetId}.${ext}`;
-      // Upload (upsert overwrites existing)
-      const { error: uploadErr } = await supabase.storage.from('staff-photos').upload(path, file, { upsert: true });
+      const path = `${staffId}-${Date.now()}.${ext}`;
+      const { error: uploadErr } = await supabase.storage.from('staff-photos').upload(path, file);
       if (uploadErr) { alert('Upload failed: ' + uploadErr.message); return; }
+
+      // 3) Get public URL with cache-bust param
       const { data: urlData } = supabase.storage.from('staff-photos').getPublicUrl(path);
       const publicUrl = urlData.publicUrl + '?t=' + Date.now();
-      await supabase.from('staff').update({ photo_url: publicUrl }).eq('id', vetId);
+
+      // 4) Save to staff record
+      const { error: dbErr } = await supabase.from('staff').update({ photo_url: publicUrl }).eq('id', staffId);
+      if (dbErr) { alert('DB update failed: ' + dbErr.message); return; }
+
+      // 5) Update local state + notify sidebar
+      setProfileImage(publicUrl);
       setVetProfile(prev => ({ ...prev, image: publicUrl }));
+      window.dispatchEvent(new CustomEvent('staffPhotoChanged', { detail: { photo_url: publicUrl } }));
     } catch (err: any) {
       alert('Upload error: ' + err.message);
     }
@@ -574,19 +622,35 @@ export default function MyPortalPage() {
   };
 
   const handleDeletePhoto = async () => {
-    if (!vetId || !vetProfile.image) return;
+    if (!profileImage) return;
     if (!confirm('Remove your profile photo?')) return;
+    const staffId = await getStaffId();
+
+    // 1) Immediately clear local state + sidebar + file input so re-upload of same file works
+    const oldImage = profileImage;
+    setProfileImage('');
+    setVetProfile(prev => ({ ...prev, image: '' }));
+    window.dispatchEvent(new CustomEvent('staffPhotoChanged', { detail: { photo_url: '' } }));
+    if (photoInputRef.current) photoInputRef.current.value = '';
+
+    if (!staffId) return;
     try {
-      // Extract file path from URL
-      const urlParts = vetProfile.image.split('/staff-photos/');
+      // 2) Clear DB first (most important)
+      await supabase.from('staff').update({ photo_url: null }).eq('id', staffId);
+
+      // 3) Delete file from storage
+      const urlParts = oldImage.split('/staff-photos/');
       if (urlParts[1]) {
         const filePath = decodeURIComponent(urlParts[1].split('?')[0]);
         await supabase.storage.from('staff-photos').remove([filePath]);
       }
-      await supabase.from('staff').update({ photo_url: null }).eq('id', vetId);
-      setVetProfile(prev => ({ ...prev, image: '' }));
+      // 4) Also clean up any other files for this vet
+      const { data: existingFiles } = await supabase.storage.from('staff-photos').list('', { search: staffId });
+      if (existingFiles && existingFiles.length > 0) {
+        await supabase.storage.from('staff-photos').remove(existingFiles.map(f => f.name));
+      }
     } catch (err: any) {
-      alert('Delete error: ' + err.message);
+      console.error('Delete error:', err);
     }
   };
 
@@ -596,13 +660,53 @@ export default function MyPortalPage() {
   // Real clients from Supabase
   const [realPatients, setRealPatients] = useState<any[]>([]);
   const [addClientOpen, setAddClientOpen] = useState(false);
+  const { addClient, refetch: refetchClients } = useClients();
+
+  // Refetch patients assigned to this vet
+  const refetchPatients = async (staffId?: string) => {
+    const sid = staffId || vetId;
+    if (!sid) return;
+    const { data: petData } = await supabase
+      .from('pets')
+      .select('id, name, species, breed, photo_url, assigned_vet_id, client_id, clients(id, first_name, last_name, health_status)')
+      .eq('assigned_vet_id', sid);
+    if (petData) {
+      const rows = petData.map((pet: any) => ({
+        clientId: pet.clients?.id || null,
+        petId: pet.id,
+        petImage: pet.photo_url || '',
+        petName: pet.name ?? '—',
+        ownerName: pet.clients ? `${pet.clients.first_name} ${pet.clients.last_name}` : '—',
+        species: pet.species ?? '—',
+        breed: pet.breed ?? '—',
+        lastVisit: '—',
+        status: (['Healthy', 'Follow-up', 'Critical'].includes(pet.clients?.health_status ?? '') ? pet.clients.health_status : 'Healthy') as 'Healthy' | 'Follow-up' | 'Critical',
+      }));
+      setRealPatients(rows);
+    }
+  };
+
+  const handleAddClient = async (values: any) => {
+    const { data, error } = await addClient(values);
+    if (!error && data) {
+      // Refetch patients after a delay to allow the pet record to be created by the dialog
+      setTimeout(() => {
+        refetchClients();
+        refetchPatients();
+        // Trigger sidebar notification badge update
+        window.dispatchEvent(new CustomEvent('notifCountChanged'));
+      }, 800);
+      return (data as any).id as string;
+    }
+  };
 
   useEffect(() => {
     (async () => {
-      // Fetch vet profile (first staff member)
+      // Fetch vet profile (doctor staff member only)
       const { data: staffData } = await supabase
         .from('staff')
         .select('id, first_name, last_name, role, email, phone, created_at, photo_url')
+        .in('role', ['veterinarian', 'senior_veterinarian', 'lead_vet_tech'])
         .limit(1)
         .single();
       if (staffData) {
@@ -618,6 +722,7 @@ export default function MyPortalPage() {
           joinedDate: joinDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
           image: staffData.photo_url || '',
         });
+        setProfileImage(staffData.photo_url || '');
 
         // Fetch appointments for this vet
         const { data: apptData } = await supabase
@@ -629,50 +734,35 @@ export default function MyPortalPage() {
           const mapped: Appointment[] = apptData.map((a: any, i: number) => {
             const start = new Date(a.scheduled_at);
             const end = new Date(start.getTime() + (a.duration_minutes ?? 30) * 60000);
-            const fmtUTC = (d: Date) => {
-              let h = d.getUTCHours();
-              const m = d.getUTCMinutes();
+            const fmtLocal = (d: Date) => {
+              let h = d.getHours();
+              const m = d.getMinutes();
               const ampm = h >= 12 ? 'PM' : 'AM';
               if (h > 12) h -= 12;
               if (h === 0) h = 12;
               return `${h}:${m.toString().padStart(2, '0')} ${ampm}`;
             };
-            const y = start.getUTCFullYear();
-            const mo = (start.getUTCMonth() + 1).toString().padStart(2, '0');
-            const da = start.getUTCDate().toString().padStart(2, '0');
+            const y = start.getFullYear();
+            const mo = (start.getMonth() + 1).toString().padStart(2, '0');
+            const da = start.getDate().toString().padStart(2, '0');
             return {
               id: i + 1,
+              dbId: a.id,
               date: `${y}-${mo}-${da}`,
-              timeStart: fmtUTC(start),
-              timeEnd: fmtUTC(end),
+              timeStart: fmtLocal(start),
+              timeEnd: fmtLocal(end),
               petName: a.pets?.name ?? '—',
               petImage: a.pets?.photo_url ?? '',
               ownerName: a.clients ? `${a.clients.first_name} ${a.clients.last_name}` : '—',
               service: a.reason ?? '—',
+              clientArrived: a.status === 'In Progress',
             };
           });
           setRealAppointments(mapped);
         }
 
         // Fetch patients assigned to this vet
-        const { data: petData } = await supabase
-          .from('pets')
-          .select('id, name, species, breed, photo_url, assigned_vet_id, client_id, clients(id, first_name, last_name, health_status)')
-          .eq('assigned_vet_id', staffData.id);
-        if (petData) {
-          const rows = petData.map((pet: any) => ({
-            clientId: pet.clients?.id || null,
-            petId: pet.id,
-            petImage: pet.photo_url || '',
-            petName: pet.name ?? '—',
-            ownerName: pet.clients ? `${pet.clients.first_name} ${pet.clients.last_name}` : '—',
-            species: pet.species ?? '—',
-            breed: pet.breed ?? '—',
-            lastVisit: '—',
-            status: (['Healthy', 'Follow-up', 'Critical'].includes(pet.clients?.health_status ?? '') ? pet.clients.health_status : 'Healthy') as 'Healthy' | 'Follow-up' | 'Critical',
-          }));
-          setRealPatients(rows);
-        }
+        await refetchPatients(staffData.id);
 
         // Fetch time blocks for this vet from DB
         const { data: blockData } = await supabase
@@ -737,6 +827,7 @@ export default function MyPortalPage() {
       unit: 'patients',
       annotationStart: '0',
       annotationEnd: `${totalPatients}`,
+      onArrowClick: () => navigate('/clients'),
     },
     {
       title: 'Appointments',
@@ -753,6 +844,7 @@ export default function MyPortalPage() {
       unit: 'appts',
       annotationStart: '0',
       annotationEnd: `${totalAppts}`,
+      onArrowClick: () => navigate('/appointments'),
     },
     {
       title: 'Completed',
@@ -997,10 +1089,21 @@ export default function MyPortalPage() {
       >
         <div className="flex items-center gap-6">
           <div style={{ position: 'relative', flexShrink: 0 }}>
-            <Avatar className="w-16 h-16">
-              <AvatarImage src={vetProfile.image} alt={vetProfile.name} className="object-cover" />
-              <AvatarFallback>{vetProfile.name.split(' ').filter(w => w[0] && w[0] === w[0].toUpperCase()).map(w => w[0]).join('').slice(0, 2)}</AvatarFallback>
-            </Avatar>
+            {profileImage ? (
+              <img
+                src={profileImage}
+                alt={vetProfile.name}
+                className="w-16 h-16 object-cover"
+                style={{ borderRadius: '50%' }}
+              />
+            ) : (
+              <div
+                className="w-16 h-16 flex items-center justify-center"
+                style={{ borderRadius: '50%', backgroundColor: '#2D6A4F20', color: '#2D6A4F', fontSize: '20px', fontWeight: 700 }}
+              >
+                {vetProfile.name.split(' ').filter(w => w[0] && w[0] === w[0].toUpperCase()).map(w => w[0]).join('').slice(0, 2)}
+              </div>
+            )}
             <input
               ref={photoInputRef}
               type="file"
@@ -1008,7 +1111,7 @@ export default function MyPortalPage() {
               style={{ display: 'none' }}
               onChange={handlePhotoUpload}
             />
-            {vetProfile.image ? (
+            {profileImage ? (
               <button
                 title="Remove photo"
                 onClick={handleDeletePhoto}
@@ -1025,7 +1128,7 @@ export default function MyPortalPage() {
             ) : (
               <button
                 title="Upload photo"
-                onClick={() => photoInputRef.current?.click()}
+                onClick={() => { if (photoInputRef.current) { photoInputRef.current.value = ''; photoInputRef.current.click(); } }}
                 style={{
                   position: 'absolute', bottom: 0, right: 0,
                   width: 22, height: 22, borderRadius: '50%',
@@ -1060,7 +1163,7 @@ export default function MyPortalPage() {
       </div>
 
       {/* ─── Section 3: My Schedule ───────────────────── */}
-      <div className="grid gap-6 mb-8" style={{ gridTemplateColumns: '1fr 340px' }}>
+      <div className="grid gap-6 mb-8" style={{ gridTemplateColumns: '1fr 340px', alignItems: 'start' }}>
         {/* Left: Day Schedule */}
         <div>
           {/* Date Nav */}
@@ -1108,7 +1211,7 @@ export default function MyPortalPage() {
             const linePercent = currentSlotIdx >= 0 ? ((nowMin - currentSlotStart) / 30) * 100 : 0;
 
             return (
-          <div className="bg-[var(--surface-white)] border border-[var(--border-color)] overflow-hidden" style={{ borderRadius: '12px' }}>
+          <div ref={scheduleRef} className="bg-[var(--surface-white)] border border-[var(--border-color)] overflow-hidden" style={{ borderRadius: '12px', overflowY: 'auto', maxHeight: 'calc(100vh - 200px)' }}>
             {SCHEDULE_SLOTS.map((slot, idx) => {
               const appt = apptBySlot.get(slot);
               const busyAppt = busyApptSlots.get(slot);
@@ -1173,7 +1276,11 @@ export default function MyPortalPage() {
                         {/* Pet info row */}
                         <div className="flex items-center gap-3">
                           <div className="relative flex-shrink-0">
-                            <img src={appt.petImage} alt={appt.petName} className="w-9 h-9 object-cover" style={{ borderRadius: '9999px' }} />
+                            {appt.petImage ? (
+                              <img src={appt.petImage} alt={appt.petName} className="w-9 h-9 object-cover" style={{ borderRadius: '9999px' }} />
+                            ) : (
+                              <div className="w-9 h-9 flex items-center justify-center text-white font-semibold" style={{ borderRadius: '9999px', backgroundColor: '#2D6A4F', fontSize: '12px' }}>{appt.petName.slice(0, 2).toUpperCase()}</div>
+                            )}
                             <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-white" style={{ borderRadius: '9999px' }} />
                           </div>
                           <div className="flex-1 min-w-0">
@@ -1201,7 +1308,7 @@ export default function MyPortalPage() {
 
                         {/* Start Appointment CTA */}
                         <button
-                          onClick={() => navigate(`/appointments/${appt.id}/visit`)}
+                          onClick={() => navigate(`/appointments/${appt.dbId || appt.id}/visit`)}
                           className="w-full flex items-center justify-center gap-2 py-2 transition-all hover:opacity-90 active:scale-[0.98]"
                           style={{
                             backgroundColor: '#2D6A4F',
@@ -1331,6 +1438,77 @@ export default function MyPortalPage() {
           </div>
             );
           })()}
+
+          {/* My Patients Table */}
+          <div className="bg-[var(--surface-white)] border border-[var(--border-color)] mt-4" style={{ borderRadius: '12px' }}>
+            <div className="p-5 border-b border-[var(--border-color)] flex items-center justify-between">
+              <h3 className="text-[var(--text-primary)]" style={{ fontSize: '18px', fontWeight: 600 }}>My Patients</h3>
+              <div className="flex items-center gap-3">
+                <Button
+                  size="sm"
+                  onClick={() => setAddClientOpen(true)}
+                  variant="outline"
+                  style={{ fontSize: '12px' }}
+                >
+                  <Plus className="w-3.5 h-3.5" /> Add Client
+                </Button>
+                <Link to="/clients" className="text-[var(--text-secondary)] flex items-center gap-1 hover:opacity-75 transition-opacity" style={{ fontSize: '12px', fontWeight: 600 }}>
+                  View all <ChevronRight className="w-[13px] h-[13px]" />
+                </Link>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-[var(--border-color)]">
+                    {['Pet', 'Owner', 'Species', 'Last Visit', 'Status'].map((h) => (
+                      <th key={h} className="py-3 px-4 text-left">
+                        <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px', fontWeight: 600 }}>{h}</span>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {realPatients.map((p, idx) => {
+                    const s = patientStatusStyles[p.status] || patientStatusStyles.Healthy;
+                    return (
+                      <tr
+                        key={p.petId || p.clientId || idx}
+                        className="border-b border-[var(--border-color)] last:border-0 hover:bg-[var(--surface-elevated)] transition-colors cursor-pointer"
+                        onClick={() => {
+                          if (p.clientId) {
+                            navigate(`/clients/${p.clientId}${p.petId ? `?petId=${p.petId}` : ''}`);
+                          }
+                        }}
+                      >
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-3">
+                            {p.petImage ? (
+                              <img src={p.petImage} alt={p.petName} className="w-8 h-8 object-cover" style={{ borderRadius: '9999px' }} />
+                            ) : (
+                              <div className="w-8 h-8 flex items-center justify-center bg-[var(--brand-green-bg)] text-[var(--brand-green-text)]" style={{ borderRadius: '9999px', fontSize: '11px', fontWeight: 700 }}>
+                                {(p.petName || '?')[0].toUpperCase()}
+                              </div>
+                            )}
+                            <div>
+                              <p className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 600 }}>{p.petName}</p>
+                              <p className="text-[var(--text-secondary)]" style={{ fontSize: '11px' }}>{p.breed}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4"><span className="text-[var(--text-primary)]" style={{ fontSize: '14px' }}>{p.ownerName}</span></td>
+                        <td className="py-3 px-4"><span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>{p.species}</span></td>
+                        <td className="py-3 px-4"><span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>{p.lastVisit || '—'}</span></td>
+                        <td className="py-3 px-4">
+                          <span className="inline-block px-2.5 py-1" style={{ backgroundColor: s.bg, color: s.text, borderRadius: '9999px', fontSize: '12px', fontWeight: 600 }}>{p.status}</span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
 
         {/* Right: Calendar + Quick Actions + Time Off */}
@@ -1441,78 +1619,9 @@ export default function MyPortalPage() {
             </Button>
           </div>
         </div>
-
-        {/* My Patients Table — aligned with schedule column */}
-        <div className="bg-[var(--surface-white)] border border-[var(--border-color)]" style={{ borderRadius: '12px' }}>
-          <div className="p-5 border-b border-[var(--border-color)] flex items-center justify-between">
-            <h3 className="text-[var(--text-primary)]" style={{ fontSize: '18px', fontWeight: 600 }}>My Patients</h3>
-            <div className="flex items-center gap-3">
-              <Button
-                size="sm"
-                onClick={() => navigate('/clients')}
-                variant="outline"
-                style={{ fontSize: '12px' }}
-              >
-                <Plus className="w-3.5 h-3.5" /> Add Client
-              </Button>
-              <Link to="/clients" className="text-[var(--text-secondary)] flex items-center gap-1 hover:opacity-75 transition-opacity" style={{ fontSize: '12px', fontWeight: 600 }}>
-                View all <ChevronRight className="w-[13px] h-[13px]" />
-              </Link>
-            </div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-[var(--border-color)]">
-                  {['Pet', 'Owner', 'Species', 'Last Visit', 'Status'].map((h) => (
-                    <th key={h} className="py-3 px-4 text-left">
-                      <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px', fontWeight: 600 }}>{h}</span>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {realPatients.map((p, idx) => {
-                  const s = patientStatusStyles[p.status] || patientStatusStyles.Healthy;
-                  return (
-                    <tr
-                      key={p.petId || p.clientId || idx}
-                      className="border-b border-[var(--border-color)] last:border-0 hover:bg-[var(--surface-elevated)] transition-colors cursor-pointer"
-                      onClick={() => {
-                        if (p.clientId) {
-                          navigate(`/clients/${p.clientId}${p.petId ? `?petId=${p.petId}` : ''}`);
-                        }
-                      }}
-                    >
-                      <td className="py-3 px-4">
-                        <div className="flex items-center gap-3">
-                          {p.petImage ? (
-                            <img src={p.petImage} alt={p.petName} className="w-8 h-8 object-cover" style={{ borderRadius: '9999px' }} />
-                          ) : (
-                            <div className="w-8 h-8 flex items-center justify-center bg-[var(--brand-green-bg)] text-[var(--brand-green-text)]" style={{ borderRadius: '9999px', fontSize: '11px', fontWeight: 700 }}>
-                              {(p.petName || '?')[0].toUpperCase()}
-                            </div>
-                          )}
-                          <div>
-                            <p className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 600 }}>{p.petName}</p>
-                            <p className="text-[var(--text-secondary)]" style={{ fontSize: '11px' }}>{p.breed}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="py-3 px-4"><span className="text-[var(--text-primary)]" style={{ fontSize: '14px' }}>{p.ownerName}</span></td>
-                      <td className="py-3 px-4"><span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>{p.species}</span></td>
-                      <td className="py-3 px-4"><span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>{p.lastVisit || '—'}</span></td>
-                      <td className="py-3 px-4">
-                        <span className="inline-block px-2.5 py-1" style={{ backgroundColor: s.bg, color: s.text, borderRadius: '9999px', fontSize: '12px', fontWeight: 600 }}>{p.status}</span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
       </div>
+
+      {/* My Patients is inside the left column of the grid above */}
 
       {/* ─── Block Time Dialog ────────────────────────── */}
       <Dialog open={blockDialogOpen} onOpenChange={setBlockDialogOpen}>
@@ -1645,6 +1754,7 @@ export default function MyPortalPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <AddClientDialog open={addClientOpen} onOpenChange={setAddClientOpen} onSave={handleAddClient} />
     </div>
   );
 }

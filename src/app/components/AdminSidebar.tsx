@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
+import { supabase } from '../../lib/supabase';
 import {
   Home, Calendar, CreditCard, MessageSquare, MessageCircle, Users, FileText, UserCircle,
   PawPrint, Sun, Moon, ChevronLeft, ChevronRight, LogOut, ChevronUp, Settings, CheckSquare,
+  Bell,
 } from 'lucide-react';
 
 type NavItem = {
@@ -27,6 +29,7 @@ const NAV_SECTIONS: NavSection[] = [
       { name: 'My Portal',      icon: UserCircle,     path: '/admin/my-portal' },
       { name: 'Team Chat',      icon: MessageCircle,  path: '/admin/chat' },
       { name: 'Communications', icon: MessageSquare,  path: '/admin/communications', badge: 5 },
+      { name: 'Notifications',  icon: Bell,           path: '/admin/notifications' },
     ],
   },
   {
@@ -37,7 +40,7 @@ const NAV_SECTIONS: NavSection[] = [
       { name: 'Payments', icon: CreditCard,  path: '/admin/payments' },
       { name: 'Clients',  icon: Users,        path: '/admin/clients' },
       { name: 'Records',  icon: FileText,    path: '/admin/records' },
-      { name: 'Tasks',    icon: CheckSquare, path: '/admin/tasks',  badge: 3 },
+      { name: 'Tasks',    icon: CheckSquare, path: '/admin/tasks' },
     ],
   },
 ];
@@ -48,6 +51,123 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
 
   const [collapsed, setCollapsed]     = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [adminPhoto, setAdminPhoto]   = useState('');
+  const [adminName, setAdminName]     = useState('Sarah Mitchell');
+  const [sections, setSections]       = useState<NavSection[]>(NAV_SECTIONS);
+
+  // ── Chat unread badge from Supabase (timestamp-based) ─────
+  const [chatUnread, setChatUnread] = useState(0);
+  const adminStaffIdRef = useRef('');
+  const chatReadAtRef = useRef('1970-01-01T00:00:00Z');
+
+  useEffect(() => {
+    let mounted = true;
+    let interval: ReturnType<typeof setInterval>;
+
+    async function checkChatUnread() {
+      if (!mounted) return;
+      const { count } = await supabase
+        .from('chat_messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('conversation', 'admin-doctor')
+        .eq('sender_name', 'Dr. Volodymyr Koldun')
+        .gt('created_at', chatReadAtRef.current);
+      // Show 1 if any unread messages exist (1 conversation), not total message count
+      if (mounted) setChatUnread((count && count > 0) ? 1 : 0);
+    }
+
+    // Fetch admin staff ID + chat_read_at FIRST, then start polling
+    (async () => {
+      const { data } = await supabase
+        .from('staff')
+        .select('id, chat_read_at')
+        .in('role', ['front_desk_manager', 'receptionist', 'clinic_manager', 'superadmin'])
+        .limit(1)
+        .single();
+      if (data && mounted) {
+        adminStaffIdRef.current = data.id;
+        chatReadAtRef.current = data.chat_read_at || '1970-01-01T00:00:00Z';
+      }
+      if (!mounted) return;
+      checkChatUnread();
+      interval = setInterval(checkChatUnread, 3000);
+    })();
+
+    return () => { mounted = false; if (interval) clearInterval(interval); };
+  }, [pathname]);
+
+  // Listen for chat read events from AdminChatPage
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.chat_read_at) {
+        chatReadAtRef.current = detail.chat_read_at;
+        setChatUnread(0);
+      }
+    };
+    window.addEventListener('adminChatRead', handler);
+    return () => window.removeEventListener('adminChatRead', handler);
+  }, []);
+
+  // Update sections when chatUnread changes
+  useEffect(() => {
+    setSections(NAV_SECTIONS.map(s => s.id === 'overview' ? {
+      ...s,
+      items: s.items.map(item =>
+        item.path === '/admin/chat' ? { ...item, badge: chatUnread || undefined } : item
+      ),
+    } : s));
+  }, [chatUnread]);
+  const adminInitials = adminName.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+
+  // Fetch admin profile from Supabase on mount
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from('staff')
+        .select('id, first_name, last_name, email, phone, photo_url, role')
+        .in('role', ['front_desk_manager', 'receptionist', 'clinic_manager', 'superadmin'])
+        .limit(1)
+        .single();
+      if (data) {
+        const name = (data.first_name && data.last_name) ? `${data.first_name} ${data.last_name}` : 'Sarah Mitchell';
+        setAdminName(name);
+        setAdminPhoto(data.photo_url || '');
+        // Cache in localStorage
+        localStorage.setItem('admin_profile_settings', JSON.stringify({
+          firstName: data.first_name || '',
+          lastName: data.last_name || '',
+          email: data.email || '',
+          phone: data.phone || '',
+        }));
+        if (data.photo_url) {
+          localStorage.setItem('admin_profile_photo', data.photo_url);
+        }
+      }
+    })();
+  }, []);
+
+  // Listen for admin photo changes from AdminSettingsPage
+  useEffect(() => {
+    const handlePhotoChanged = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      setAdminPhoto(detail?.photo_url || '');
+    };
+    window.addEventListener('adminPhotoChanged', handlePhotoChanged);
+    return () => window.removeEventListener('adminPhotoChanged', handlePhotoChanged);
+  }, []);
+
+  // Listen for admin profile changes from AdminSettingsPage
+  useEffect(() => {
+    const handleProfileChanged = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.firstName && detail?.lastName) {
+        setAdminName(`${detail.firstName} ${detail.lastName}`);
+      }
+    };
+    window.addEventListener('adminProfileChanged', handleProfileChanged);
+    return () => window.removeEventListener('adminProfileChanged', handleProfileChanged);
+  }, []);
 
   const profileRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -79,33 +199,10 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
         }}
       >
         <Link to="/admin" className="flex items-center gap-2 flex-shrink-0">
-          <div
-            className="w-10 h-10 bg-[#2D6A4F] flex items-center justify-center flex-shrink-0"
-            style={{ borderRadius: '10px' }}
-          >
-            <PawPrint className="w-6 h-6 text-white" />
-          </div>
-          {!collapsed && (
-            <div className="flex flex-col">
-              <span
-                className="text-[var(--text-primary)] whitespace-nowrap"
-                style={{ fontSize: '20px', fontWeight: 700, lineHeight: 1.2 }}
-              >
-                Hugory
-              </span>
-              <span
-                style={{
-                  fontSize: '10px',
-                  fontWeight: 700,
-                  letterSpacing: '0.08em',
-                  textTransform: 'uppercase',
-                  color: '#3B82F6',
-                  lineHeight: 1.2,
-                }}
-              >
-                Admin
-              </span>
-            </div>
+          {collapsed ? (
+            <img src="/logo-mini.svg" alt="HugoIT" className="flex-shrink-0" style={{ width: '32px', height: '32px' }} />
+          ) : (
+            <img src={isDark ? '/logo-admin-dark.svg' : '/logo-admin.svg'} alt="HugoIT Admin" className="flex-shrink-0" style={{ height: '52px' }} />
           )}
         </Link>
       </div>
@@ -129,7 +226,7 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
 
       {/* ── Navigation ── */}
       <nav className="flex-1 overflow-y-auto overflow-x-hidden" style={{ padding: '12px 8px' }}>
-        {NAV_SECTIONS.map((section, si) => (
+        {sections.map((section, si) => (
           <div key={section.id} style={{ marginTop: si === 0 ? 0 : '8px' }}>
 
             {/* Section divider + label */}
@@ -290,19 +387,28 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
               {/* Mini header */}
               <div className="border-b border-[var(--border-color)]" style={{ padding: '14px 16px' }}>
                 <div className="flex items-center gap-3">
-                  <div
-                    className="flex items-center justify-center text-white font-bold flex-shrink-0"
-                    style={{
-                      width: '40px', height: '40px', borderRadius: '50%',
-                      background: 'linear-gradient(135deg, #3B82F6, #6366F1)',
-                      fontSize: '14px',
-                    }}
-                  >
-                    SM
-                  </div>
+                  {adminPhoto ? (
+                    <img
+                      src={adminPhoto}
+                      alt={adminName}
+                      className="flex-shrink-0 object-cover"
+                      style={{ width: '40px', height: '40px', borderRadius: '50%' }}
+                    />
+                  ) : (
+                    <div
+                      className="flex items-center justify-center text-white font-bold flex-shrink-0"
+                      style={{
+                        width: '40px', height: '40px', borderRadius: '50%',
+                        background: 'linear-gradient(135deg, #3B82F6, #6366F1)',
+                        fontSize: '14px',
+                      }}
+                    >
+                      {adminInitials}
+                    </div>
+                  )}
                   <div className="min-w-0">
                     <p className="text-[var(--text-primary)] truncate" style={{ fontSize: '14px', fontWeight: 600 }}>
-                      Sarah Mitchell
+                      {adminName}
                     </p>
                     <p className="text-[var(--text-secondary)] truncate" style={{ fontSize: '12px' }}>
                       sarah.mitchell@vettrack.com
@@ -337,7 +443,7 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
           {/* Trigger */}
           <button
             onClick={() => setProfileOpen(!profileOpen)}
-            title={collapsed ? 'Sarah Mitchell' : undefined}
+            title={collapsed ? adminName : undefined}
             className={`w-full flex items-center transition-colors overflow-hidden ${profileOpen ? 'bg-[var(--surface-elevated)]' : 'hover:bg-[var(--surface-elevated)]'}`}
             style={{
               borderRadius: '8px',
@@ -346,21 +452,30 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
               gap:            collapsed ? 0 : '10px',
             }}
           >
-            <div
-              className="flex items-center justify-center text-white font-bold flex-shrink-0"
-              style={{
-                width: '36px', height: '36px', borderRadius: '50%',
-                background: 'linear-gradient(135deg, #3B82F6, #6366F1)',
-                fontSize: '13px',
-              }}
-            >
-              SM
-            </div>
+            {adminPhoto ? (
+              <img
+                src={adminPhoto}
+                alt={adminName}
+                className="flex-shrink-0 object-cover"
+                style={{ width: '36px', height: '36px', borderRadius: '50%' }}
+              />
+            ) : (
+              <div
+                className="flex items-center justify-center text-white font-bold flex-shrink-0"
+                style={{
+                  width: '36px', height: '36px', borderRadius: '50%',
+                  background: 'linear-gradient(135deg, #3B82F6, #6366F1)',
+                  fontSize: '13px',
+                }}
+              >
+                {adminInitials}
+              </div>
+            )}
             {!collapsed && (
               <>
                 <div className="flex-1 min-w-0 text-left">
                   <p className="text-[var(--text-primary)] truncate" style={{ fontSize: '14px', fontWeight: 600 }}>
-                    Sarah Mitchell
+                    {adminName}
                   </p>
                   <p className="text-[var(--text-secondary)] truncate" style={{ fontSize: '12px', fontWeight: 400 }}>
                     Front Desk Admin
