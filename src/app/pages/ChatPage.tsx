@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
-import { useProfile } from '../hooks/useProfile';
+import { useAuth } from '../context/AuthContext';
 import {
   MessageSquare,
   Send,
@@ -23,7 +23,7 @@ const EMOJI_GROUPS = [
 
 const ORG_ID = '00000000-0000-0000-0000-000000000001';
 const CONVERSATION_KEY = 'admin-doctor';
-const DOCTOR_NAME = 'Dr. Volodymyr Koldun';
+// Doctor name is now dynamic — fetched from the logged-in user's profile
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -96,12 +96,13 @@ function DateSeparator({ label }: { label: string }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function ChatPage() {
-  const { profile: adminProfile } = useProfile('admin');
+  const { user } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [unreadCount, setUnreadCount] = useState(0);
   const [selected, setSelected] = useState(false);
   const doctorStaffId = useRef('');
+  const myNameRef = useRef('Doctor');
   const chatReadAtRef = useRef('1970-01-01T00:00:00Z');
   const [chatReadAtLoaded, setChatReadAtLoaded] = useState(false);
 
@@ -111,11 +112,12 @@ export default function ChatPage() {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
 
-  // Admin name/photo from useProfile (single source of truth)
-  const adminName = adminProfile.fullName || 'Front Desk Admin';
-  const adminPhoto = adminProfile.avatarUrl || '';
+  // Fetch actual admin name/photo from profiles table (not the logged-in user)
+  const [adminName, setAdminName] = useState('Front Desk Admin');
+  const [adminPhoto, setAdminPhoto] = useState('');
+  const [adminLoaded, setAdminLoaded] = useState(false);
 
-  // Fetch doctor staff ID + chat_read_at on mount (operational data only)
+  // Fetch doctor staff ID + chat_read_at + admin profile on mount
   useEffect(() => {
     (async () => {
       const { data: docData } = await supabase
@@ -129,8 +131,34 @@ export default function ChatPage() {
         chatReadAtRef.current = docData.chat_read_at || '1970-01-01T00:00:00Z';
       }
       setChatReadAtLoaded(true);
+
+      // Fetch logged-in doctor's name for sender_name
+      if (user) {
+        const { data: myProfile } = await supabase
+          .from('profiles')
+          .select('first_name, last_name')
+          .eq('id', user.id)
+          .single();
+        if (myProfile) {
+          myNameRef.current = `Dr. ${myProfile.first_name || ''} ${myProfile.last_name || ''}`.trim();
+        }
+      }
+
+      // Fetch admin profile (the person the doctor chats with)
+      const { data: adminData } = await supabase
+        .from('profiles')
+        .select('first_name, last_name, avatar_url')
+        .in('role', ['front_desk_manager', 'receptionist', 'clinic_manager'])
+        .limit(1)
+        .single();
+      if (adminData) {
+        const name = `${adminData.first_name || ''} ${adminData.last_name || ''}`.trim();
+        if (name) setAdminName(name);
+        if (adminData.avatar_url) setAdminPhoto(adminData.avatar_url);
+      }
+      setAdminLoaded(true);
     })();
-  }, []);
+  }, [user]);
 
   // Emoji picker
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -150,7 +178,7 @@ export default function ChatPage() {
     if (data) {
       const mapped: Message[] = data.map((m: any) => ({
         id: m.id,
-        from: m.sender_name === DOCTOR_NAME ? 'me' as const : 'them' as const,
+        from: m.sender_name === myNameRef.current ? 'me' as const : 'them' as const,
         text: m.content,
         timestamp: new Date(m.created_at),
         imageUrl: m.image_url || undefined,
@@ -162,7 +190,7 @@ export default function ChatPage() {
         setUnreadCount(0);
       } else {
         const readAt = new Date(chatReadAtRef.current).getTime();
-        const unread = data.filter((m: any) => m.sender_name !== DOCTOR_NAME && new Date(m.created_at).getTime() > readAt).length;
+        const unread = data.filter((m: any) => m.sender_name !== myNameRef.current && new Date(m.created_at).getTime() > readAt).length;
         setUnreadCount(unread);
       }
     }
@@ -263,7 +291,7 @@ export default function ChatPage() {
     await supabase.from('chat_messages').insert([{
       organization_id: ORG_ID,
       conversation: CONVERSATION_KEY,
-      sender_name: DOCTOR_NAME,
+      sender_name: myNameRef.current,
       content: text || (imageUrl ? '📷 Image' : ''),
       image_url: imageUrl,
     }]);
@@ -311,46 +339,48 @@ export default function ChatPage() {
           <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>Messages</h2>
         </div>
 
-        {/* Conversation list — single item */}
+        {/* Conversation list — single item (wait for admin data) */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
-          <button
-            onClick={handleSelect}
-            style={{
-              width: '100%', display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px',
-              backgroundColor: selected ? 'var(--surface-elevated)' : 'transparent',
-              border: 'none', cursor: 'pointer', textAlign: 'left', transition: 'background-color 0.15s',
-            }}
-            onMouseEnter={(e) => { if (!selected) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--surface-elevated)'; }}
-            onMouseLeave={(e) => { if (!selected) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}
-          >
-            <Avatar name={adminName} color="#7C3AED" size={40} online photoUrl={adminPhoto} />
+          {adminLoaded && (
+            <button
+              onClick={handleSelect}
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px',
+                backgroundColor: selected ? 'var(--surface-elevated)' : 'transparent',
+                border: 'none', cursor: 'pointer', textAlign: 'left', transition: 'background-color 0.15s',
+              }}
+              onMouseEnter={(e) => { if (!selected) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--surface-elevated)'; }}
+              onMouseLeave={(e) => { if (!selected) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}
+            >
+              <Avatar name={adminName} color="#7C3AED" size={40} online photoUrl={adminPhoto} />
 
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
-                <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '160px' }}>
-                  {adminName}
-                </span>
-                <span style={{ fontSize: '11px', color: 'var(--text-secondary)', flexShrink: 0, marginLeft: '8px' }}>
-                  {previewTime}
-                </span>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '1px', display: 'block' }}>Front Desk Admin</span>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: '13px', color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0 }}>
-                  {previewText}
-                </span>
-                {unreadCount > 0 && (
-                  <span style={{ flexShrink: 0, marginLeft: '8px', backgroundColor: '#d4183d', color: '#fff', fontSize: '11px', fontWeight: 700, borderRadius: '999px', minWidth: '20px', height: '20px', padding: '0 6px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                    {unreadCount > 99 ? '99+' : unreadCount}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
+                  <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '160px' }}>
+                    {adminName}
                   </span>
-                )}
+                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)', flexShrink: 0, marginLeft: '8px' }}>
+                    {previewTime}
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '1px', display: 'block' }}>Front Desk Admin</span>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '13px', color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0 }}>
+                    {previewText}
+                  </span>
+                  {unreadCount > 0 && (
+                    <span style={{ flexShrink: 0, marginLeft: '8px', backgroundColor: '#d4183d', color: '#fff', fontSize: '11px', fontWeight: 700, borderRadius: '999px', minWidth: '20px', height: '20px', padding: '0 6px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
+                  )}
+                </div>
               </div>
-            </div>
-          </button>
+            </button>
+          )}
         </div>
       </div>
 

@@ -417,7 +417,7 @@ export default function NotificationsPage() {
         const data = await fetchNotificationsFromSupabase(isAdmin);
         if (cancelled) return;
 
-        // Apply persisted read/dismissed state
+        // Apply persisted read/dismissed state (do NOT auto-mark as read)
         const { data: stateRows } = await supabase.from('notification_state').select('notification_id, status');
         const readSet = new Set<string>();
         const dismissedSet = new Set<string>();
@@ -429,17 +429,8 @@ export default function NotificationsPage() {
           .filter(n => !dismissedSet.has(n.id))
           .map(n => readSet.has(n.id) ? { ...n, read: true } : n);
 
-        // Auto-mark all unread as read on page visit
-        const unreadIds = afterPersist.filter(n => !n.read).map(n => n.id);
-        if (unreadIds.length > 0) {
-          const rows = unreadIds.map(id => ({ notification_id: id, status: 'read', updated_at: new Date().toISOString() }));
-          await supabase.from('notification_state').upsert(rows);
-        }
-
-        const allRead = afterPersist.map(n => ({ ...n, read: true }));
         if (!cancelled) {
-          setNotifications(allRead);
-          window.dispatchEvent(new CustomEvent('notifCountChanged', { detail: { count: 0 } }));
+          setNotifications(afterPersist);
         }
       } catch {}
       if (!cancelled) setLoading(false);

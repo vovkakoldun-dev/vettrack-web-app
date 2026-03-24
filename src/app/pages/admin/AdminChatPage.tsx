@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
-import { useProfile } from '../../hooks/useProfile';
+import { useAuth } from '../../context/AuthContext';
 import {
   MessageSquare,
   Send,
@@ -23,7 +23,7 @@ const EMOJI_GROUPS = [
 
 const ORG_ID = '00000000-0000-0000-0000-000000000001';
 const CONVERSATION_KEY = 'admin-doctor';
-const DOCTOR_NAME = 'Dr. Volodymyr Koldun';
+// Doctor name is now dynamic — fetched from profiles
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -96,9 +96,9 @@ function DateSeparator({ label }: { label: string }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function AdminChatPage() {
-  const { profile: adminProfile } = useProfile('admin');
-  const { profile: doctorProfile } = useProfile('doctor');
+  const { user } = useAuth();
   const adminStaffId = useRef('');
+  const myNameRef = useRef('Admin');
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [unreadCount, setUnreadCount] = useState(0);
@@ -106,8 +106,9 @@ export default function AdminChatPage() {
   const chatReadAtRef = useRef('1970-01-01T00:00:00Z');
   const [chatReadAtLoaded, setChatReadAtLoaded] = useState(false);
 
-  // Doctor photo from useProfile (single source of truth)
-  const doctorPhoto = doctorProfile.avatarUrl || '';
+  // Fetch actual doctor name/photo from profiles (not the logged-in user)
+  const [doctorName, setDoctorName] = useState('Doctor');
+  const [doctorPhoto, setDoctorPhoto] = useState('');
 
   // Image attachment state
   const chatImageRef = useRef<HTMLInputElement>(null);
@@ -122,7 +123,7 @@ export default function AdminChatPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Fetch admin staff ID + chat_read_at on mount (operational data only)
+  // Fetch admin staff ID + chat_read_at + doctor profile on mount
   useEffect(() => {
     (async () => {
       const { data } = await supabase
@@ -136,8 +137,33 @@ export default function AdminChatPage() {
         chatReadAtRef.current = data.chat_read_at || '1970-01-01T00:00:00Z';
       }
       setChatReadAtLoaded(true);
+
+      // Fetch logged-in admin's name for sender_name
+      if (user) {
+        const { data: myProfile } = await supabase
+          .from('profiles')
+          .select('first_name, last_name')
+          .eq('id', user.id)
+          .single();
+        if (myProfile) {
+          myNameRef.current = `${myProfile.first_name || ''} ${myProfile.last_name || ''}`.trim() || 'Admin';
+        }
+      }
+
+      // Fetch doctor profile (the person the admin chats with)
+      const { data: docProfile } = await supabase
+        .from('profiles')
+        .select('first_name, last_name, avatar_url')
+        .in('role', ['veterinarian', 'senior_veterinarian', 'specialist'])
+        .limit(1)
+        .single();
+      if (docProfile) {
+        const name = `Dr. ${docProfile.first_name || ''} ${docProfile.last_name || ''}`.trim();
+        if (name && name !== 'Dr.') setDoctorName(name);
+        if (docProfile.avatar_url) setDoctorPhoto(docProfile.avatar_url);
+      }
     })();
-  }, []);
+  }, [user]);
 
   // ── Fetch messages from Supabase ──────────────────────────
   async function fetchMessages() {
@@ -148,7 +174,7 @@ export default function AdminChatPage() {
       .order('created_at', { ascending: true });
 
     if (data) {
-      const myName = adminProfile.fullName || 'Admin';
+      const myName = myNameRef.current;
       const mapped: Message[] = data.map((m: any) => ({
         id: m.id,
         from: m.sender_name === myName ? 'me' as const : 'them' as const,
@@ -264,7 +290,7 @@ export default function AdminChatPage() {
     await supabase.from('chat_messages').insert([{
       organization_id: ORG_ID,
       conversation: CONVERSATION_KEY,
-      sender_name: adminProfile.fullName || 'Admin',
+      sender_name: myNameRef.current,
       content: text || (imageUrl ? '📷 Image' : ''),
       image_url: imageUrl,
     }]);
@@ -324,12 +350,12 @@ export default function AdminChatPage() {
             onMouseEnter={(e) => { if (!selected) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--surface-elevated)'; }}
             onMouseLeave={(e) => { if (!selected) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}
           >
-            <Avatar name={DOCTOR_NAME} color="#2D6A4F" size={40} online photoUrl={doctorPhoto} />
+            <Avatar name={doctorName} color="#2D6A4F" size={40} online photoUrl={doctorPhoto} />
 
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
                 <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '160px' }}>
-                  {DOCTOR_NAME}
+                  {doctorName}
                 </span>
                 <span style={{ fontSize: '11px', color: 'var(--text-secondary)', flexShrink: 0, marginLeft: '8px' }}>
                   {previewTime}
@@ -362,9 +388,9 @@ export default function AdminChatPage() {
             {/* Chat header */}
             <div style={{ height: '64px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--surface-white)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <Avatar name={DOCTOR_NAME} color="#2D6A4F" size={40} online photoUrl={doctorPhoto} />
+                <Avatar name={doctorName} color="#2D6A4F" size={40} online photoUrl={doctorPhoto} />
                 <div>
-                  <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.3 }}>{DOCTOR_NAME}</div>
+                  <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.3 }}>{doctorName}</div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Veterinarian</span>
                     <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>·</span>
@@ -398,7 +424,7 @@ export default function AdminChatPage() {
                         <div key={msg.id} style={{ display: 'flex', flexDirection: isMe ? 'row-reverse' : 'row', alignItems: 'flex-end', gap: '8px', marginBottom: '8px' }}>
                           {!isMe && (
                             <div style={{ flexShrink: 0, marginBottom: isLastMine ? '20px' : '0' }}>
-                              <Avatar name={DOCTOR_NAME} color="#2D6A4F" size={28} photoUrl={doctorPhoto} />
+                              <Avatar name={doctorName} color="#2D6A4F" size={28} photoUrl={doctorPhoto} />
                             </div>
                           )}
 

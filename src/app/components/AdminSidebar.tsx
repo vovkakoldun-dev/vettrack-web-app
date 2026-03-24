@@ -60,6 +60,7 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
   // ── Chat unread badge from Supabase (timestamp-based) ─────
   const [chatUnread, setChatUnread] = useState(0);
   const adminStaffIdRef = useRef('');
+  const myNameRef = useRef('');
   const chatReadAtRef = useRef('1970-01-01T00:00:00Z');
 
   useEffect(() => {
@@ -67,27 +68,28 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
     let interval: ReturnType<typeof setInterval>;
 
     async function checkChatUnread() {
-      if (!mounted) return;
+      if (!mounted || !myNameRef.current) return;
       const { count } = await supabase
         .from('chat_messages')
         .select('id', { count: 'exact', head: true })
         .eq('conversation', 'admin-doctor')
-        .eq('sender_name', 'Dr. Volodymyr Koldun')
+        .neq('sender_name', myNameRef.current)
         .gt('created_at', chatReadAtRef.current);
       // Show 1 if any unread messages exist (1 conversation), not total message count
       if (mounted) setChatUnread((count && count > 0) ? 1 : 0);
     }
 
-    // Fetch admin staff ID + chat_read_at FIRST, then start polling
+    // Fetch admin staff ID + chat_read_at + name FIRST, then start polling
     (async () => {
       const { data } = await supabase
         .from('staff')
-        .select('id, chat_read_at')
+        .select('id, first_name, last_name, chat_read_at')
         .in('role', ['front_desk_manager', 'receptionist', 'clinic_manager', 'superadmin'])
         .limit(1)
         .single();
       if (data && mounted) {
         adminStaffIdRef.current = data.id;
+        myNameRef.current = `${data.first_name || ''} ${data.last_name || ''}`.trim() || 'Admin';
         chatReadAtRef.current = data.chat_read_at || '1970-01-01T00:00:00Z';
       }
       if (!mounted) return;

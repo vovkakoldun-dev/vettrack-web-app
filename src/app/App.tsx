@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { supabase } from '../lib/supabase';
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router';
 import { Sidebar } from './components/Sidebar';
 import { AdminSidebar } from './components/AdminSidebar';
@@ -397,9 +398,33 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 function PublicRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
+  const [redirectPath, setRedirectPath] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    // Redirect based on user's role in profiles table
+    (async () => {
+      const { data } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+      const role = data?.role || '';
+      if (['front_desk_manager', 'receptionist', 'clinic_manager'].includes(role)) {
+        setRedirectPath('/admin');
+      } else if (role === 'superadmin') {
+        setRedirectPath('/superadmin');
+      } else if (role === 'pet_owner') {
+        setRedirectPath('/owner');
+      } else {
+        setRedirectPath('/');
+      }
+    })();
+  }, [user]);
 
   if (loading) return <AuthLoading />;
-  if (user) return <Navigate to="/" replace />;
+  if (user && redirectPath) return <Navigate to={redirectPath} replace />;
+  if (user) return <AuthLoading />;
 
   return <>{children}</>;
 }
