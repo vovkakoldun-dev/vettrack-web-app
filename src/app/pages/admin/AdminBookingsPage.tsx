@@ -257,7 +257,7 @@ export default function AdminBookingsPage() {
   const [selectedVetFilter, setSelectedVetFilter] = useState('all');
   const [staffList, setStaffList] = useState<{ id: string; name: string; initials: string }[]>([]);
   useEffect(() => {
-    supabase.from('staff').select('id, first_name, last_name').then(({ data }) => {
+    supabase.from('staff').select('id, first_name, last_name, role').in('role', ['veterinarian', 'senior_veterinarian', 'specialist']).eq('status', 'Active').order('first_name').then(({ data }) => {
       if (data) setStaffList(data.map((s: any) => ({
         id: s.id,
         name: `Dr. ${s.first_name} ${s.last_name}`,

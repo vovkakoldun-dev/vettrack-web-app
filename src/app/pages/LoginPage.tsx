@@ -213,25 +213,8 @@ export default function LoginPage() {
       />
 
       {/* Logo */}
-      <div className="flex items-center gap-3 mb-10" style={{ position: 'relative', zIndex: 1 }}>
-        <div
-          className="flex items-center justify-center"
-          style={{
-            width: '44px', height: '44px', borderRadius: '12px',
-            background: 'linear-gradient(135deg, #2D6A4F, #74C69D)',
-            boxShadow: '0 0 20px rgba(45,106,79,0.5)',
-          }}
-        >
-          <PawPrint className="w-6 h-6 text-white" />
-        </div>
-        <div>
-          <div style={{ fontSize: '22px', fontWeight: 700, color: isDark ? '#E2E8F0' : '#0F172A', letterSpacing: '-0.3px' }}>
-            Hugory
-          </div>
-          <div style={{ fontSize: '12px', color: isDark ? '#64748B' : '#64748B', marginTop: '-2px' }}>
-            Veterinary Management System
-          </div>
-        </div>
+      <div className="flex items-center justify-center mb-10" style={{ position: 'relative', zIndex: 1 }}>
+        <img src={isDark ? '/logo-full-dark.svg' : '/logo-full.svg'} alt="HugoIT" style={{ height: '52px' }} />
       </div>
 
       {/* Card container */}
@@ -547,7 +530,7 @@ export default function LoginPage() {
 
       {/* Footer */}
       <p style={{ position: 'relative', zIndex: 1, marginTop: '40px', fontSize: '12px', color: isDark ? '#334155' : '#94A3B8' }}>
-        © 2026 Hugory · Secure veterinary management platform
+        © 2026 HugoIT · Secure veterinary management platform
       </p>
     </div>
   );
