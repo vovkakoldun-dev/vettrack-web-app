@@ -27,12 +27,21 @@ export function ClientRow({ petImage, petName, ownerName, breed, lastVisit, stat
     >
       <td className="py-4 px-4">
         <div className="flex items-center gap-3">
-          <img
-            src={petImage}
-            alt={petName}
-            className="w-10 h-10 object-cover"
-            style={{ borderRadius: '9999px' }}
-          />
+          {petImage ? (
+            <img
+              src={petImage}
+              alt={petName}
+              className="w-10 h-10 object-cover"
+              style={{ borderRadius: '9999px' }}
+            />
+          ) : (
+            <div
+              className="w-10 h-10 flex items-center justify-center flex-shrink-0"
+              style={{ borderRadius: '9999px', backgroundColor: '#2D6A4F20', color: '#2D6A4F', fontSize: '14px', fontWeight: 700 }}
+            >
+              {petName.slice(0, 2).toUpperCase()}
+            </div>
+          )}
           <span className="text-[var(--text-primary)]" style={{ fontSize: '16px', fontWeight: 600 }}>
             {petName}
           </span>

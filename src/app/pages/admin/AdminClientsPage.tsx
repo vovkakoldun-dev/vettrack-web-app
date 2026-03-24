@@ -88,7 +88,6 @@ export default function AdminClientsPage() {
   const handleAddClient = async (values: AddClientValues): Promise<string | void> => {
     const { data, error } = await addClient(values);
     if (!error && data) {
-      setTimeout(() => refetch(), 500);
       return (data as any).id as string;
     }
   };
@@ -124,6 +123,7 @@ export default function AdminClientsPage() {
       const supaId = (entry as Client & { _supaId: string })._supaId;
       setStatusOverrides((prev) => ({ ...prev, [supaId]: newStatus }));
       await supabase.from('clients').update({ health_status: newStatus }).eq('id', supaId);
+      window.dispatchEvent(new CustomEvent('clientDataChanged'));
     }
   };
 
@@ -397,7 +397,7 @@ export default function AdminClientsPage() {
       </div>
     </div>
 
-      <AddClientDialog open={addClientOpen} onOpenChange={setAddClientOpen} onSave={handleAddClient} />
+      <AddClientDialog open={addClientOpen} onOpenChange={(open) => { setAddClientOpen(open); if (!open) setTimeout(() => { refetch(); window.dispatchEvent(new CustomEvent('notifCountChanged')); }, 300); }} onSave={handleAddClient} />
     </>
   );
 }

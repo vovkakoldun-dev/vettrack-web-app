@@ -19,12 +19,21 @@ export function AppointmentCard({ time, petName, ownerName, service, petImage, o
       onClick={onClick}
     >
       <div className="flex items-start gap-3">
-        <img
-          src={petImage}
-          alt={petName}
-          className="w-12 h-12 object-cover flex-shrink-0"
-          style={{ borderRadius: '9999px' }}
-        />
+        {petImage ? (
+          <img
+            src={petImage}
+            alt={petName}
+            className="w-12 h-12 object-cover flex-shrink-0"
+            style={{ borderRadius: '9999px' }}
+          />
+        ) : (
+          <div
+            className="w-12 h-12 flex items-center justify-center flex-shrink-0"
+            style={{ borderRadius: '9999px', backgroundColor: '#2D6A4F20', color: '#2D6A4F', fontSize: '16px', fontWeight: 700 }}
+          >
+            {petName.slice(0, 2).toUpperCase()}
+          </div>
+        )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <Clock className="w-4 h-4 text-[var(--text-secondary)]" />

@@ -1,16 +1,18 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useLocation } from 'react-router';
 import {
   Bell, Calendar, FlaskConical, User, Syringe, AlertTriangle,
-  Check, CheckCheck, Trash2, Clock, ChevronRight,
+  Check, CheckCheck, Trash2, Clock, ChevronRight, Loader2,
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
+import { supabase } from '../../lib/supabase';
 
 // ─── Types ───────────────────────────────────────────────────
 
 type NotifCategory = 'Appointment' | 'Lab Result' | 'Patient' | 'Vaccine' | 'System';
 
 interface Notification {
-  id: number;
+  id: string;
   category: NotifCategory;
   title: string;
   description: string;
@@ -26,7 +28,6 @@ interface Notification {
 
 // ─── Color Maps ──────────────────────────────────────────────
 
-// `hex` is the raw hex used for gradients/shadows (CSS vars can't be appended with alpha)
 const categoryConfig: Record<NotifCategory, { bg: string; text: string; hex: string; icon: React.ElementType }> = {
   Appointment: { bg: '#2D6A4F20', text: 'var(--brand-green-text)', hex: '#2D6A4F', icon: Calendar },
   'Lab Result': { bg: '#8B5CF620', text: '#8B5CF6',                hex: '#8B5CF6', icon: FlaskConical },
@@ -35,205 +36,40 @@ const categoryConfig: Record<NotifCategory, { bg: string; text: string; hex: str
   System:       { bg: '#F4A26120', text: '#F4A261',                hex: '#F4A261', icon: AlertTriangle },
 };
 
-// ─── Mock Data ───────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────
 
-const INITIAL_NOTIFICATIONS: Notification[] = [
-  {
-    id: 1,
-    category: 'Lab Result',
-    title: "Rocky's cardiac lab results are ready",
-    description: 'NT-proBNP and Cardiac Troponin I results require urgent review. Critical values flagged.',
-    time: '5 minutes ago',
-    timeISO: '2026-03-13T09:25:00',
-    read: false,
-    petName: 'Rocky',
-    ownerName: 'James Wilson',
-    actionLabel: 'View Record',
-    actionPath: '/records/8',
-    urgent: true,
-  },
-  {
-    id: 2,
-    category: 'Appointment',
-    title: 'Upcoming appointment in 30 minutes',
-    description: 'Luna (Tabby) with Emily Johnson — Annual Wellness Exam at 10:00 AM.',
-    time: '30 minutes ago',
-    timeISO: '2026-03-13T09:00:00',
-    read: false,
-    petName: 'Luna',
-    ownerName: 'Emily Johnson',
-    actionLabel: 'View Appointment',
-    actionPath: '/appointments',
-  },
-  {
-    id: 3,
-    category: 'Patient',
-    title: "Follow-up overdue: Charlie",
-    description: "Charlie (Corgi) was due for a joint pain follow-up check on Mar 12. Contact David Miller to reschedule.",
-    time: '2 hours ago',
-    timeISO: '2026-03-13T07:30:00',
-    read: false,
-    petName: 'Charlie',
-    ownerName: 'David Miller',
-    actionLabel: 'View Patient',
-    actionPath: '/clients/5',
-    urgent: true,
-  },
-  {
-    id: 4,
-    category: 'Appointment',
-    title: 'Appointment cancelled',
-    description: "Buddy's grooming & wellness check with Karen Thomas at 3:00 PM today has been cancelled by the owner.",
-    time: '3 hours ago',
-    timeISO: '2026-03-13T06:30:00',
-    read: false,
-    petName: 'Buddy',
-    ownerName: 'Karen Thomas',
-    actionLabel: 'Reschedule',
-    actionPath: '/appointments',
-  },
-  {
-    id: 5,
-    category: 'Vaccine',
-    title: 'Vaccine due in 7 days — Max',
-    description: "Max (Golden Retriever) is due for his Rabies 3-year booster on Mar 20, 2026. Owner notification sent.",
-    time: '4 hours ago',
-    timeISO: '2026-03-13T05:30:00',
-    read: true,
-    petName: 'Max',
-    ownerName: 'John Smith',
-    actionLabel: 'Schedule Visit',
-    actionPath: '/appointments',
-  },
-  {
-    id: 6,
-    category: 'Lab Result',
-    title: "Luna's urinalysis results pending review",
-    description: 'Trace crystalluria detected. Results awaiting your review before sending report to owner.',
-    time: 'Yesterday, 4:15 PM',
-    timeISO: '2026-03-12T16:15:00',
-    read: false,
-    petName: 'Luna',
-    ownerName: 'Emily Johnson',
-    actionLabel: 'View Record',
-    actionPath: '/records/15',
-  },
-  {
-    id: 7,
-    category: 'Appointment',
-    title: 'New appointment request',
-    description: "Sarah Williams has requested an appointment for Bella's post-surgery follow-up on Mar 17.",
-    time: 'Yesterday, 2:00 PM',
-    timeISO: '2026-03-12T14:00:00',
-    read: true,
-    petName: 'Bella',
-    ownerName: 'Sarah Williams',
-    actionLabel: 'Confirm',
-    actionPath: '/appointments',
-  },
-  {
-    id: 8,
-    category: 'Patient',
-    title: 'Prescription refill request — Charlie',
-    description: 'David Miller has requested a refill for Carprofen 75mg (14-day supply). Last prescribed Mar 5.',
-    time: 'Yesterday, 11:30 AM',
-    timeISO: '2026-03-12T11:30:00',
-    read: true,
-    petName: 'Charlie',
-    ownerName: 'David Miller',
-    actionLabel: 'View Record',
-    actionPath: '/records/7',
-  },
-  {
-    id: 9,
-    category: 'System',
-    title: 'Rocky — echocardiogram referral due',
-    description: "Echocardiogram referral for Rocky was sent to Dr. Amanda Torres on Mar 3. Appointment scheduled for Mar 14. Confirm attendance.",
-    time: 'Yesterday, 9:00 AM',
-    timeISO: '2026-03-12T09:00:00',
-    read: true,
-    petName: 'Rocky',
-    ownerName: 'James Wilson',
-    actionLabel: 'View Record',
-    actionPath: '/records/9',
-  },
-  {
-    id: 10,
-    category: 'Vaccine',
-    title: 'Vaccine overdue — Simba',
-    description: "Simba (Maine Coon) is overdue for FVRCP booster. Was due Feb 28. Owner has not responded to reminder.",
-    time: 'Mar 11, 2026',
-    timeISO: '2026-03-11T10:00:00',
-    read: true,
-    petName: 'Simba',
-    ownerName: 'Lisa Martinez',
-    actionLabel: 'Contact Owner',
-    actionPath: '/clients/9',
-  },
-  {
-    id: 11,
-    category: 'Appointment',
-    title: 'Appointment completed — Bella',
-    description: "Post-surgery follow-up for Bella completed on Mar 10. Incision healing well. Record updated.",
-    time: 'Mar 10, 2026',
-    timeISO: '2026-03-10T15:00:00',
-    read: true,
-    petName: 'Bella',
-    ownerName: 'Sarah Williams',
-    actionLabel: 'View Record',
-    actionPath: '/records/6',
-  },
-  {
-    id: 12,
-    category: 'Patient',
-    title: 'Weight alert — Simba',
-    description: "Simba weighed in at 14.2 lbs at last visit — 1.5 lbs above target. Diet plan reminder sent to owner.",
-    time: 'Mar 10, 2026',
-    timeISO: '2026-03-10T11:00:00',
-    read: true,
-    petName: 'Simba',
-    ownerName: 'Lisa Martinez',
-    actionLabel: 'View Patient',
-    actionPath: '/clients/9',
-  },
-  {
-    id: 13,
-    category: 'System',
-    title: 'Monthly records summary ready',
-    description: "Your March 2026 activity summary is ready: 13 records created, 3 pending review, 5 follow-ups scheduled.",
-    time: 'Mar 9, 2026',
-    timeISO: '2026-03-09T08:00:00',
-    read: true,
-    actionLabel: 'View Records',
-    actionPath: '/records',
-  },
-  {
-    id: 14,
-    category: 'Vaccine',
-    title: 'Vaccine due in 14 days — Cooper',
-    description: "Cooper (Beagle) is due for DHPP booster on Mar 27, 2026. Schedule reminder sent to Michael Brown.",
-    time: 'Mar 8, 2026',
-    timeISO: '2026-03-08T09:00:00',
-    read: true,
-    petName: 'Cooper',
-    ownerName: 'Michael Brown',
-    actionLabel: 'Schedule Visit',
-    actionPath: '/appointments',
-  },
-  {
-    id: 15,
-    category: 'Lab Result',
-    title: "Cooper's post-dental bloodwork — all clear",
-    description: "CBC results following Cooper's dental procedure are within normal limits. No concerns.",
-    time: 'Mar 8, 2026',
-    timeISO: '2026-03-08T14:30:00',
-    read: true,
-    petName: 'Cooper',
-    ownerName: 'Michael Brown',
-    actionLabel: 'View Record',
-    actionPath: '/records/4',
-  },
-];
+function localDateString(d: Date = new Date()): string {
+  return `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')}`;
+}
+
+function formatRelativeTime(isoString: string): string {
+  const now = new Date();
+  const date = new Date(isoString);
+  const diffMs = now.getTime() - date.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMin < 0) {
+    // Future — upcoming appointment
+    const minsUntil = Math.abs(diffMin);
+    if (minsUntil < 60) return `in ${minsUntil} minute${minsUntil !== 1 ? 's' : ''}`;
+    const hoursUntil = Math.floor(minsUntil / 60);
+    return `in ${hoursUntil} hour${hoursUntil !== 1 ? 's' : ''}`;
+  }
+  if (diffMin < 1) return 'Just now';
+  if (diffMin < 60) return `${diffMin} minute${diffMin !== 1 ? 's' : ''} ago`;
+  if (diffHours < 24) return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
+  if (diffDays === 1) {
+    return `Yesterday, ${date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+  }
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function formatTime12(isoString: string): string {
+  const d = new Date(isoString);
+  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+}
 
 type FilterTab = 'all' | 'unread' | 'Appointment' | 'Lab Result' | 'Patient' | 'Vaccine' | 'System';
 
@@ -247,13 +83,376 @@ const FILTER_TABS: { label: string; value: FilterTab }[] = [
   { label: 'System', value: 'System' },
 ];
 
+// ─── Data Fetching ───────────────────────────────────────────
+
+async function fetchNotificationsFromSupabase(isAdmin: boolean): Promise<Notification[]> {
+  const now = new Date();
+  const today = localDateString(now);
+
+  // 7 days ago
+  const sevenDaysAgo = new Date(now);
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const sevenDaysAgoStr = localDateString(sevenDaysAgo);
+
+  // 30 days from now (for upcoming vaccine due dates)
+  const thirtyDaysFromNow = new Date(now);
+  thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
+  const thirtyDaysFromNowStr = localDateString(thirtyDaysFromNow);
+
+  const notifications: Notification[] = [];
+  // IDs use DB record IDs for stability (must match Sidebar computation)
+
+  // ── 1. Today's upcoming appointments ──────────────────────
+  const { data: todayAppointments } = await supabase
+    .from('appointments')
+    .select('id, scheduled_at, duration_minutes, status, reason, pets(id, name, species, breed), clients(id, first_name, last_name), staff(id, first_name, last_name)')
+    .gte('scheduled_at', `${today}T00:00:00`)
+    .lte('scheduled_at', `${today}T23:59:59`)
+    .in('status', ['Scheduled', 'Confirmed'])
+    .order('scheduled_at', { ascending: true });
+
+  if (todayAppointments) {
+    for (const appt of todayAppointments) {
+      const pet = appt.pets as { id: string; name: string; species: string; breed: string | null } | null;
+      const client = appt.clients as { id: string; first_name: string; last_name: string } | null;
+      const vet = appt.staff as { id: string; first_name: string; last_name: string } | null;
+      const apptTime = new Date(appt.scheduled_at);
+      const diffMin = Math.round((apptTime.getTime() - now.getTime()) / 60000);
+      const isFuture = diffMin > 0;
+      const isUrgent = isFuture && diffMin <= 30;
+
+      const petLabel = pet ? `${pet.name}${pet.species ? ` (${pet.species})` : ''}` : 'Unknown pet';
+      const ownerLabel = client ? `${client.first_name} ${client.last_name}` : '';
+      const vetLabel = vet ? `Dr. ${vet.first_name} ${vet.last_name}` : '';
+      const reasonLabel = appt.reason || 'General visit';
+
+      let title: string;
+      if (isFuture) {
+        if (diffMin <= 60) {
+          title = `Upcoming appointment in ${diffMin} minute${diffMin !== 1 ? 's' : ''}`;
+        } else {
+          const hours = Math.floor(diffMin / 60);
+          title = `Upcoming appointment in ${hours} hour${hours !== 1 ? 's' : ''}`;
+        }
+      } else {
+        title = `Appointment scheduled at ${formatTime12(appt.scheduled_at)}`;
+      }
+
+      notifications.push({
+        id: `appt-today-${appt.id}`,
+        category: 'Appointment',
+        title,
+        description: `${petLabel} with ${ownerLabel}${vetLabel ? ` — ${vetLabel}` : ''} — ${reasonLabel} at ${formatTime12(appt.scheduled_at)}.`,
+        time: formatRelativeTime(appt.scheduled_at),
+        timeISO: appt.scheduled_at,
+        read: false,
+        petName: pet?.name,
+        ownerName: ownerLabel,
+        actionLabel: 'View Appointment',
+        actionPath: '/appointments',
+        urgent: isUrgent,
+      });
+    }
+  }
+
+  // ── 2. Recently completed appointments (last 7 days) ──────
+  const { data: completedAppointments } = await supabase
+    .from('appointments')
+    .select('id, scheduled_at, status, reason, pets(id, name, species, breed), clients(id, first_name, last_name)')
+    .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`)
+    .lt('scheduled_at', `${today}T00:00:00`)
+    .eq('status', 'Completed')
+    .order('scheduled_at', { ascending: false })
+    .limit(10);
+
+  if (completedAppointments) {
+    for (const appt of completedAppointments) {
+      const pet = appt.pets as { id: string; name: string; species: string; breed: string | null } | null;
+      const client = appt.clients as { id: string; first_name: string; last_name: string } | null;
+      const ownerLabel = client ? `${client.first_name} ${client.last_name}` : '';
+      const reasonLabel = appt.reason || 'General visit';
+
+      notifications.push({
+        id: `appt-done-${appt.id}`,
+        category: 'Appointment',
+        title: `Appointment completed — ${pet?.name || 'Unknown'}`,
+        description: `${reasonLabel} for ${pet?.name || 'Unknown'}${pet?.species ? ` (${pet.species})` : ''} completed on ${new Date(appt.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}. Record updated.`,
+        time: formatRelativeTime(appt.scheduled_at),
+        timeISO: appt.scheduled_at,
+        read: false,
+        petName: pet?.name,
+        ownerName: ownerLabel,
+        actionLabel: 'View Appointment',
+        actionPath: '/appointments',
+      });
+    }
+  }
+
+  // ── 3. Cancelled appointments (last 7 days) ───────────────
+  const { data: cancelledAppointments } = await supabase
+    .from('appointments')
+    .select('id, scheduled_at, reason, pets(id, name), clients(id, first_name, last_name)')
+    .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`)
+    .eq('status', 'Cancelled')
+    .order('scheduled_at', { ascending: false })
+    .limit(5);
+
+  if (cancelledAppointments) {
+    for (const appt of cancelledAppointments) {
+      const pet = appt.pets as { id: string; name: string } | null;
+      const client = appt.clients as { id: string; first_name: string; last_name: string } | null;
+      const ownerLabel = client ? `${client.first_name} ${client.last_name}` : '';
+
+      notifications.push({
+        id: `appt-cancel-${appt.id}`,
+        category: 'Appointment',
+        title: 'Appointment cancelled',
+        description: `${pet?.name || 'Unknown'}'s ${appt.reason || 'appointment'} with ${ownerLabel} on ${new Date(appt.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} has been cancelled.`,
+        time: formatRelativeTime(appt.scheduled_at),
+        timeISO: appt.scheduled_at,
+        read: false,
+        petName: pet?.name,
+        ownerName: ownerLabel,
+        actionLabel: 'Reschedule',
+        actionPath: '/appointments',
+      });
+    }
+  }
+
+  // ── 4. Vaccines due / overdue ─────────────────────────────
+  const { data: vaccinesDue } = await supabase
+    .from('vaccinations')
+    .select('id, vaccine_name, next_due_date, administered_date, pets(id, name, species, breed)')
+    .not('next_due_date', 'is', null)
+    .lte('next_due_date', thirtyDaysFromNowStr)
+    .order('next_due_date', { ascending: true })
+    .limit(10);
+
+  if (vaccinesDue) {
+    for (const vax of vaccinesDue) {
+      const pet = vax.pets as { id: string; name: string; species: string; breed: string | null } | null;
+      const dueDate = new Date(vax.next_due_date!);
+      const daysUntilDue = Math.round((dueDate.getTime() - now.getTime()) / 86400000);
+      const isOverdue = daysUntilDue < 0;
+      const petLabel = pet ? `${pet.name}${pet.breed ? ` (${pet.breed})` : ''}` : 'Unknown pet';
+
+      let title: string;
+      let description: string;
+
+      if (isOverdue) {
+        title = `Vaccine overdue — ${pet?.name || 'Unknown'}`;
+        description = `${petLabel} is overdue for ${vax.vaccine_name}. Was due ${dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}. Contact owner to schedule.`;
+      } else if (daysUntilDue <= 7) {
+        title = `Vaccine due in ${daysUntilDue} day${daysUntilDue !== 1 ? 's' : ''} — ${pet?.name || 'Unknown'}`;
+        description = `${petLabel} is due for ${vax.vaccine_name} on ${dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}.`;
+      } else {
+        title = `Vaccine due in ${daysUntilDue} days — ${pet?.name || 'Unknown'}`;
+        description = `${petLabel} is due for ${vax.vaccine_name} booster on ${dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}. Schedule reminder sent.`;
+      }
+
+      notifications.push({
+        id: `vax-${vax.id}`,
+        category: 'Vaccine',
+        title,
+        description,
+        time: isOverdue
+          ? `Due ${dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+          : `Due in ${daysUntilDue} day${daysUntilDue !== 1 ? 's' : ''}`,
+        timeISO: vax.next_due_date!,
+        read: false,
+        petName: pet?.name,
+        actionLabel: isOverdue ? 'Contact Owner' : 'Schedule Visit',
+        actionPath: '/appointments',
+        urgent: isOverdue,
+      });
+    }
+  }
+
+  // ── 5. New clients registered (last 7 days) ───────────────
+  const { data: newClients } = await supabase
+    .from('clients')
+    .select('id, first_name, last_name, created_at')
+    .gte('created_at', `${sevenDaysAgoStr}T00:00:00`)
+    .order('created_at', { ascending: false })
+    .limit(5);
+
+  if (newClients) {
+    for (const client of newClients) {
+      const ownerLabel = `${client.first_name} ${client.last_name}`;
+      const createdDate = new Date(client.created_at);
+      const isRecent = (now.getTime() - createdDate.getTime()) < 86400000; // within 24h
+
+      notifications.push({
+        id: `client-${client.id}`,
+        category: 'Patient',
+        title: `New client registered — ${ownerLabel}`,
+        description: `${ownerLabel} has been added to the system on ${createdDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}. Review their profile and assign to a veterinarian.`,
+        time: formatRelativeTime(client.created_at),
+        timeISO: client.created_at,
+        read: false,
+        ownerName: ownerLabel,
+        actionLabel: 'View Client',
+        actionPath: `/clients/${client.id}`,
+      });
+    }
+  }
+
+  // ── 6. No-show appointments (last 7 days) ─────────────────
+  const { data: noShowAppointments } = await supabase
+    .from('appointments')
+    .select('id, scheduled_at, reason, pets(id, name), clients(id, first_name, last_name)')
+    .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`)
+    .eq('status', 'No Show')
+    .order('scheduled_at', { ascending: false })
+    .limit(5);
+
+  if (noShowAppointments) {
+    for (const appt of noShowAppointments) {
+      const pet = appt.pets as { id: string; name: string } | null;
+      const client = appt.clients as { id: string; first_name: string; last_name: string } | null;
+      const ownerLabel = client ? `${client.first_name} ${client.last_name}` : '';
+
+      notifications.push({
+        id: `noshow-${appt.id}`,
+        category: 'System',
+        title: `No-show: ${pet?.name || 'Unknown'}'s appointment`,
+        description: `${pet?.name || 'Unknown'} with ${ownerLabel} did not attend their ${appt.reason || 'appointment'} on ${new Date(appt.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}. Consider reaching out to reschedule.`,
+        time: formatRelativeTime(appt.scheduled_at),
+        timeISO: appt.scheduled_at,
+        read: false,
+        petName: pet?.name,
+        ownerName: ownerLabel,
+        actionLabel: 'Reschedule',
+        actionPath: '/appointments',
+      });
+    }
+  }
+
+  // ── 7. New patients assigned to current vet (doctor portal only) ──
+  if (!isAdmin) {
+  // Fetch notification events from Supabase
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 86400000).toISOString();
+  const { data: notifEvents } = await supabase
+    .from('notification_events')
+    .select('*')
+    .gte('timestamp', sevenDaysAgo);
+
+  for (const evt of (notifEvents || [])) {
+    const d = evt.data as any;
+    if (evt.type === 'vet_assign') {
+      const petLabel = `${d.petName}${d.breed ? ` (${d.breed})` : ''}`;
+      notifications.push({
+        id: evt.id,
+        category: 'Patient',
+        title: `New patient assigned — ${d.petName}`,
+        description: `${petLabel} owned by ${d.ownerName} has been assigned to you. Review the patient profile and upcoming appointments.`,
+        time: formatRelativeTime(evt.timestamp),
+        timeISO: evt.timestamp,
+        read: false,
+        petName: d.petName,
+        ownerName: d.ownerName,
+        actionLabel: 'View Patient',
+        actionPath: `/clients/${d.clientId || ''}`,
+        urgent: false,
+      });
+    } else if (evt.type === 'vet_unassign') {
+      notifications.push({
+        id: evt.id,
+        category: 'Patient',
+        title: `Patient unassigned — ${d.petName}`,
+        description: `${d.petName} owned by ${d.ownerName} has been unassigned from ${isAdmin ? d.vetName : 'you'}. The patient may be reassigned to another veterinarian.`,
+        time: formatRelativeTime(evt.timestamp),
+        timeISO: evt.timestamp,
+        read: false,
+        petName: d.petName,
+        ownerName: d.ownerName,
+        actionLabel: 'View Patient',
+        actionPath: `/clients/${d.clientId || ''}`,
+        urgent: false,
+      });
+    } else if (evt.type === 'appt_assign') {
+      const dateLabel = d.date ? ` on ${d.date}` : '';
+      const timeLabel = d.time ? ` at ${d.time}` : '';
+      notifications.push({
+        id: evt.id,
+        category: 'Appointment',
+        title: `New appointment scheduled — ${d.petName}`,
+        description: `${d.petName} owned by ${d.ownerName} has a ${d.service || 'appointment'} scheduled${dateLabel}${timeLabel}. You have been assigned as the attending veterinarian.`,
+        time: formatRelativeTime(evt.timestamp),
+        timeISO: evt.timestamp,
+        read: false,
+        petName: d.petName,
+        ownerName: d.ownerName,
+        actionLabel: 'View Appointment',
+        actionPath: `/appointments`,
+        urgent: false,
+      });
+    }
+  }
+  } // end !isAdmin
+
+  // Sort all notifications: unread first, then by date descending
+  notifications.sort((a, b) => {
+    if (a.read !== b.read) return a.read ? 1 : -1;
+    return new Date(b.timeISO).getTime() - new Date(a.timeISO).getTime();
+  });
+
+  return notifications;
+}
+
 // ─── Component ───────────────────────────────────────────────
 
 export default function NotificationsPage() {
-  const [notifications, setNotifications] = useState<Notification[]>(INITIAL_NOTIFICATIONS);
+  const { pathname } = useLocation();
+  const isAdmin = pathname.startsWith('/admin');
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      try {
+        const data = await fetchNotificationsFromSupabase(isAdmin);
+        if (cancelled) return;
+
+        // Apply persisted read/dismissed state
+        const { data: stateRows } = await supabase.from('notification_state').select('notification_id, status');
+        const readSet = new Set<string>();
+        const dismissedSet = new Set<string>();
+        for (const row of (stateRows || [])) {
+          if (row.status === 'read') readSet.add(row.notification_id);
+          if (row.status === 'dismissed') dismissedSet.add(row.notification_id);
+        }
+        const afterPersist = data
+          .filter(n => !dismissedSet.has(n.id))
+          .map(n => readSet.has(n.id) ? { ...n, read: true } : n);
+
+        // Auto-mark all unread as read on page visit
+        const unreadIds = afterPersist.filter(n => !n.read).map(n => n.id);
+        if (unreadIds.length > 0) {
+          const rows = unreadIds.map(id => ({ notification_id: id, status: 'read', updated_at: new Date().toISOString() }));
+          await supabase.from('notification_state').upsert(rows);
+        }
+
+        const allRead = afterPersist.map(n => ({ ...n, read: true }));
+        if (!cancelled) {
+          setNotifications(allRead);
+          window.dispatchEvent(new CustomEvent('notifCountChanged', { detail: { count: 0 } }));
+        }
+      } catch {}
+      if (!cancelled) setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const unreadCount = notifications.filter((n) => !n.read).length;
+
+  // Broadcast unread count so sidebar can pick it up
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('notifCountChanged', { detail: { count: unreadCount } }));
+  }, [unreadCount]);
 
   const filtered = notifications.filter((n) => {
     if (activeFilter === 'all') return true;
@@ -261,16 +460,42 @@ export default function NotificationsPage() {
     return n.category === activeFilter;
   });
 
-  const markAsRead = (id: number) => {
-    setNotifications((prev) => prev.map((n) => n.id === id ? { ...n, read: true } : n));
+  const saveReadState = async (ids: string[]) => {
+    try {
+      const rows = ids.map(id => ({ notification_id: id, status: 'read', updated_at: new Date().toISOString() }));
+      if (rows.length > 0) await supabase.from('notification_state').upsert(rows);
+    } catch {}
+  };
+  const saveDismissedState = async (ids: string[]) => {
+    try {
+      const rows = ids.map(id => ({ notification_id: id, status: 'dismissed', updated_at: new Date().toISOString() }));
+      if (rows.length > 0) await supabase.from('notification_state').upsert(rows);
+    } catch {}
+  };
+
+
+  const markAsRead = (id: string) => {
+    setNotifications((prev) => {
+      const updated = prev.map((n) => n.id === id ? { ...n, read: true } : n);
+      saveReadState(updated.filter(n => n.read).map(n => n.id));
+      return updated;
+    });
   };
 
   const markAllRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    setNotifications((prev) => {
+      const updated = prev.map((n) => ({ ...n, read: true }));
+      saveReadState(updated.map(n => n.id));
+      return updated;
+    });
   };
 
-  const dismiss = (id: number) => {
-    setNotifications((prev) => prev.filter((n) => n.id !== id));
+  const dismiss = (id: string) => {
+    setNotifications((prev) => {
+      const updated = prev.filter((n) => n.id !== id);
+      saveDismissedState([id]);
+      return updated;
+    });
   };
 
   return (
@@ -356,165 +581,180 @@ export default function NotificationsPage() {
         })}
       </div>
 
-      {/* Notifications List */}
-      <div className="space-y-3">
-        {filtered.length === 0 ? (
-          <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-12 text-center" style={{ borderRadius: '12px' }}>
-            <div className="w-14 h-14 mx-auto mb-4 flex items-center justify-center" style={{ backgroundColor: 'var(--surface-elevated)', borderRadius: '9999px' }}>
-              <Bell className="w-7 h-7 text-[var(--text-secondary)]" />
-            </div>
-            <p className="text-[var(--text-primary)]" style={{ fontSize: '16px', fontWeight: 600 }}>No notifications</p>
-            <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: '14px' }}>
-              {activeFilter === 'unread' ? "You're all caught up!" : 'Nothing here yet.'}
-            </p>
+      {/* Loading State */}
+      {loading && (
+        <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-12 text-center" style={{ borderRadius: '12px' }}>
+          <div className="w-14 h-14 mx-auto mb-4 flex items-center justify-center" style={{ backgroundColor: 'var(--surface-elevated)', borderRadius: '9999px' }}>
+            <Loader2 className="w-7 h-7 text-[var(--text-secondary)] animate-spin" />
           </div>
-        ) : (
-          filtered.map((notif) => {
-            const config = categoryConfig[notif.category];
-            const CategoryIcon = config.icon;
+          <p className="text-[var(--text-primary)]" style={{ fontSize: '16px', fontWeight: 600 }}>Loading notifications...</p>
+          <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: '14px' }}>
+            Fetching latest updates from your clinic data.
+          </p>
+        </div>
+      )}
 
-            return (
-              <div
-                key={notif.id}
-                className="bg-[var(--surface-white)] border p-5 transition-all"
-                style={{
-                  borderRadius: '12px',
-                  borderColor: notif.read
-                    ? 'var(--border-color)'
-                    : notif.urgent ? '#d4183d40' : `${config.hex}35`,
-                  borderLeftWidth: notif.read ? undefined : '3px',
-                  borderLeftColor: notif.read ? undefined : notif.urgent ? '#d4183d' : config.hex,
-                  opacity: notif.read ? 0.82 : 1,
-                  boxShadow: notif.read
-                    ? undefined
-                    : notif.urgent
-                      ? '0 0 18px rgba(212,24,61,0.12), 0 2px 8px rgba(0,0,0,0.06)'
-                      : `0 0 18px ${config.hex}18, 0 2px 8px rgba(0,0,0,0.06)`,
-                }}
-              >
-                <div className="flex items-start gap-4">
-                  {/* Icon — rounded square, My Portal style */}
-                  <div
-                    className="w-10 h-10 flex-shrink-0 flex items-center justify-center mt-0.5"
-                    style={{
-                      borderRadius: '10px',
-                      background: `linear-gradient(135deg, ${config.hex}22 0%, ${config.hex}10 100%)`,
-                      border: `1px solid ${config.hex}30`,
-                      boxShadow: notif.read ? undefined : `0 0 12px ${config.hex}30`,
-                    }}
-                  >
-                    <CategoryIcon className="w-5 h-5" style={{ color: config.text }} />
-                  </div>
+      {/* Notifications List */}
+      {!loading && (
+        <div className="space-y-3">
+          {filtered.length === 0 ? (
+            <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-12 text-center" style={{ borderRadius: '12px' }}>
+              <div className="w-14 h-14 mx-auto mb-4 flex items-center justify-center" style={{ backgroundColor: 'var(--surface-elevated)', borderRadius: '9999px' }}>
+                <Bell className="w-7 h-7 text-[var(--text-secondary)]" />
+              </div>
+              <p className="text-[var(--text-primary)]" style={{ fontSize: '16px', fontWeight: 600 }}>No notifications</p>
+              <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: '14px' }}>
+                {activeFilter === 'unread' ? "You're all caught up!" : 'Nothing here yet.'}
+              </p>
+            </div>
+          ) : (
+            filtered.map((notif) => {
+              const config = categoryConfig[notif.category];
+              const CategoryIcon = config.icon;
 
-                  {/* Content */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          {/* Unread dot */}
-                          {!notif.read && (
-                            <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: notif.urgent ? '#d4183d' : 'var(--brand-green-text)' }} />
-                          )}
-                          <span
-                            className="text-[var(--text-primary)]"
-                            style={{ fontSize: '15px', fontWeight: notif.read ? 500 : 700 }}
-                          >
-                            {notif.title}
-                          </span>
-                          {notif.urgent && !notif.read && (
+              return (
+                <div
+                  key={notif.id}
+                  className="bg-[var(--surface-white)] border p-5 transition-all"
+                  style={{
+                    borderRadius: '12px',
+                    borderColor: notif.read
+                      ? 'var(--border-color)'
+                      : notif.urgent ? '#d4183d40' : `${config.hex}35`,
+                    borderLeftWidth: notif.read ? undefined : '3px',
+                    borderLeftColor: notif.read ? undefined : notif.urgent ? '#d4183d' : config.hex,
+                    opacity: notif.read ? 0.82 : 1,
+                    boxShadow: notif.read
+                      ? undefined
+                      : notif.urgent
+                        ? '0 0 18px rgba(212,24,61,0.12), 0 2px 8px rgba(0,0,0,0.06)'
+                        : `0 0 18px ${config.hex}18, 0 2px 8px rgba(0,0,0,0.06)`,
+                  }}
+                >
+                  <div className="flex items-start gap-4">
+                    {/* Icon — rounded square, My Portal style */}
+                    <div
+                      className="w-10 h-10 flex-shrink-0 flex items-center justify-center mt-0.5"
+                      style={{
+                        borderRadius: '10px',
+                        background: `linear-gradient(135deg, ${config.hex}22 0%, ${config.hex}10 100%)`,
+                        border: `1px solid ${config.hex}30`,
+                        boxShadow: notif.read ? undefined : `0 0 12px ${config.hex}30`,
+                      }}
+                    >
+                      <CategoryIcon className="w-5 h-5" style={{ color: config.text }} />
+                    </div>
+
+                    {/* Content */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1 flex-wrap">
+                            {/* Unread dot */}
+                            {!notif.read && (
+                              <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: notif.urgent ? '#d4183d' : 'var(--brand-green-text)' }} />
+                            )}
+                            <span
+                              className="text-[var(--text-primary)]"
+                              style={{ fontSize: '15px', fontWeight: notif.read ? 500 : 700 }}
+                            >
+                              {notif.title}
+                            </span>
+                            {notif.urgent && !notif.read && (
+                              <span
+                                className="inline-block px-2 py-0.5"
+                                style={{
+                                  backgroundColor: '#d4183d20',
+                                  color: '#d4183d',
+                                  borderRadius: '9999px',
+                                  fontSize: '11px',
+                                  fontWeight: 700,
+                                }}
+                              >
+                                Urgent
+                              </span>
+                            )}
                             <span
                               className="inline-block px-2 py-0.5"
                               style={{
-                                backgroundColor: '#d4183d20',
-                                color: '#d4183d',
+                                backgroundColor: config.bg,
+                                color: config.text,
                                 borderRadius: '9999px',
                                 fontSize: '11px',
-                                fontWeight: 700,
+                                fontWeight: 600,
                               }}
                             >
-                              Urgent
+                              {notif.category}
                             </span>
-                          )}
-                          <span
-                            className="inline-block px-2 py-0.5"
-                            style={{
-                              backgroundColor: config.bg,
-                              color: config.text,
-                              borderRadius: '9999px',
-                              fontSize: '11px',
-                              fontWeight: 600,
-                            }}
-                          >
-                            {notif.category}
-                          </span>
-                        </div>
-                        <p className="text-[var(--text-secondary)] mb-2" style={{ fontSize: '14px', lineHeight: 1.5 }}>
-                          {notif.description}
-                        </p>
-                        <div className="flex items-center gap-4 flex-wrap">
-                          {(notif.petName || notif.ownerName) && (
-                            <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>
-                              {notif.petName && <strong className="text-[var(--text-primary)]">{notif.petName}</strong>}
-                              {notif.petName && notif.ownerName && ' — '}
-                              {notif.ownerName}
+                          </div>
+                          <p className="text-[var(--text-secondary)] mb-2" style={{ fontSize: '14px', lineHeight: 1.5 }}>
+                            {notif.description}
+                          </p>
+                          <div className="flex items-center gap-4 flex-wrap">
+                            {(notif.petName || notif.ownerName) && (
+                              <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>
+                                {notif.petName && <strong className="text-[var(--text-primary)]">{notif.petName}</strong>}
+                                {notif.petName && notif.ownerName && ' — '}
+                                {notif.ownerName}
+                              </span>
+                            )}
+                            <span className="flex items-center gap-1 text-[var(--text-secondary)]" style={{ fontSize: '12px' }}>
+                              <Clock className="w-3 h-3" />
+                              {notif.time}
                             </span>
-                          )}
-                          <span className="flex items-center gap-1 text-[var(--text-secondary)]" style={{ fontSize: '12px' }}>
-                            <Clock className="w-3 h-3" />
-                            {notif.time}
-                          </span>
+                          </div>
                         </div>
-                      </div>
 
-                      {/* Actions */}
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        {notif.actionLabel && notif.actionPath && (
-                          <a
-                            href={notif.actionPath}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 transition-colors"
-                            style={{
-                              backgroundColor: '#2D6A4F10',
-                              color: 'var(--brand-green-text)',
-                              borderRadius: '8px',
-                              fontSize: '13px',
-                              fontWeight: 600,
-                              textDecoration: 'none',
-                            }}
-                          >
-                            {notif.actionLabel}
-                            <ChevronRight className="w-3.5 h-3.5" />
-                          </a>
-                        )}
-                        {!notif.read && (
+                        {/* Actions */}
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          {notif.actionLabel && notif.actionPath && (
+                            <a
+                              href={notif.actionPath}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 transition-colors"
+                              style={{
+                                backgroundColor: '#2D6A4F10',
+                                color: 'var(--brand-green-text)',
+                                borderRadius: '8px',
+                                fontSize: '13px',
+                                fontWeight: 600,
+                                textDecoration: 'none',
+                              }}
+                            >
+                              {notif.actionLabel}
+                              <ChevronRight className="w-3.5 h-3.5" />
+                            </a>
+                          )}
+                          {!notif.read && (
+                            <button
+                              onClick={() => markAsRead(notif.id)}
+                              title="Mark as read"
+                              className="w-8 h-8 flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--brand-green-text)] hover:bg-[var(--surface-elevated)] transition-colors"
+                              style={{ borderRadius: '8px' }}
+                            >
+                              <Check className="w-4 h-4" />
+                            </button>
+                          )}
                           <button
-                            onClick={() => markAsRead(notif.id)}
-                            title="Mark as read"
-                            className="w-8 h-8 flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--brand-green-text)] hover:bg-[var(--surface-elevated)] transition-colors"
+                            onClick={() => dismiss(notif.id)}
+                            title="Dismiss"
+                            className="w-8 h-8 flex items-center justify-center text-[var(--text-secondary)] hover:text-[#d4183d] hover:bg-[var(--surface-elevated)] transition-colors"
                             style={{ borderRadius: '8px' }}
                           >
-                            <Check className="w-4 h-4" />
+                            <Trash2 className="w-4 h-4" />
                           </button>
-                        )}
-                        <button
-                          onClick={() => dismiss(notif.id)}
-                          title="Dismiss"
-                          className="w-8 h-8 flex items-center justify-center text-[var(--text-secondary)] hover:text-[#d4183d] hover:bg-[var(--surface-elevated)] transition-colors"
-                          style={{ borderRadius: '8px' }}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            );
-          })
-        )}
-      </div>
+              );
+            })
+          )}
+        </div>
+      )}
 
       {/* Footer count */}
-      {filtered.length > 0 && (
+      {!loading && filtered.length > 0 && (
         <p className="text-center text-[var(--text-secondary)] mt-6" style={{ fontSize: '13px' }}>
           Showing {filtered.length} notification{filtered.length !== 1 ? 's' : ''}
           {activeFilter !== 'all' && ` · ${FILTER_TABS.find(t => t.value === activeFilter)?.label}`}

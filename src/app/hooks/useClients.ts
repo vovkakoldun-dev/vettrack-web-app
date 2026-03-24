@@ -64,6 +64,17 @@ export function useClients() {
     fetchClients()
   }, [fetchClients])
 
+  // Listen for cross-page data changes
+  useEffect(() => {
+    const handler = () => { fetchClients() }
+    window.addEventListener('clientDataChanged', handler)
+    window.addEventListener('petDataChanged', handler)
+    return () => {
+      window.removeEventListener('clientDataChanged', handler)
+      window.removeEventListener('petDataChanged', handler)
+    }
+  }, [fetchClients])
+
   const addClient = useCallback(async (values: AddClientValues) => {
     const { data, error: err } = await supabase
       .from('clients')
@@ -72,6 +83,7 @@ export function useClients() {
       .single()
     if (!err && data) {
       setClients(prev => [data as ClientRow, ...prev])
+      window.dispatchEvent(new CustomEvent('clientDataChanged'))
     }
     return { data, error: err }
   }, [])
@@ -85,6 +97,7 @@ export function useClients() {
       .single()
     if (!err && data) {
       setClients(prev => prev.map(c => c.id === id ? { ...c, ...values } : c))
+      window.dispatchEvent(new CustomEvent('clientDataChanged'))
     }
     return { data, error: err }
   }, [])
@@ -96,6 +109,7 @@ export function useClients() {
     const { error: err } = await supabase.from('clients').delete().eq('id', id)
     if (!err) {
       setClients(prev => prev.filter(c => c.id !== id))
+      window.dispatchEvent(new CustomEvent('clientDataChanged'))
     }
     return { error: err }
   }, [])

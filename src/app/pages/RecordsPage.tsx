@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router';
 import {
   Search, FileText, CalendarDays, ClipboardList, FlaskConical,
@@ -11,6 +11,7 @@ import {
 import {
   Table, TableHeader, TableBody, TableHead, TableRow, TableCell,
 } from '../components/ui/table';
+import { supabase } from '../../lib/supabase';
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -19,6 +20,7 @@ type RecordStatus = 'Final' | 'Pending Review' | 'Amended' | 'Draft';
 
 interface MedicalRecord {
   id: number;
+  dbId?: string;
   petName: string;
   petImage: string;
   breed: string;
@@ -50,10 +52,6 @@ const statusColors: Record<RecordStatus, { bg: string; text: string }> = {
   Draft:            { bg: '#6B728020', text: 'var(--text-secondary)' },
 };
 
-// ─── Mock Data ───────────────────────────────────────────────
-
-const RECORDS: MedicalRecord[] = []
-
 // ─── Component ───────────────────────────────────────────────
 
 export default function RecordsPage() {
@@ -65,8 +63,38 @@ export default function RecordsPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [records, setRecords] = useState<MedicalRecord[]>([]);
 
-  const filtered = [].filter((r) => {
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from('medical_records')
+        .select('id, record_number, record_type, status, visit_date, visit_time, reason, clinical_notes, duration_minutes, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name), staff!medical_records_vet_id_fkey(id, first_name, last_name)')
+        .order('visit_date', { ascending: false });
+      if (data) {
+        const mapped: MedicalRecord[] = data.map((r: any, i: number) => {
+          const d = new Date(r.visit_date + 'T12:00:00');
+          return {
+            id: i + 1,
+            dbId: r.id,
+            petName: r.pets?.name ?? '—',
+            petImage: r.pets?.photo_url || '',
+            breed: r.pets?.breed ?? '—',
+            ownerName: r.clients ? `${r.clients.first_name} ${r.clients.last_name}` : '—',
+            recordType: (r.record_type || 'Visit') as RecordType,
+            date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+            dateISO: r.visit_date,
+            vet: r.staff ? `Dr. ${r.staff.first_name} ${r.staff.last_name}` : '—',
+            summary: r.reason || r.clinical_notes || '—',
+            status: (r.status || 'Final') as RecordStatus,
+          };
+        });
+        setRecords(mapped);
+      }
+    })();
+  }, []);
+
+  const filtered = records.filter((r) => {
     const q = search.toLowerCase();
     const matchesSearch =
       r.petName.toLowerCase().includes(q) ||
@@ -80,8 +108,8 @@ export default function RecordsPage() {
     return matchesSearch && matchesType && matchesStatus && matchesDateFrom && matchesDateTo;
   });
 
-  const pendingCount = [].filter((r) => r.status === 'Pending Review').length;
-  const thisMonthCount = [].filter((r) => r.dateISO >= '2026-03-01').length;
+  const pendingCount = records.filter((r) => r.status === 'Pending Review').length;
+  const thisMonthCount = records.filter((r) => r.dateISO >= '2026-03-01').length;
 
   return (
     <div className="max-w-[1440px] mx-auto p-8">
@@ -95,10 +123,10 @@ export default function RecordsPage() {
 
       {/* Stat Cards */}
       <div className="grid grid-cols-4 gap-6 mb-8">
-        <StatCard title="Total Records" value={RECORDS.length.toString()} icon={FileText} trend={{ value: `${thisMonthCount} this month`, isPositive: true }} iconColor="var(--brand-green-text)" />
+        <StatCard title="Total Records" value={records.length.toString()} icon={FileText} trend={{ value: `${thisMonthCount} this month`, isPositive: true }} iconColor="var(--brand-green-text)" />
         <StatCard title="This Month" value={thisMonthCount.toString()} icon={CalendarDays} trend={{ value: '+5 from last month', isPositive: true }} iconColor="#3B82F6" />
         <StatCard title="Pending Review" value={pendingCount.toString()} icon={ClipboardList} trend={{ value: 'Needs attention', isPositive: false }} iconColor="#F4A261" />
-        <StatCard title="Lab Results" value={RECORDS.filter((r) => r.recordType === 'Lab Result').length.toString()} icon={FlaskConical} trend={{ value: '2 awaiting results', isPositive: false }} iconColor="#8B5CF6" />
+        <StatCard title="Lab Results" value={records.filter((r) => r.recordType === 'Lab Result').length.toString()} icon={FlaskConical} trend={{ value: '2 awaiting results', isPositive: false }} iconColor="#8B5CF6" />
       </div>
 
       {/* Search + Filters */}
@@ -157,12 +185,16 @@ export default function RecordsPage() {
                 <TableRow
                   key={rec.id}
                   className="hover:bg-[var(--surface-elevated)] cursor-pointer transition-colors"
-                  onClick={() => navigate(`${basePath}/${rec.id}`)}
+                  onClick={() => navigate(`${basePath}/${rec.dbId || rec.id}`)}
                 >
                   {/* Pet */}
                   <TableCell className="py-4 px-4">
                     <div className="flex items-center gap-3">
-                      <img src={rec.petImage} alt={rec.petName} className="w-10 h-10 object-cover" style={{ borderRadius: '9999px' }} />
+                      {rec.petImage ? (
+                        <img src={rec.petImage} alt={rec.petName} className="w-10 h-10 object-cover" style={{ borderRadius: '9999px' }} />
+                      ) : (
+                        <div className="w-10 h-10 flex items-center justify-center text-white font-semibold flex-shrink-0" style={{ borderRadius: '9999px', backgroundColor: '#2D6A4F', fontSize: '13px' }}>{rec.petName.slice(0, 2).toUpperCase()}</div>
+                      )}
                       <div>
                         <p className="text-[var(--text-primary)]" style={{ fontSize: '15px', fontWeight: 600 }}>{rec.petName}</p>
                         <p className="text-[var(--text-secondary)]" style={{ fontSize: '12px' }}>{rec.breed}</p>
@@ -206,7 +238,7 @@ export default function RecordsPage() {
         {/* Footer */}
         <div className="px-6 py-4 border-t border-[var(--border-color)] flex items-center justify-between">
           <p className="text-[var(--text-secondary)]" style={{ fontSize: '14px', fontWeight: 400 }}>
-            Showing {filtered.length} of {RECORDS.length} records
+            Showing {filtered.length} of {records.length} records
           </p>
         </div>
       </div>

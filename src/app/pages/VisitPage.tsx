@@ -15,6 +15,8 @@ import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '../components/ui/select';
 import { MOCK_APPOINTMENTS, LAB_TESTS } from '../data/mockAppointments';
+import type { Appointment as MockAppt } from '../data/mockAppointments';
+import { supabase } from '../../lib/supabase';
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -127,7 +129,53 @@ export default function VisitPage() {
   const navigate = useNavigate();
   const { advanceToCheckout } = useActiveVisit();
 
-  const appt = MOCK_APPOINTMENTS.find((a) => String(a.id) === id);
+  const mockAppt = MOCK_APPOINTMENTS.find((a) => String(a.id) === id);
+  const [realAppt, setRealAppt] = useState<MockAppt | null>(null);
+  const [loadingAppt, setLoadingAppt] = useState(!mockAppt);
+
+  useEffect(() => {
+    if (mockAppt || !id) return;
+    (async () => {
+      setLoadingAppt(true);
+      const { data } = await supabase
+        .from('appointments')
+        .select('id, scheduled_at, duration_minutes, status, reason, notes, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name), staff!appointments_vet_id_fkey(id, first_name, last_name)')
+        .eq('id', id)
+        .single();
+      if (data) {
+        const start = new Date(data.scheduled_at);
+        const end = new Date(start.getTime() + (data.duration_minutes ?? 30) * 60000);
+        const fmt = (d: Date) => {
+          let h = d.getHours();
+          const m = d.getMinutes();
+          const ampm = h >= 12 ? 'PM' : 'AM';
+          if (h > 12) h -= 12;
+          if (h === 0) h = 12;
+          return `${h}:${m.toString().padStart(2, '0')} ${ampm}`;
+        };
+        const y = start.getFullYear();
+        const mo = (start.getMonth() + 1).toString().padStart(2, '0');
+        const da = start.getDate().toString().padStart(2, '0');
+        setRealAppt({
+          id: 0,
+          date: `${y}-${mo}-${da}`,
+          timeStart: fmt(start),
+          timeEnd: fmt(end),
+          petName: data.pets?.name ?? '—',
+          petImage: data.pets?.photo_url ?? '',
+          ownerName: data.clients ? `${data.clients.first_name} ${data.clients.last_name}` : '—',
+          species: data.pets?.species ?? '—',
+          service: data.reason ?? '—',
+          vet: data.staff ? `Dr. ${data.staff.first_name} ${data.staff.last_name}` : '—',
+          status: (data.status as any) ?? 'In Progress',
+          notes: data.notes ?? '',
+        });
+      }
+      setLoadingAppt(false);
+    })();
+  }, [id, mockAppt]);
+
+  const appt = mockAppt || realAppt;
 
   // ── Form state ───────────────────────────────────────────────
   const [chiefComplaint, setChiefComplaint] = useState('');
@@ -179,6 +227,14 @@ export default function VisitPage() {
     const interval = setInterval(() => setElapsedSec((s) => s + 1), 1000);
     return () => clearInterval(interval);
   }, []);
+
+  if (loadingAppt) {
+    return (
+      <div className="max-w-[960px] mx-auto p-8 text-center">
+        <p className="text-[var(--text-secondary)]" style={{ fontSize: '16px' }}>Loading appointment...</p>
+      </div>
+    );
+  }
 
   if (!appt) {
     return (
@@ -951,7 +1007,34 @@ export default function VisitPage() {
             Back to Appointments
           </Button>
           <Button
-            onClick={() => { advanceToCheckout(id!); navigate(`/appointments/${id}/checkout`); }}
+            onClick={async () => {
+              // Persist front-desk tasks to Supabase so AdminTasksPage can show them
+              if (frontDeskTasks.length > 0 && appt) {
+                try {
+                  const today = new Date().toISOString().split('T')[0];
+                  const taskRows = frontDeskTasks.map(t => ({
+                    type: t.type,
+                    priority: t.priority,
+                    status: 'Pending',
+                    due_date: t.dueDate || today,
+                    due_time: t.dueTime || null,
+                    pet_name: appt.petName,
+                    pet_species: appt.species || '—',
+                    owner_name: appt.ownerName,
+                    owner_phone: '',
+                    assigned_by: (appt.vet && appt.vet !== '—') ? appt.vet : 'Dr. Volodymyr Koldun',
+                    visit_date: today,
+                    doctor_notes: t.notes,
+                    tags: [],
+                  }));
+                  if (taskRows.length > 0) {
+                    await supabase.from('tasks').insert(taskRows);
+                  }
+                  window.dispatchEvent(new Event('notifCountChanged'));
+                } catch {}
+              }
+              advanceToCheckout(id!); navigate(`/appointments/${id}/checkout`);
+            }}
             style={{ backgroundColor: '#2D6A4F', color: '#fff', border: 'none' }}
             className="hover:opacity-90"
           >

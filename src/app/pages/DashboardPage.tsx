@@ -7,6 +7,7 @@ import { useDashboardStats } from '../hooks/useDashboardStats';
 import { useAppointments } from '../hooks/useAppointments';
 import { useClients } from '../hooks/useClients';
 import { supabase } from '../../lib/supabase';
+import { useProfile } from '../hooks/useProfile';
 
 // ─── Search result types ────────────────────────────────────
 
@@ -526,23 +527,8 @@ export default function DashboardPage() {
   });
   const isDevClinic = selectedClinic.is_dev !== false; // default to dev if not set
 
-  // ── Vet name from Supabase (cached to avoid flash) ─────────
-  const [vetName, setVetName] = useState(() => {
-    try {
-      const cached = localStorage.getItem('doctor_dashboard_name');
-      return cached || '';
-    } catch { return ''; }
-  });
-  useEffect(() => {
-    (async () => {
-      const { data } = await supabase.from('staff').select('first_name, last_name').in('role', ['veterinarian', 'senior_veterinarian', 'lead_vet_tech']).limit(1).single();
-      if (data) {
-        const name = `Dr. ${data.last_name}`;
-        setVetName(name);
-        localStorage.setItem('doctor_dashboard_name', name);
-      }
-    })();
-  }, []);
+  // ── Vet name from useProfile hook ─────────
+  const { profile: doctorProfile } = useProfile('doctor');
 
   // ── Real data from Supabase ─────────────────────────────────
   const stats = useDashboardStats();
@@ -587,7 +573,7 @@ export default function DashboardPage() {
     <div className="max-w-[1440px] mx-auto p-8">
       {/* Welcome Header */}
       <div className="mb-6">
-        <h1 className="text-[var(--text-primary)] mb-2">Welcome back, {vetName || 'Doctor'} 👋</h1>
+        <h1 className="text-[var(--text-primary)] mb-2">Welcome back, {doctorProfile.displayName || 'Doctor'} 👋</h1>
         <p className="text-[var(--text-secondary)]" style={{ fontSize: '16px', fontWeight: 400 }}>
           {selectedClinic.name
             ? `${selectedClinic.name} — Here's what's happening today.`

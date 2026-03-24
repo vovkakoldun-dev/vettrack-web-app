@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate, useSearchParams, useLocation } from 'react-router';
 import { supabase } from '../../lib/supabase';
 import {
@@ -247,93 +247,107 @@ export default function ClientDetailPage() {
   const [client, setClient] = useState(mockClient);
   const [dbLoaded, setDbLoaded] = useState(false);
 
-  useEffect(() => {
+  const fetchClientData = useCallback(async () => {
     if (!id) return;
-    (async () => {
-      const { data: c } = await supabase
-        .from('clients')
-        .select('id, first_name, last_name, email, phone, address, city, state, zip, notes, portal_status, health_status, created_at, pets(id, name, species, breed, date_of_birth, sex, weight_kg, microchip_no, photo_url, assigned_vet_id, assigned_vet:staff!pets_assigned_vet_id_fkey(id, first_name, last_name))')
-        .eq('id', id)
-        .single();
-      if (c) {
-        const petIds = (c.pets as any[] || []).map((p: any) => p.id);
-        // Fetch allergies and conditions for all pets
-        const [allergiesRes, conditionsRes, treatmentsRes, appointmentsRes] = await Promise.all([
-          petIds.length > 0 ? supabase.from('pet_allergies').select('*').in('pet_id', petIds) : { data: [] },
-          petIds.length > 0 ? supabase.from('pet_conditions').select('*').in('pet_id', petIds) : { data: [] },
-          petIds.length > 0 ? supabase.from('pet_treatments').select('*').in('pet_id', petIds).order('date', { ascending: false }) : { data: [] },
-          petIds.length > 0 ? supabase.from('appointments').select('id, pet_id, scheduled_at, duration_minutes, status, reason, staff!appointments_vet_id_fkey(first_name, last_name)').in('pet_id', petIds).gte('scheduled_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString()).order('scheduled_at', { ascending: true }) : { data: [] },
-        ]);
-        const petAllergies = (allergiesRes.data || []) as any[];
-        const petConditions = (conditionsRes.data || []) as any[];
-        const petTreatments = (treatmentsRes.data || []) as any[];
-        const petAppointments = (appointmentsRes.data || []) as any[];
+    const { data: c } = await supabase
+      .from('clients')
+      .select('id, first_name, last_name, email, phone, address, city, state, zip, notes, portal_status, health_status, created_at, pets(id, name, species, breed, date_of_birth, sex, weight_kg, microchip_no, photo_url, assigned_vet_id, assigned_vet:staff!pets_assigned_vet_id_fkey(id, first_name, last_name))')
+      .eq('id', id)
+      .single();
+    if (c) {
+      const petIds = (c.pets as any[] || []).map((p: any) => p.id);
+      const [allergiesRes, conditionsRes, treatmentsRes, appointmentsRes] = await Promise.all([
+        petIds.length > 0 ? supabase.from('pet_allergies').select('*').in('pet_id', petIds) : { data: [] },
+        petIds.length > 0 ? supabase.from('pet_conditions').select('*').in('pet_id', petIds) : { data: [] },
+        petIds.length > 0 ? supabase.from('pet_treatments').select('*').in('pet_id', petIds).order('date', { ascending: false }) : { data: [] },
+        petIds.length > 0 ? supabase.from('appointments').select('id, pet_id, scheduled_at, duration_minutes, status, reason, staff!appointments_vet_id_fkey(first_name, last_name)').in('pet_id', petIds).gte('scheduled_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString()).order('scheduled_at', { ascending: true }) : { data: [] },
+      ]);
+      const petAllergies = (allergiesRes.data || []) as any[];
+      const petConditions = (conditionsRes.data || []) as any[];
+      const petTreatments = (treatmentsRes.data || []) as any[];
+      const petAppointments = (appointmentsRes.data || []) as any[];
 
-        const pets = (c.pets as any[] || []).map((p: any, idx: number) => ({
-          id: idx + 1,
-          dbId: p.id as string,
-          name: p.name || '—',
-          species: p.species || '—',
-          breed: p.breed || '—',
-          dob: p.date_of_birth || '',
-          age: p.date_of_birth ? `${Math.floor((Date.now() - new Date(p.date_of_birth).getTime()) / (365.25 * 24 * 60 * 60 * 1000))} years` : '—',
-          sex: p.sex || '—',
-          weight: p.weight_kg ? `${p.weight_kg} kg` : '—',
-          microchip: p.microchip_no || '—',
-          color: '—',
-          image: p.photo_url || '',
-          assignedVet: p.assigned_vet ? `Dr. ${p.assigned_vet.first_name} ${p.assigned_vet.last_name}` : '—',
-          status: ((['Healthy', 'Follow-up', 'Critical'].includes((c as any).health_status)) ? (c as any).health_status : 'Healthy') as 'Healthy' | 'Follow-up' | 'Critical',
-          conditions: petConditions.filter((pc: any) => pc.pet_id === p.id).map((pc: any) => ({
-            id: pc.id, name: pc.name, dateDiagnosed: new Date(pc.date_diagnosed).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }), status: pc.status as 'active' | 'resolved', notes: pc.notes || '',
-          })),
-          treatments: petTreatments.filter((pt: any) => pt.pet_id === p.id).map((pt: any) => ({
-            id: pt.id, name: pt.name, date: new Date(pt.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }), vet: pt.vet, notes: pt.notes,
-          })),
-          allergies: petAllergies.filter((pa: any) => pa.pet_id === p.id).map((pa: any) => pa.name as string),
-          visits: [] as { id: number; date: string; reason: string; vet: string; summary: string; notes: string; status: 'Completed' | 'Scheduled' }[],
-          vetNotes: '',
-          clientNotes: '',
-          upcomingAppointments: petAppointments.filter((a: any) => a.pet_id === p.id).map((a: any, ai: number) => {
-            const d = new Date(a.scheduled_at);
-            const fmtTime = (dt: Date) => {
-              let h = dt.getUTCHours(); const m = dt.getUTCMinutes();
-              const ampm = h >= 12 ? 'PM' : 'AM';
-              if (h > 12) h -= 12; if (h === 0) h = 12;
-              return `${h}:${m.toString().padStart(2, '0')} ${ampm}`;
-            };
-            return {
-              id: ai + 1,
-              time: fmtTime(d),
-              date: d.toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' }),
-              reason: a.reason || a.status || 'Appointment',
-            };
-          }),
-          vaccinations: [] as { id: number; name: string; status: 'Up to date' | 'Due soon' | 'Overdue'; lastGiven: string; nextDue: string }[],
-        }));
-        const addr = [c.address, c.city, c.state, c.zip].filter(Boolean).join(', ');
-        setClient({
-          id: 1,
-          owner: {
-            name: `${c.first_name} ${c.last_name}`,
-            email: c.email || '—',
-            phone: c.phone || '—',
-            address: addr || '—',
-            emergencyContact: '—',
-            emergencyPhone: '—',
-          },
-          insurance: { provider: '—', policyNumber: '—', coverageType: '—', expiryDate: '—' },
-          pets: pets.length > 0 ? pets : [{
-            id: 1, dbId: '', name: '—', species: '—', breed: '—', dob: '', age: '—',
-            sex: '—', weight: '—', microchip: '—', color: '—', image: '',
-            status: 'Healthy' as const, conditions: [], treatments: [], allergies: [],
-            visits: [], vetNotes: '', clientNotes: '', upcomingAppointments: [], vaccinations: [],
-          }],
-        });
-        setDbLoaded(true);
-      }
-    })();
+      const pets = (c.pets as any[] || []).map((p: any, idx: number) => ({
+        id: idx + 1,
+        dbId: p.id as string,
+        name: p.name || '—',
+        species: p.species || '—',
+        breed: p.breed || '—',
+        dob: p.date_of_birth || '',
+        age: p.date_of_birth ? `${Math.floor((Date.now() - new Date(p.date_of_birth).getTime()) / (365.25 * 24 * 60 * 60 * 1000))} years` : '—',
+        sex: p.sex || '—',
+        weight: p.weight_kg ? `${p.weight_kg} kg` : '—',
+        microchip: p.microchip_no || '—',
+        color: '—',
+        image: p.photo_url || '',
+        assignedVet: p.assigned_vet ? `Dr. ${p.assigned_vet.first_name} ${p.assigned_vet.last_name}` : '—',
+        status: ((['Healthy', 'Follow-up', 'Critical'].includes((c as any).health_status)) ? (c as any).health_status : 'Healthy') as 'Healthy' | 'Follow-up' | 'Critical',
+        conditions: petConditions.filter((pc: any) => pc.pet_id === p.id).map((pc: any) => ({
+          id: pc.id, name: pc.name, dateDiagnosed: new Date(pc.date_diagnosed).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }), status: pc.status as 'active' | 'resolved', notes: pc.notes || '',
+        })),
+        treatments: petTreatments.filter((pt: any) => pt.pet_id === p.id).map((pt: any) => ({
+          id: pt.id, name: pt.name, date: new Date(pt.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }), vet: pt.vet, notes: pt.notes,
+        })),
+        allergies: petAllergies.filter((pa: any) => pa.pet_id === p.id).map((pa: any) => pa.name as string),
+        visits: [] as { id: number; date: string; reason: string; vet: string; summary: string; notes: string; status: 'Completed' | 'Scheduled' }[],
+        vetNotes: '',
+        clientNotes: '',
+        upcomingAppointments: petAppointments.filter((a: any) => a.pet_id === p.id).map((a: any, ai: number) => {
+          const d = new Date(a.scheduled_at);
+          const fmtTime = (dt: Date) => {
+            let h = dt.getUTCHours(); const m = dt.getUTCMinutes();
+            const ampm = h >= 12 ? 'PM' : 'AM';
+            if (h > 12) h -= 12; if (h === 0) h = 12;
+            return `${h}:${m.toString().padStart(2, '0')} ${ampm}`;
+          };
+          return {
+            id: ai + 1,
+            time: fmtTime(d),
+            date: d.toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' }),
+            reason: a.reason || a.status || 'Appointment',
+          };
+        }),
+        vaccinations: [] as { id: number; name: string; status: 'Up to date' | 'Due soon' | 'Overdue'; lastGiven: string; nextDue: string }[],
+      }));
+      const addr = [c.address, c.city, c.state, c.zip].filter(Boolean).join(', ');
+      setClient({
+        id: 1,
+        owner: {
+          name: `${c.first_name} ${c.last_name}`,
+          email: c.email || '—',
+          phone: c.phone || '—',
+          address: addr || '—',
+          emergencyContact: '—',
+          emergencyPhone: '—',
+        },
+        insurance: { provider: '—', policyNumber: '—', coverageType: '—', expiryDate: '—' },
+        pets: pets.length > 0 ? pets : [{
+          id: 1, dbId: '', name: '—', species: '—', breed: '—', dob: '', age: '—',
+          sex: '—', weight: '—', microchip: '—', color: '—', image: '',
+          status: 'Healthy' as const, conditions: [], treatments: [], allergies: [],
+          visits: [], vetNotes: '', clientNotes: '', upcomingAppointments: [], vaccinations: [],
+        }],
+      });
+      setDbLoaded(true);
+    }
   }, [id]);
+
+  useEffect(() => {
+    fetchClientData();
+  }, [fetchClientData]);
+
+  // Re-fetch when data changes elsewhere in the app
+  useEffect(() => {
+    const handler = () => { fetchClientData() }
+    window.addEventListener('clientDataChanged', handler)
+    window.addEventListener('petDataChanged', handler)
+    window.addEventListener('appointmentDataChanged', handler)
+    return () => {
+      window.removeEventListener('clientDataChanged', handler)
+      window.removeEventListener('petDataChanged', handler)
+      window.removeEventListener('appointmentDataChanged', handler)
+    }
+  }, [fetchClientData]);
 
   const [selectedPetIdx, setSelectedPetIdx] = useState(0);
 
@@ -370,10 +384,10 @@ export default function ClientDetailPage() {
       if (addPetPhoto) {
         const ext = addPetPhoto.name.split('.').pop() || 'jpg';
         const path = `${id}/${Date.now()}.${ext}`;
-        const { error: uploadErr } = await supabase.storage.from('pet-photos').upload(path, addPetPhoto, { upsert: true });
+        const { error: uploadErr } = await supabase.storage.from('pet-images').upload(path, addPetPhoto, { upsert: true, contentType: addPetPhoto.type });
         if (!uploadErr) {
-          const { data: urlData } = supabase.storage.from('pet-photos').getPublicUrl(path);
-          photoUrl = urlData.publicUrl;
+          const { data: urlData } = supabase.storage.from('pet-images').getPublicUrl(path);
+          photoUrl = urlData.publicUrl + '?t=' + Date.now();
         }
       }
       const { error: petErr } = await supabase.from('pets').insert([{
@@ -435,6 +449,8 @@ export default function ClientDetailPage() {
           handleSelectPet(pets.length - 1);
         }
       }
+      // Notify other pages of the new pet
+      window.dispatchEvent(new CustomEvent('petDataChanged'));
     } catch (err) {
       console.error('Add pet error:', err);
     }
@@ -482,6 +498,9 @@ export default function ClientDetailPage() {
         address: ownerAddress !== '—' ? ownerAddress : null,
       }).eq('id', id);
 
+      // Notify other pages of the data change
+      window.dispatchEvent(new CustomEvent('clientDataChanged'));
+      window.dispatchEvent(new CustomEvent('petDataChanged'));
     } catch (err) {
       console.error('Save error:', err);
     }
@@ -545,10 +564,10 @@ export default function ClientDetailPage() {
     try {
       const ext = file.name.split('.').pop() || 'jpg';
       const path = `${id}/${Date.now()}.${ext}`;
-      const { error: uploadErr } = await supabase.storage.from('pet-photos').upload(path, file, { upsert: true });
+      const { error: uploadErr } = await supabase.storage.from('pet-images').upload(path, file, { upsert: true, contentType: file.type });
       if (uploadErr) throw uploadErr;
-      const { data: urlData } = supabase.storage.from('pet-photos').getPublicUrl(path);
-      const publicUrl = urlData.publicUrl;
+      const { data: urlData } = supabase.storage.from('pet-images').getPublicUrl(path);
+      const publicUrl = urlData.publicUrl + '?t=' + Date.now();
       // Update the pet record in Supabase
       const pet = (client.pets as any[])[selectedPetIdx];
       if (pet) {
@@ -984,9 +1003,31 @@ export default function ClientDetailPage() {
                           key={v.id}
                           onClick={async () => {
                             const petDbId = client.pets[selectedPetIdx]?.dbId;
+                            const pet = client.pets[selectedPetIdx];
                             setPetAssignedVet(v.name);
                             if (petDbId) {
                               await supabase.from('pets').update({ assigned_vet_id: v.id }).eq('id', petDbId);
+                              window.dispatchEvent(new CustomEvent('petDataChanged'));
+                              try {
+                                // Remove old assign event for this pet, then insert new one
+                                await supabase.from('notification_events').delete().eq('type', 'vet_assign').ilike('id', `assign-${petDbId}-%`);
+                                await supabase.from('notification_events').upsert({
+                                  id: `assign-${petDbId}-${Date.now()}`,
+                                  type: 'vet_assign',
+                                  timestamp: new Date().toISOString(),
+                                  data: {
+                                    petId: petDbId,
+                                    petName: pet?.name || 'Unknown',
+                                    species: pet?.species || '',
+                                    breed: pet?.breed || '',
+                                    ownerName: client.owner.name,
+                                    clientId: id,
+                                    vetId: v.id,
+                                    vetName: v.name,
+                                  },
+                                });
+                              } catch {}
+                              window.dispatchEvent(new CustomEvent('notifCountChanged'));
                             }
                           }}
                         >
@@ -999,9 +1040,30 @@ export default function ClientDetailPage() {
                           <DropdownMenuItem
                             onClick={async () => {
                               const petDbId = client.pets[selectedPetIdx]?.dbId;
+                              const pet = client.pets[selectedPetIdx];
+                              const prevVetName = petAssignedVet;
                               setPetAssignedVet('—');
                               if (petDbId) {
                                 await supabase.from('pets').update({ assigned_vet_id: null }).eq('id', petDbId);
+                                window.dispatchEvent(new CustomEvent('petDataChanged'));
+                                // Store unassignment event for doctor notification
+                                try {
+                                  await supabase.from('notification_events').upsert({
+                                    id: `unassign-${petDbId}-${Date.now()}`,
+                                    type: 'vet_unassign',
+                                    timestamp: new Date().toISOString(),
+                                    data: {
+                                      petId: petDbId,
+                                      petName: pet?.name || 'Unknown',
+                                      ownerName: client.owner.name,
+                                      clientId: id,
+                                      vetName: prevVetName,
+                                    },
+                                  });
+                                  // Remove any assign event for this pet
+                                  await supabase.from('notification_events').delete().eq('type', 'vet_assign').ilike('id', `assign-${petDbId}-%`);
+                                } catch {}
+                                window.dispatchEvent(new CustomEvent('notifCountChanged'));
                               }
                             }}
                           >

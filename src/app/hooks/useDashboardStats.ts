@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
 
 export interface DashboardStats {
@@ -18,41 +18,57 @@ export function useDashboardStats(): DashboardStats {
     loading: true,
   })
 
-  useEffect(() => {
-    async function load() {
-      const today = new Date().toISOString().split('T')[0]
-      const weekEnd = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]
+  const load = useCallback(async () => {
+    const n = new Date()
+    const today = `${n.getFullYear()}-${(n.getMonth() + 1).toString().padStart(2, '0')}-${n.getDate().toString().padStart(2, '0')}`
+    const w = new Date(Date.now() + 7 * 86400000)
+    const weekEnd = `${w.getFullYear()}-${(w.getMonth() + 1).toString().padStart(2, '0')}-${w.getDate().toString().padStart(2, '0')}`
 
-      const [clientsRes, apptRes, vacRes, petsRes] = await Promise.all([
-        supabase
-          .from('clients')
-          .select('id', { count: 'exact', head: true }),
-        supabase
-          .from('appointments')
-          .select('id', { count: 'exact', head: true })
-          .gte('scheduled_at', `${today}T00:00:00`)
-          .lte('scheduled_at', `${today}T23:59:59`),
-        supabase
-          .from('vaccinations')
-          .select('id', { count: 'exact', head: true })
-          .lte('next_due_date', weekEnd)
-          .gte('next_due_date', today),
-        supabase
-          .from('pets')
-          .select('id', { count: 'exact', head: true })
-          .eq('is_active', true),
-      ])
+    const [clientsRes, apptRes, vacRes, petsRes] = await Promise.all([
+      supabase
+        .from('clients')
+        .select('id', { count: 'exact', head: true }),
+      supabase
+        .from('appointments')
+        .select('id', { count: 'exact', head: true })
+        .gte('scheduled_at', `${today}T00:00:00`)
+        .lte('scheduled_at', `${today}T23:59:59`),
+      supabase
+        .from('vaccinations')
+        .select('id', { count: 'exact', head: true })
+        .lte('next_due_date', weekEnd)
+        .gte('next_due_date', today),
+      supabase
+        .from('pets')
+        .select('id', { count: 'exact', head: true })
+        .eq('is_active', true),
+    ])
 
-      setStats({
-        totalClients: clientsRes.count ?? 0,
-        appointmentsToday: apptRes.count ?? 0,
-        vaccinesDueThisWeek: vacRes.count ?? 0,
-        activePets: petsRes.count ?? 0,
-        loading: false,
-      })
-    }
-    load()
+    setStats({
+      totalClients: clientsRes.count ?? 0,
+      appointmentsToday: apptRes.count ?? 0,
+      vaccinesDueThisWeek: vacRes.count ?? 0,
+      activePets: petsRes.count ?? 0,
+      loading: false,
+    })
   }, [])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  // Re-fetch when data changes anywhere in the app
+  useEffect(() => {
+    const handler = () => { load() }
+    window.addEventListener('clientDataChanged', handler)
+    window.addEventListener('petDataChanged', handler)
+    window.addEventListener('appointmentDataChanged', handler)
+    return () => {
+      window.removeEventListener('clientDataChanged', handler)
+      window.removeEventListener('petDataChanged', handler)
+      window.removeEventListener('appointmentDataChanged', handler)
+    }
+  }, [load])
 
   return stats
 }

@@ -1,11 +1,12 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useLocation } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 import {
   Plus, Search, Clock, User, Calendar as CalendarIcon,
   CheckCircle2, AlertCircle, XCircle,
   ChevronLeft, ChevronRight, LayoutList, LayoutGrid, CalendarDays,
   Pencil, Trash2, Bell, Stethoscope, UserCheck,
   Smartphone, ChevronDown, ChevronUp, Phone, MessageCircle, X,
+  CreditCard, Receipt, DollarSign, Banknote,
 } from 'lucide-react';
 import { useAppointments } from '../../hooks/useAppointments';
 import { Button } from '../../components/ui/button';
@@ -19,6 +20,9 @@ import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '../../components/ui/select';
 import { Calendar } from '../../components/ui/calendar';
+import { supabase } from '../../../lib/supabase';
+import { useClients } from '../../hooks/useClients';
+import { usePets } from '../../hooks/usePets';
 
 // ─── Status Styles ───────────────────────────────────────────
 
@@ -28,6 +32,7 @@ const statusStyles: Record<string, { bg: string; text: string; icon: typeof Chec
   Completed: { bg: '#6B728020', text: 'var(--text-secondary)', icon: CheckCircle2 },
   Cancelled: { bg: '#d4183d20', text: '#d4183d', icon: XCircle },
   'In Progress': { bg: '#3B82F620', text: '#3B82F6', icon: Stethoscope },
+  Paid: { bg: '#74C69D20', text: 'var(--brand-green-text)', icon: CheckCircle2 },
 };
 
 const serviceColors: Record<string, string> = {
@@ -115,9 +120,9 @@ function getDurationMin(start: string, end: string): number {
   return toMin(end) - toMin(start);
 }
 
-// Generate 30-min slots from 8:00 AM to 5:30 PM
-const SCHEDULE_SLOTS = Array.from({ length: 20 }, (_, i) => {
-  const totalMin = 8 * 60 + i * 30;
+// Generate 30-min slots for full 24 hours
+const SCHEDULE_SLOTS = Array.from({ length: 48 }, (_, i) => {
+  const totalMin = i * 30;
   const h = Math.floor(totalMin / 60);
   const m = totalMin % 60;
   const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
@@ -130,11 +135,16 @@ const SCHEDULE_SLOTS = Array.from({ length: 20 }, (_, i) => {
 const FILTER_TABS = ['All', 'Upcoming', 'Completed', 'Cancelled'] as const;
 type FilterTab = typeof FILTER_TABS[number];
 
+const DEFAULT_ORG_ID = '00000000-0000-0000-0000-000000000001';
+
 // ─── Component ───────────────────────────────────────────────
 
 export default function AdminBookingsPage() {
+  const navigate = useNavigate();
   const location = useLocation();
-  const { appointments: supaAppts, loading: apptsLoading } = useAppointments();
+  const { appointments: supaAppts, loading: apptsLoading, updateStatus: updateApptStatus, deleteAppointment, addAppointment } = useAppointments();
+  const { clients: allClients } = useClients();
+  const { pets: allPets } = usePets();
   const [selectedDate, setSelectedDate] = useState<Date>(() => new Date());
   const [activeFilter, setActiveFilter] = useState<FilterTab>('All');
   const [searchQuery, setSearchQuery] = useState('');
@@ -175,13 +185,32 @@ export default function AdminBookingsPage() {
         ownerName: a.clients ? `${a.clients.first_name} ${a.clients.last_name}` : '—',
         species: a.pets?.species ?? '—',
         service: a.services?.name ?? a.reason ?? '—',
-        vet: a.staff ? `Dr. ${a.staff.last_name}` : '—',
+        vet: a.staff ? `Dr. ${a.staff.first_name} ${a.staff.last_name}` : '—',
+        vetId: a.staff?.id ?? '',
+        petId: a.pets?.id ?? '',
+        clientId: a.clients?.id ?? '',
         status: a.status as string,
         notes: a.notes ?? '',
+        durationMinutes: dur,
       };
     }),
     [supaAppts],
   );
+
+  // Load already-paid appointment IDs (appointments with existing invoices)
+  useEffect(() => {
+    (async () => {
+      const completedIds = supaAppts.filter((a) => a.status === 'Completed').map((a) => a.id);
+      if (completedIds.length === 0) return;
+      const { data } = await supabase
+        .from('invoices')
+        .select('appointment_id')
+        .in('appointment_id', completedIds);
+      if (data && data.length > 0) {
+        setPaidApptIds(new Set(data.map((d: any) => d.appointment_id)));
+      }
+    })();
+  }, [supaAppts]);
 
   const [localOverrides, setLocalOverrides] = useState<Record<string, Record<string, unknown>>>({});
   const appointments = useMemo(() =>
@@ -206,6 +235,13 @@ export default function AdminBookingsPage() {
   };
   const [detailOpen, setDetailOpen] = useState(false);
   const [arrivedToast, setArrivedToast] = useState<string | null>(null);
+  // Payment checkout dialog
+  const [paymentOpen, setPaymentOpen] = useState(false);
+  const [paymentAppt, setPaymentAppt] = useState<any>(null);
+  const [paymentMethod, setPaymentMethod] = useState<'card' | 'cash' | 'insurance'>('card');
+  const [paymentProcessing, setPaymentProcessing] = useState(false);
+  const [paymentDone, setPaymentDone] = useState(false);
+  const [paidApptIds, setPaidApptIds] = useState<Set<string>>(new Set());
   const [detailMode, setDetailMode] = useState<'view' | 'edit'>('view');
   const [selectedAppt, setSelectedAppt] = useState<Record<string, unknown> | null>(null);
   const [editDate, setEditDate] = useState('');
@@ -213,6 +249,22 @@ export default function AdminBookingsPage() {
   const [editService, setEditService] = useState('');
   const [editVet, setEditVet] = useState('');
   const [editNotes, setEditNotes] = useState('');
+  const [dayPopupOpen, setDayPopupOpen] = useState(false);
+  const [dayPopupDate, setDayPopupDate] = useState('');
+  const [dayPopupVet, setDayPopupVet] = useState('all');
+
+  // ── Doctor filter ──────────────────────────────────────────
+  const [selectedVetFilter, setSelectedVetFilter] = useState('all');
+  const [staffList, setStaffList] = useState<{ id: string; name: string; initials: string }[]>([]);
+  useEffect(() => {
+    supabase.from('staff').select('id, first_name, last_name').then(({ data }) => {
+      if (data) setStaffList(data.map((s: any) => ({
+        id: s.id,
+        name: `Dr. ${s.first_name} ${s.last_name}`,
+        initials: `${(s.first_name?.[0] ?? '').toUpperCase()}${(s.last_name?.[0] ?? '').toUpperCase()}`,
+      })));
+    });
+  }, []);
 
   // ── New Appointment form state ──────────────────────────────
   const [newApptPet, setNewApptPet] = useState('');
@@ -238,6 +290,13 @@ export default function AdminBookingsPage() {
   const [npOwnerName, setNpOwnerName] = useState('');
   const [npOwnerEmail, setNpOwnerEmail] = useState('');
   const [npOwnerPhone, setNpOwnerPhone] = useState('');
+  const [newApptClientId, setNewApptClientId] = useState('');
+  const [newApptPetId, setNewApptPetId] = useState('');
+  const [ownerSearch, setOwnerSearch] = useState('');
+  const [ownerDropdownOpen, setOwnerDropdownOpen] = useState(false);
+  const [newApptVetId, setNewApptVetId] = useState('');
+  const [savingAppt, setSavingAppt] = useState(false);
+  const [vetTimeBlocks, setVetTimeBlocks] = useState<{ date: string; time_start: string; time_end: string; type: string }[]>([]);
 
   // ── Portal requests ──────────────────────────────
   const [portalRequests, setPortalRequests] = useState<PortalRequest[]>([]);
@@ -289,7 +348,8 @@ export default function AdminBookingsPage() {
         setTimeout(() => openApptDetail(target), 0);
       }
     } else if (state?.openNewAppt) {
-      setTimeout(() => openNewApptDialog(), 0);
+      const s = state as any;
+      setTimeout(() => openNewApptDialog(s.prefillVetId, s.prefillVetName, s.prefillDate), 0);
     }
 
     window.history.replaceState({}, '');
@@ -298,7 +358,11 @@ export default function AdminBookingsPage() {
 
   const datesWithAppointments = getDatesWithAppointments(appointments);
 
-  const dayAppointments = appointments.filter((a) => isSameDay(a.date, selectedDate));
+  const dayAppointments = appointments.filter((a) => {
+    if (!isSameDay(a.date, selectedDate)) return false;
+    if (selectedVetFilter !== 'all' && (a as any).vetId !== selectedVetFilter) return false;
+    return true;
+  });
 
   const filteredByStatus = dayAppointments.filter((a) => {
     if (activeFilter === 'All') return true;
@@ -306,7 +370,12 @@ export default function AdminBookingsPage() {
     return a.status === activeFilter;
   });
 
-  const filteredAppointments = filteredByStatus.filter((a) => {
+  const filteredByVet = filteredByStatus.filter((a) => {
+    if (selectedVetFilter === 'all') return true;
+    return (a as any).vetId === selectedVetFilter;
+  });
+
+  const filteredAppointments = filteredByVet.filter((a) => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -355,12 +424,32 @@ export default function AdminBookingsPage() {
   const isCurrentMonthView = monthViewDate.getMonth() === new Date().getMonth() && monthViewDate.getFullYear() === new Date().getFullYear();
   const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
-  const openNewApptDialog = () => {
+  const openNewApptDialog = (prefillVetId?: string, prefillVetName?: string, prefillDate?: string) => {
     const y = selectedDate.getFullYear();
     const m = (selectedDate.getMonth() + 1).toString().padStart(2, '0');
     const d = selectedDate.getDate().toString().padStart(2, '0');
-    setNewApptDate(`${y}-${m}-${d}`);
+    setNewApptDate(prefillDate || `${y}-${m}-${d}`);
     setNewApptTime('09:00');
+    setNewApptClientId('');
+    setNewApptPetId('');
+    setNewApptPet('');
+    setOwnerSearch('');
+    setNewApptService('');
+    setNewApptNotes('');
+    setNewApptVetId(prefillVetId || '');
+    setNewApptVetName(prefillVetName || '');
+    setNewApptPetHealth('Healthy');
+    setVisitType('returning');
+    setNpPetName('');
+    setNpSpecies('');
+    setNpBreed('');
+    setNpDob('');
+    setNpWeight('');
+    setNpSex('');
+    setNpOwnerName('');
+    setNpOwnerEmail('');
+    setNpOwnerPhone('');
+    if (prefillVetId) fetchVetTimeBlocks(prefillVetId);
     setDialogOpen(true);
   };
 
@@ -370,7 +459,24 @@ export default function AdminBookingsPage() {
     const m = (selectedDate.getMonth() + 1).toString().padStart(2, '0');
     const d = selectedDate.getDate().toString().padStart(2, '0');
     setNewApptDate(`${y}-${m}-${d}`);
+    setNewApptClientId('');
+    setNewApptPetId('');
+    setNewApptPet('');
+    setOwnerSearch('');
+    setNewApptService('');
+    setNewApptNotes('');
+    setNewApptVetId('');
+    setNewApptVetName('');
     setDialogOpen(true);
+  };
+
+  const fetchVetTimeBlocks = async (vetId: string) => {
+    if (!vetId) { setVetTimeBlocks([]); return; }
+    const { data } = await supabase
+      .from('staff_time_blocks')
+      .select('date, time_start, time_end, type')
+      .eq('staff_id', vetId);
+    setVetTimeBlocks(data || []);
   };
 
   const openApptDetail = (appt: Record<string, unknown>) => {
@@ -416,9 +522,14 @@ export default function AdminBookingsPage() {
 
   const handleCancelAppt = () => {
     if (!selectedAppt) return;
-    setAppointments((prev) =>
-      prev.map((a) => (a.id === selectedAppt.id ? { ...a, status: 'Cancelled' as const } : a)),
-    );
+    updateApptStatus(selectedAppt.id, 'Cancelled');
+    setDetailOpen(false);
+  };
+
+  const handleDeleteAppt = async () => {
+    if (!selectedAppt) return;
+    if (!confirm('Are you sure you want to permanently delete this booking? This cannot be undone.')) return;
+    await deleteAppointment(selectedAppt.id);
     setDetailOpen(false);
   };
 
@@ -426,11 +537,42 @@ export default function AdminBookingsPage() {
     const dateAppts = appointments.filter(
       (a) => a.date === dateStr && a.status !== 'Cancelled' && (excludeId == null || a.id !== excludeId),
     );
-    const bookedTimes = new Map(dateAppts.map((a) => [a.timeStart, a]));
+    const bookedTimes = new Map<string, typeof appointments[0]>();
+    dateAppts.forEach((a) => {
+      const t24 = to24Hour(a.timeStart);
+      const [sh, sm] = t24.split(':').map(Number);
+      const startMin = sh * 60 + sm;
+      const dur = getDurationMin(a.timeStart, a.timeEnd);
+      SCHEDULE_SLOTS.forEach((slot) => {
+        const s24 = to24Hour(slot);
+        const [slh, slm] = s24.split(':').map(Number);
+        const slotMin = slh * 60 + slm;
+        if (slotMin >= startMin && slotMin < startMin + dur) {
+          bookedTimes.set(slot, a);
+        }
+      });
+    });
+    // Check vet time blocks
+    const blocked = new Map<string, string>();
+    if (newApptVetId) {
+      vetTimeBlocks
+        .filter(b => b.date === dateStr)
+        .forEach(b => {
+          const bStartMin = (() => { const [h, m] = b.time_start.split(':').map(Number); return h * 60 + m; })();
+          const bEndMin = (() => { const [h, m] = b.time_end.split(':').map(Number); return h * 60 + m; })();
+          SCHEDULE_SLOTS.forEach(slot => {
+            const s24 = to24Hour(slot);
+            const [slh, slm] = s24.split(':').map(Number);
+            const slotMin = slh * 60 + slm;
+            if (slotMin >= bStartMin && slotMin < bEndMin) blocked.set(slot, b.type);
+          });
+        });
+    }
     return SCHEDULE_SLOTS.map((slot) => ({
       time: slot,
       time24: to24Hour(slot),
       booked: bookedTimes.get(slot) || null,
+      blocked: blocked.get(slot) || null,
     }));
   };
 
@@ -446,7 +588,7 @@ export default function AdminBookingsPage() {
             Manage your clinic schedule and bookings.
           </p>
         </div>
-        <Button onClick={openNewApptDialog}>
+        <Button onClick={() => openNewApptDialog()}>
           <Plus className="w-4 h-4" /> New Booking
         </Button>
       </div>
@@ -914,6 +1056,20 @@ export default function AdminBookingsPage() {
                   ))}
                 </div>
 
+                {/* Doctor Filter */}
+                <Select value={selectedVetFilter} onValueChange={setSelectedVetFilter}>
+                  <SelectTrigger className="w-[200px] h-9">
+                    <Stethoscope className="w-4 h-4 text-[var(--text-secondary)] mr-1" />
+                    <SelectValue placeholder="All Doctors" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Doctors</SelectItem>
+                    {staffList.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
                 {/* Search */}
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-secondary)]" />
@@ -945,7 +1101,9 @@ export default function AdminBookingsPage() {
             ) : (
               <div className="space-y-3">
                 {filteredAppointments.map((appt) => {
-                  const s = statusStyles[appt.status];
+                  const isPaid = paidApptIds.has(appt.id);
+                  const displayStatus = isPaid ? 'Paid' : appt.status;
+                  const s = statusStyles[displayStatus] || statusStyles.Completed;
                   const StatusIcon = s.icon;
                   const serviceColor = serviceColors[appt.service] || serviceColors.Other;
                   return (
@@ -1017,8 +1175,60 @@ export default function AdminBookingsPage() {
                           }}
                         >
                           <StatusIcon className="w-3 h-3" />
-                          {appt.status}
+                          {displayStatus}
                         </span>
+
+                        {/* Patient Arrived / Start Appointment button */}
+                        {(appt.status === 'Confirmed' || appt.status === 'Pending') && (
+                          <button
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              setAppointments((prev) =>
+                                prev.map((a) => (a.id === appt.id ? { ...a, status: 'In Progress' as const } : a)),
+                              );
+                              await updateApptStatus(appt.id, 'In Progress');
+                              setArrivedToast(`${appt.petName} (${appt.ownerName}) has arrived and is ready — ${appt.vet || 'Vet'} has been notified.`);
+                              setTimeout(() => setArrivedToast(null), 4000);
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 flex-shrink-0 hover:opacity-90 transition-opacity"
+                            style={{
+                              backgroundColor: '#2D6A4F',
+                              color: '#fff',
+                              borderRadius: '8px',
+                              fontSize: '12px',
+                              fontWeight: 600,
+                              border: 'none',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <UserCheck className="w-3.5 h-3.5" />
+                            Patient Arrived
+                          </button>
+                        )}
+                        {appt.status === 'Completed' && !paidApptIds.has(appt.id) && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setPaymentAppt(appt);
+                              setPaymentMethod('card');
+                              setPaymentDone(false);
+                              setPaymentOpen(true);
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 flex-shrink-0 hover:opacity-90 transition-opacity"
+                            style={{
+                              backgroundColor: '#3B82F6',
+                              color: '#fff',
+                              borderRadius: '8px',
+                              fontSize: '12px',
+                              fontWeight: 600,
+                              border: 'none',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <CreditCard className="w-3.5 h-3.5" />
+                            Checkout
+                          </button>
+                        )}
                       </div>
 
                       {/* Notes preview */}
@@ -1081,6 +1291,9 @@ export default function AdminBookingsPage() {
                       onClick={() => {
                         setSelectedDate(dayDate);
                         setMonthViewDate(new Date(mvYear, mvMonth, 1));
+                        setDayPopupDate(dateStr);
+                        setDayPopupVet('all');
+                        setDayPopupOpen(true);
                       }}
                     >
                       {/* Day number */}
@@ -1171,7 +1384,7 @@ export default function AdminBookingsPage() {
               </div>
 
               {/* Time Slot Grid */}
-              <div className="bg-[var(--surface-white)] border border-[var(--border-color)] overflow-hidden" style={{ borderRadius: '12px' }}>
+              <div className="bg-[var(--surface-white)] border border-[var(--border-color)] overflow-hidden" style={{ borderRadius: '12px', maxHeight: '600px', overflowY: 'auto' }}>
                 {SCHEDULE_SLOTS.map((slot, idx) => {
                   const appt = appointmentByTime.get(slot);
                   const isLast = idx === SCHEDULE_SLOTS.length - 1;
@@ -1792,6 +2005,160 @@ export default function AdminBookingsPage() {
         </DialogContent>
       </Dialog>
 
+      {/* ─── Payment Checkout Dialog ─────────────────── */}
+      <Dialog open={paymentOpen} onOpenChange={(open) => { setPaymentOpen(open); if (!open) setPaymentDone(false); }}>
+        <DialogContent style={{ maxWidth: 440, borderRadius: 16 }}>
+          <DialogTitle style={{ fontSize: 18, fontWeight: 700 }}>
+            {paymentDone ? 'Payment Complete' : 'Checkout & Payment'}
+          </DialogTitle>
+          {paymentAppt && !paymentDone && (
+            <div className="space-y-5 pt-2">
+              {/* Patient info */}
+              <div className="flex items-center gap-3 p-3" style={{ backgroundColor: 'var(--surface-elevated)', borderRadius: 10, border: '1px solid var(--border-color)' }}>
+                <Avatar className="w-10 h-10">
+                  <AvatarImage src={paymentAppt.petImage} alt={paymentAppt.petName} />
+                  <AvatarFallback style={{ fontSize: 13, fontWeight: 700 }}>{paymentAppt.petName?.slice(0, 2).toUpperCase()}</AvatarFallback>
+                </Avatar>
+                <div className="flex-1">
+                  <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{paymentAppt.petName}</p>
+                  <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{paymentAppt.ownerName} · {paymentAppt.service}</p>
+                </div>
+                <div className="text-right">
+                  <p style={{ fontSize: 18, fontWeight: 800, color: 'var(--brand-green-text)' }}>$70.20</p>
+                  <p style={{ fontSize: 11, color: 'var(--text-secondary)' }}>invoice total</p>
+                </div>
+              </div>
+
+              {/* Payment method */}
+              <div>
+                <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>Payment Method</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {([
+                    { key: 'card' as const, icon: CreditCard, label: 'Card' },
+                    { key: 'cash' as const, icon: Banknote, label: 'Cash' },
+                    { key: 'insurance' as const, icon: Receipt, label: 'Insurance' },
+                  ]).map(({ key, icon: Icon, label }) => (
+                    <button
+                      key={key}
+                      onClick={() => setPaymentMethod(key)}
+                      className="flex flex-col items-center gap-1.5 py-3 transition-all"
+                      style={{
+                        borderRadius: 10,
+                        border: paymentMethod === key ? '2px solid #2D6A4F' : '1px solid var(--border-color)',
+                        backgroundColor: paymentMethod === key ? '#2D6A4F10' : 'transparent',
+                        cursor: 'pointer',
+                        background: paymentMethod === key ? '#2D6A4F10' : 'var(--surface-white)',
+                      }}
+                    >
+                      <Icon style={{ width: 20, height: 20, color: paymentMethod === key ? '#2D6A4F' : 'var(--text-secondary)' }} />
+                      <span style={{ fontSize: 12, fontWeight: 600, color: paymentMethod === key ? '#2D6A4F' : 'var(--text-secondary)' }}>{label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Summary */}
+              <div className="space-y-2 pt-1" style={{ borderTop: '1px solid var(--border-color)', paddingTop: 12 }}>
+                <div className="flex justify-between">
+                  <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Services</span>
+                  <span style={{ fontSize: 13, color: 'var(--text-primary)' }}>$65.00</span>
+                </div>
+                <div className="flex justify-between">
+                  <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Tax (8%)</span>
+                  <span style={{ fontSize: 13, color: 'var(--text-primary)' }}>$5.20</span>
+                </div>
+                <div className="flex justify-between pt-2" style={{ borderTop: '1px solid var(--border-color)' }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>Total</span>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--brand-green-text)' }}>$70.20</span>
+                </div>
+              </div>
+
+              {/* Confirm button */}
+              <Button
+                onClick={async () => {
+                  setPaymentProcessing(true);
+                  setPaidApptIds((prev) => new Set(prev).add(paymentAppt.id));
+                  // Create medical record + invoice + payment
+                  if (paymentAppt.petId && paymentAppt.clientId) {
+                    const now = new Date();
+                    const recNum = `VT-${now.getFullYear()}-${String(now.getTime()).slice(-6)}`;
+                    const clinicId = '00000000-0000-0000-0000-000000000002';
+                    await supabase.from('medical_records').insert({
+                      record_number: recNum,
+                      appointment_id: paymentAppt.id,
+                      pet_id: paymentAppt.petId,
+                      client_id: paymentAppt.clientId,
+                      clinic_id: clinicId,
+                      vet_id: paymentAppt.vetId || null,
+                      visit_date: paymentAppt.date,
+                      visit_time: paymentAppt.timeStart,
+                      reason: paymentAppt.service,
+                      clinical_notes: paymentAppt.notes || null,
+                      record_type: 'Visit',
+                      status: 'Final',
+                      duration_minutes: paymentAppt.durationMinutes || 30,
+                    });
+                    // Create invoice
+                    const subtotal = 65;
+                    const taxAmount = parseFloat((subtotal * 0.08).toFixed(2));
+                    const total = subtotal + taxAmount;
+                    const invNum = `INV-${now.getFullYear()}-${String(now.getTime()).slice(-6)}`;
+                    const { data: invData } = await supabase.from('invoices').insert({
+                      invoice_number: invNum,
+                      client_id: paymentAppt.clientId,
+                      clinic_id: clinicId,
+                      appointment_id: paymentAppt.id,
+                      organization_id: DEFAULT_ORG_ID,
+                      subtotal,
+                      tax_amount: taxAmount,
+                      total,
+                      discount_amount: 0,
+                      amount_paid: total,
+                      status: 'Paid',
+                      paid_at: now.toISOString(),
+                      notes: `${paymentAppt.service} — ${paymentAppt.petName}`,
+                    }).select('id').single();
+                    // Create payment record
+                    if (invData) {
+                      const methodMap: Record<string, string> = { card: 'Credit Card', cash: 'Cash', insurance: 'Insurance' };
+                      await supabase.from('payments').insert({
+                        invoice_id: invData.id,
+                        amount: total,
+                        method: methodMap[paymentMethod] || 'Credit Card',
+                        paid_at: now.toISOString(),
+                      });
+                    }
+                  }
+                  setPaymentProcessing(false);
+                  setPaymentDone(true);
+                }}
+                disabled={paymentProcessing}
+                className="w-full hover:opacity-90"
+                style={{ backgroundColor: '#2D6A4F', color: '#fff', border: 'none', height: 42, fontSize: 14, fontWeight: 600 }}
+              >
+                {paymentProcessing ? 'Processing...' : `Confirm Payment — $70.20`}
+              </Button>
+            </div>
+          )}
+          {paymentDone && (
+            <div className="text-center py-6 space-y-4">
+              <div className="mx-auto" style={{ width: 64, height: 64, borderRadius: '50%', backgroundColor: '#2D6A4F15', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <CheckCircle2 style={{ width: 32, height: 32, color: '#2D6A4F' }} />
+              </div>
+              <div>
+                <p style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)' }}>Payment Received</p>
+                <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>
+                  {paymentAppt?.petName} — {paymentAppt?.ownerName} · {paymentMethod === 'card' ? 'Card' : paymentMethod === 'cash' ? 'Cash' : 'Insurance'}
+                </p>
+              </div>
+              <Button onClick={() => setPaymentOpen(false)} className="hover:opacity-90" style={{ backgroundColor: '#2D6A4F', color: '#fff', border: 'none' }}>
+                Done
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* ─── Patient Arrived Toast ─────────────────── */}
       {arrivedToast && (
         <div
@@ -1891,11 +2258,16 @@ export default function AdminBookingsPage() {
                       )}
                     </div>
                     <div className="flex items-center justify-between gap-2 px-6 py-4 border-t border-[var(--border-color)] flex-shrink-0">
-                      {!isDone && (
-                        <Button variant="outline" size="sm" onClick={handleCancelAppt} className="text-[#d4183d] border-[#d4183d] hover:bg-[#d4183d10] hover:text-[#d4183d]">
-                          <Trash2 className="w-3.5 h-3.5 mr-1.5" />Cancel Booking
+                      <div className="flex gap-2">
+                        {!isDone && (
+                          <Button variant="outline" size="sm" onClick={handleCancelAppt} className="text-[#d4183d] border-[#d4183d] hover:bg-[#d4183d10] hover:text-[#d4183d]">
+                            <XCircle className="w-3.5 h-3.5 mr-1.5" />Cancel
+                          </Button>
+                        )}
+                        <Button variant="outline" size="sm" onClick={handleDeleteAppt} className="text-[#d4183d] border-[#d4183d] hover:bg-[#d4183d10] hover:text-[#d4183d]">
+                          <Trash2 className="w-3.5 h-3.5 mr-1.5" />Delete
                         </Button>
-                      )}
+                      </div>
                       <div className="flex gap-2 ml-auto">
                         <Button variant="outline" size="sm" onClick={() => setDetailMode('edit')}><Pencil className="w-3.5 h-3.5 mr-1.5" />Edit</Button>
                         {canCheckIn && (
@@ -1963,6 +2335,668 @@ export default function AdminBookingsPage() {
               </>
             );
           })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── New Appointment Dialog ────────────────────── */}
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent
+          className="p-0 gap-0 overflow-hidden [&>button]:top-[14px] [&>button]:right-[14px] [&>button]:w-8 [&>button]:h-8 [&>button]:flex [&>button]:items-center [&>button]:justify-center [&>button]:rounded-[8px] [&>button]:!bg-white/15 [&>button]:!text-white [&>button]:!opacity-100 [&>button]:hover:!bg-white/25 [&>button]:transition-colors [&>button>svg]:w-4 [&>button>svg]:h-4"
+          style={{ maxWidth: '780px', width: '95vw', maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}
+        >
+          {/* Header */}
+          <div style={{ background: '#2D6A4F', padding: '18px 24px', flexShrink: 0 }}>
+            <div className="flex items-center gap-3">
+              <div style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: 'rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <CalendarIcon style={{ width: '18px', height: '18px', color: '#fff' }} />
+              </div>
+              <div>
+                <h2 style={{ fontSize: '17px', fontWeight: 700, color: '#fff', lineHeight: 1.2 }}>New Appointment</h2>
+                <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginTop: '1px' }}>Schedule a visit for a patient</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Body */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 264px', flex: 1, minHeight: 0 }}>
+
+            {/* Left: fields */}
+            <div style={{ padding: '22px 24px', overflowY: 'auto', borderRight: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+
+              {/* Visit type tabs */}
+              <div style={{ display: 'flex', gap: '0', borderRadius: '9px', padding: '3px', backgroundColor: 'var(--surface-elevated)' }}>
+                {([
+                  { id: 'returning' as const, label: 'Returning Patient', emoji: '🔄' },
+                  { id: 'new'       as const, label: 'New Patient',        emoji: '✨' },
+                ] as const).map(tab => {
+                  const active = visitType === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => setVisitType(tab.id)}
+                      style={{
+                        flex: 1, padding: '7px 10px', borderRadius: '7px',
+                        fontSize: '13px', fontWeight: active ? 700 : 500,
+                        backgroundColor: active ? 'var(--surface-white)' : 'transparent',
+                        color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
+                        boxShadow: active ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                        cursor: 'pointer', border: 'none',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      <span>{tab.emoji}</span> {tab.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Patient — Returning */}
+              {visitType === 'returning' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Patient</p>
+                  {/* Client search */}
+                  <div style={{ position: 'relative' }}>
+                    <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Owner</p>
+                    <div style={{ position: 'relative' }}>
+                      <Search className="w-4 h-4" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)', pointerEvents: 'none' }} />
+                      <Input
+                        placeholder="Search by name or phone…"
+                        value={ownerSearch}
+                        onChange={(e) => { setOwnerSearch(e.target.value); setOwnerDropdownOpen(true); if (!e.target.value) { setNewApptClientId(''); setNewApptPetId(''); } }}
+                        onFocus={() => setOwnerDropdownOpen(true)}
+                        style={{ paddingLeft: '34px' }}
+                      />
+                      {newApptClientId && (
+                        <button onClick={() => { setOwnerSearch(''); setNewApptClientId(''); setNewApptPetId(''); }} style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '16px', lineHeight: 1 }}>×</button>
+                      )}
+                    </div>
+                    {ownerDropdownOpen && ownerSearch.length > 0 && !newApptClientId && (() => {
+                      const q = ownerSearch.toLowerCase();
+                      const filtered = allClients.filter(c =>
+                        `${c.first_name} ${c.last_name}`.toLowerCase().includes(q) ||
+                        (c.phone && c.phone.includes(q)) ||
+                        (c.email && c.email.toLowerCase().includes(q))
+                      ).slice(0, 8);
+                      return (
+                        <div style={{
+                          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
+                          backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)',
+                          borderRadius: '8px', marginTop: '4px', boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                          maxHeight: '200px', overflowY: 'auto',
+                        }}>
+                          {filtered.length === 0 && (
+                            <div style={{ padding: '12px 14px', fontSize: '13px', color: 'var(--text-secondary)' }}>No clients found</div>
+                          )}
+                          {filtered.map(c => (
+                            <button
+                              key={c.id}
+                              onClick={() => {
+                                setNewApptClientId(c.id);
+                                setOwnerSearch(`${c.first_name} ${c.last_name}`);
+                                setNewApptPetId('');
+                                setOwnerDropdownOpen(false);
+                              }}
+                              style={{
+                                width: '100%', padding: '10px 14px', border: 'none', background: 'none',
+                                cursor: 'pointer', textAlign: 'left', fontSize: '13px',
+                                display: 'flex', alignItems: 'center', gap: '10px',
+                                borderBottom: '1px solid var(--border-color)',
+                              }}
+                              className="hover:bg-[var(--surface-elevated)] transition-colors"
+                            >
+                              <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#2D6A4F20', color: '#2D6A4F', fontSize: '10px', fontWeight: 700 }}>
+                                {(c.first_name?.[0] || '').toUpperCase()}{(c.last_name?.[0] || '').toUpperCase()}
+                              </div>
+                              <div>
+                                <p style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{c.first_name} {c.last_name}</p>
+                                {c.phone && <p style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{c.phone}</p>}
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                  {/* Pet dropdown */}
+                  {newApptClientId && (
+                    <div>
+                      <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Pet</p>
+                      <Select value={newApptPetId} onValueChange={(v) => { setNewApptPetId(v); const pet = allPets.find(p => p.id === v); if (pet) setNewApptPet(pet.name); }}>
+                        <SelectTrigger><SelectValue placeholder="Select pet…" /></SelectTrigger>
+                        <SelectContent>
+                          {allPets.filter(p => p.client_id === newApptClientId).map(p => (
+                            <SelectItem key={p.id} value={p.id}>{p.name} ({p.species}{p.breed ? `, ${p.breed}` : ''})</SelectItem>
+                          ))}
+                          {allPets.filter(p => p.client_id === newApptClientId).length === 0 && (
+                            <SelectItem value="__none" disabled>No pets for this client</SelectItem>
+                          )}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Patient — New (first visit) */}
+              {visitType === 'new' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Pet Information</p>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <div>
+                      <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Pet Name *</p>
+                      <Input placeholder="e.g. Max" value={npPetName} onChange={e => setNpPetName(e.target.value)} />
+                    </div>
+                    <div>
+                      <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Species *</p>
+                      <Select value={npSpecies} onValueChange={setNpSpecies}>
+                        <SelectTrigger><SelectValue placeholder="Select…" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Dog">🐶 Dog</SelectItem>
+                          <SelectItem value="Cat">🐱 Cat</SelectItem>
+                          <SelectItem value="Rabbit">🐰 Rabbit</SelectItem>
+                          <SelectItem value="Bird">🐦 Bird</SelectItem>
+                          <SelectItem value="Other">Other</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Breed</p>
+                      <Input placeholder="e.g. Golden Retriever" value={npBreed} onChange={e => setNpBreed(e.target.value)} />
+                    </div>
+                    <div>
+                      <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Sex</p>
+                      <Select value={npSex} onValueChange={setNpSex}>
+                        <SelectTrigger><SelectValue placeholder="Select…" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Male">Male</SelectItem>
+                          <SelectItem value="Female">Female</SelectItem>
+                          <SelectItem value="Male (neutered)">Male (neutered)</SelectItem>
+                          <SelectItem value="Female (spayed)">Female (spayed)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Date of Birth</p>
+                      <Input type="date" value={npDob} onChange={e => setNpDob(e.target.value)} />
+                    </div>
+                    <div>
+                      <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Weight</p>
+                      <Input placeholder="e.g. 12.5 kg" value={npWeight} onChange={e => setNpWeight(e.target.value)} />
+                    </div>
+                  </div>
+                  <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '12px' }}>
+                    <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '12px' }}>Owner Information</p>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <div>
+                        <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Full Name *</p>
+                        <Input placeholder="e.g. John Smith" value={npOwnerName} onChange={e => setNpOwnerName(e.target.value)} />
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                        <div>
+                          <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Email *</p>
+                          <Input type="email" placeholder="owner@email.com" value={npOwnerEmail} onChange={e => setNpOwnerEmail(e.target.value)} />
+                        </div>
+                        <div>
+                          <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Phone</p>
+                          <Input type="tel" placeholder="(555) 000-0000" value={npOwnerPhone} onChange={e => setNpOwnerPhone(e.target.value)} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Service type */}
+              <div>
+                <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Service Type</p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
+                  {[
+                    { label: 'Annual Checkup',  color: '#2D6A4F', emoji: '🩺' },
+                    { label: 'Vaccination',      color: '#3B82F6', emoji: '💉' },
+                    { label: 'Dental Cleaning',  color: '#8B5CF6', emoji: '🦷' },
+                    { label: 'Surgery',          color: '#EC4899', emoji: '🔬' },
+                    { label: 'Follow-up',        color: '#F4A261', emoji: '📋' },
+                    { label: 'Emergency',        color: '#d4183d', emoji: '🚨' },
+                    { label: 'Consultation',     color: '#06B6D4', emoji: '💬' },
+                    { label: 'Other',            color: '#6B7280', emoji: '📝' },
+                  ].map(s => {
+                    const active = newApptService === s.label;
+                    return (
+                      <button
+                        key={s.label}
+                        onClick={() => setNewApptService(s.label)}
+                        style={{
+                          padding: '8px 6px', borderRadius: '9px',
+                          fontSize: '11px', fontWeight: active ? 700 : 500,
+                          border: `1.5px solid ${active ? s.color : 'var(--border-color)'}`,
+                          backgroundColor: active ? `${s.color}18` : 'transparent',
+                          color: active ? s.color : 'var(--text-secondary)',
+                          cursor: 'pointer', textAlign: 'center',
+                          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px',
+                          transition: 'all 0.15s',
+                        }}
+                      >
+                        <span style={{ fontSize: '16px', lineHeight: 1 }}>{s.emoji}</span>
+                        <span style={{ lineHeight: 1.2 }}>{s.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Veterinarian */}
+              <div>
+                <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Veterinarian</p>
+                <div className="flex gap-2 flex-wrap">
+                  {staffList.length === 0 && <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>No vets found</span>}
+                  {staffList.map((v, i) => {
+                    const colors = ['#2D6A4F', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261'];
+                    const color = colors[i % colors.length];
+                    const active = newApptVetId === v.id;
+                    return (
+                      <button key={v.id} onClick={() => { setNewApptVetId(v.id); setNewApptVetName(v.name); fetchVetTimeBlocks(v.id); }} style={{
+                        padding: '7px 14px', borderRadius: '8px', fontSize: '13px',
+                        fontWeight: active ? 700 : 500,
+                        border: `1.5px solid ${active ? color : 'var(--border-color)'}`,
+                        backgroundColor: active ? `${color}18` : 'transparent',
+                        color: active ? color : 'var(--text-secondary)',
+                        cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '7px',
+                        transition: 'all 0.15s',
+                      }}>
+                        <span style={{ width: '22px', height: '22px', borderRadius: '50%', backgroundColor: `${color}20`, color: color, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', fontWeight: 700, flexShrink: 0 }}>
+                          {v.initials}
+                        </span>
+                        {v.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Date */}
+              <div>
+                <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Date</p>
+                <Input type="date" value={newApptDate} onChange={e => setNewApptDate(e.target.value)} />
+              </div>
+
+              {/* Time slot grid */}
+              <div>
+                <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Time</p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
+                  {getSlotAvailability(newApptDate).map(slot => {
+                    const isActive = newApptTime === slot.time24;
+                    const isUnavailable = !!slot.booked || !!slot.blocked;
+                    return (
+                      <button
+                        key={slot.time24}
+                        disabled={isUnavailable}
+                        onClick={() => setNewApptTime(slot.time24)}
+                        style={{
+                          padding: '8px 4px', borderRadius: '8px', fontSize: '12px', fontWeight: isActive ? 700 : 500,
+                          border: `1.5px solid ${isActive ? '#2D6A4F' : 'var(--border-color)'}`,
+                          backgroundColor: isActive ? '#2D6A4F' : isUnavailable ? 'var(--surface-elevated)' : 'transparent',
+                          color: isActive ? '#fff' : isUnavailable ? 'var(--text-secondary)' : 'var(--text-primary)',
+                          cursor: isUnavailable ? 'not-allowed' : 'pointer',
+                          opacity: isUnavailable ? 0.5 : 1,
+                          transition: 'all 0.15s',
+                          textDecoration: isUnavailable ? 'line-through' : 'none',
+                        }}
+                        title={slot.booked ? `Booked: ${(slot.booked as any).petName}` : slot.blocked ? `Blocked: ${slot.blocked}` : slot.time}
+                      >
+                        {slot.time}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Duration */}
+              <div>
+                <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Duration</p>
+                <div className="flex gap-2 flex-wrap">
+                  {['15 min', '30 min', '45 min', '60 min', '90 min'].map(d => {
+                    const active = newApptDuration === d;
+                    return (
+                      <button key={d} onClick={() => setNewApptDuration(d)} style={{
+                        padding: '6px 13px', borderRadius: '7px', fontSize: '13px',
+                        fontWeight: active ? 700 : 500,
+                        border: `1.5px solid ${active ? '#2D6A4F' : 'var(--border-color)'}`,
+                        backgroundColor: active ? '#2D6A4F18' : 'transparent',
+                        color: active ? 'var(--brand-green-text)' : 'var(--text-secondary)',
+                        cursor: 'pointer', transition: 'all 0.15s',
+                      }}>{d}</button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div>
+                <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Notes</p>
+                <Textarea
+                  placeholder="Reason for visit, symptoms, owner requests…"
+                  style={{ minHeight: '72px', resize: 'none' }}
+                  value={newApptNotes}
+                  onChange={e => setNewApptNotes(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {/* Right: summary + notifications */}
+            <div style={{ backgroundColor: 'var(--surface-elevated)', padding: '20px 16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {/* Summary */}
+              <div style={{ backgroundColor: 'var(--surface-white)', borderRadius: '10px', padding: '14px', border: '1px solid var(--border-color)' }}>
+                <p style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '10px' }}>Summary</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div className="flex items-center gap-2">
+                    <CalendarIcon style={{ width: '12px', height: '12px', color: 'var(--text-secondary)', flexShrink: 0 }} />
+                    <span style={{ fontSize: '13px', color: newApptDate ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
+                      {newApptDate ? new Date(newApptDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : 'No date set'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Clock style={{ width: '12px', height: '12px', color: 'var(--text-secondary)', flexShrink: 0 }} />
+                    <span style={{ fontSize: '13px', color: 'var(--text-primary)' }}>
+                      {newApptTime ? from24Hour(newApptTime) : '—'} · {newApptDuration}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <User style={{ width: '12px', height: '12px', color: 'var(--text-secondary)', flexShrink: 0 }} />
+                    <span style={{ fontSize: '13px', color: newApptVetName ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{newApptVetName || 'No vet selected'}</span>
+                  </div>
+                  {newApptService && (
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: serviceColors[newApptService] || '#6B7280' }} />
+                      <span style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{newApptService}</span>
+                    </div>
+                  )}
+                  {newApptPet && (
+                    <div className="flex items-center gap-2">
+                      <Search style={{ width: '12px', height: '12px', color: 'var(--text-secondary)', flexShrink: 0 }} />
+                      <span style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{newApptPet}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Notifications */}
+              <div style={{ backgroundColor: 'var(--surface-white)', borderRadius: '10px', padding: '14px', border: '1px solid var(--border-color)' }}>
+                <div className="flex items-center gap-2" style={{ marginBottom: '14px' }}>
+                  <Bell style={{ width: '12px', height: '12px', color: 'var(--text-secondary)' }} />
+                  <p style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Notifications</p>
+                </div>
+                <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '6px' }}>Confirmation</p>
+                <div className="flex gap-1.5" style={{ marginBottom: '6px' }}>
+                  {['Email', 'SMS', 'Both', 'None'].map(m => {
+                    const active = confirmMethod === m;
+                    return (
+                      <button key={m} onClick={() => setConfirmMethod(m)} style={{
+                        flex: 1, padding: '4px 2px', borderRadius: '6px', fontSize: '11px',
+                        fontWeight: active ? 700 : 400,
+                        border: `1.5px solid ${active ? '#2D6A4F' : 'var(--border-color)'}`,
+                        backgroundColor: active ? '#2D6A4F15' : 'transparent',
+                        color: active ? 'var(--brand-green-text)' : 'var(--text-secondary)',
+                        cursor: 'pointer',
+                      }}>{m}</button>
+                    );
+                  })}
+                </div>
+                {confirmMethod !== 'None' && (
+                  <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '14px', lineHeight: 1.4 }}>
+                    Sent immediately after booking
+                  </p>
+                )}
+                {confirmMethod === 'None' && <div style={{ marginBottom: '14px' }} />}
+                <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '6px' }}>Reminder</p>
+                <div className="flex gap-1.5" style={{ marginBottom: '8px' }}>
+                  {['Email', 'SMS', 'Both', 'None'].map(m => {
+                    const active = reminderMethod === m;
+                    return (
+                      <button key={m} onClick={() => setReminderMethod(m)} style={{
+                        flex: 1, padding: '4px 2px', borderRadius: '6px', fontSize: '11px',
+                        fontWeight: active ? 700 : 400,
+                        border: `1.5px solid ${active ? '#2D6A4F' : 'var(--border-color)'}`,
+                        backgroundColor: active ? '#2D6A4F15' : 'transparent',
+                        color: active ? 'var(--brand-green-text)' : 'var(--text-secondary)',
+                        cursor: 'pointer',
+                      }}>{m}</button>
+                    );
+                  })}
+                </div>
+                {reminderMethod !== 'None' && (
+                  <div>
+                    <p style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>Send before appointment</p>
+                    <div className="flex gap-1.5 flex-wrap">
+                      {['1 hr', '4 hrs', '1 day', '2 days'].map(t => {
+                        const active = reminderTiming === t;
+                        return (
+                          <button key={t} onClick={() => setReminderTiming(t)} style={{
+                            padding: '4px 9px', borderRadius: '5px', fontSize: '11px',
+                            fontWeight: active ? 700 : 400,
+                            border: `1.5px solid ${active ? '#2D6A4F' : 'var(--border-color)'}`,
+                            backgroundColor: active ? '#2D6A4F15' : 'transparent',
+                            color: active ? 'var(--brand-green-text)' : 'var(--text-secondary)',
+                            cursor: 'pointer',
+                          }}>{t}</button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div style={{ borderTop: '1px solid var(--border-color)', padding: '14px 24px', display: 'flex', justifyContent: 'flex-end', gap: '10px', flexShrink: 0, backgroundColor: 'var(--surface-white)' }}>
+            <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={savingAppt}>Cancel</Button>
+            <Button
+              disabled={savingAppt}
+              onClick={async () => {
+                if (savingAppt) return;
+                setSavingAppt(true);
+                try {
+                  const tzOffset = (() => { const off = new Date().getTimezoneOffset(); const sign = off <= 0 ? '+' : '-'; const h = String(Math.floor(Math.abs(off) / 60)).padStart(2, '0'); const m = String(Math.abs(off) % 60).padStart(2, '0'); return `${sign}${h}:${m}`; })();
+                  const scheduled_at = `${newApptDate}T${newApptTime}:00${tzOffset}`;
+                  const durationMin = parseInt(newApptDuration) || 30;
+
+                  let finalClientId = newApptClientId;
+                  let finalPetId = newApptPetId;
+
+                  if (visitType === 'new') {
+                    if (!npOwnerName.trim() || !npPetName.trim() || !npSpecies) { alert('Please fill in owner name, pet name, and species.'); setSavingAppt(false); return; }
+                    const nameParts = npOwnerName.trim().split(' ');
+                    const { data: newClient, error: cErr } = await supabase
+                      .from('clients')
+                      .insert([{
+                        organization_id: DEFAULT_ORG_ID,
+                        first_name: nameParts[0] ?? '',
+                        last_name: nameParts.slice(1).join(' ') || '',
+                        email: npOwnerEmail || undefined,
+                        phone: npOwnerPhone || undefined,
+                        health_status: newApptPetHealth,
+                      }])
+                      .select('id')
+                      .single();
+                    if (cErr || !newClient) { alert('Failed to create client: ' + (cErr?.message || 'Unknown error')); setSavingAppt(false); return; }
+                    finalClientId = newClient.id;
+
+                    const weightKg = npWeight ? parseFloat(npWeight) : undefined;
+                    const { data: newPet, error: pErr } = await supabase
+                      .from('pets')
+                      .insert([{
+                        client_id: finalClientId,
+                        name: npPetName,
+                        species: npSpecies,
+                        breed: npBreed || undefined,
+                        date_of_birth: npDob || undefined,
+                        sex: npSex || undefined,
+                        weight_kg: weightKg && !isNaN(weightKg) ? weightKg : undefined,
+                        assigned_vet_id: newApptVetId || undefined,
+                        is_active: true,
+                      }])
+                      .select('id')
+                      .single();
+                    if (pErr || !newPet) { alert('Failed to create pet: ' + (pErr?.message || 'Unknown error')); setSavingAppt(false); return; }
+                    finalPetId = newPet.id;
+                  }
+
+                  if (!finalClientId || !finalPetId) { alert('Please select a patient (owner and pet).'); setSavingAppt(false); return; }
+
+                  if (visitType === 'returning' && newApptVetId && finalPetId) {
+                    await supabase.from('pets').update({ assigned_vet_id: newApptVetId }).eq('id', finalPetId);
+                    window.dispatchEvent(new CustomEvent('petDataChanged'));
+                  }
+
+                  await addAppointment({
+                    pet_id: finalPetId,
+                    client_id: finalClientId,
+                    vet_id: newApptVetId || undefined,
+                    scheduled_at,
+                    duration_minutes: durationMin,
+                    reason: newApptService || undefined,
+                    notes: newApptNotes || undefined,
+                    status: newApptStatus,
+                  });
+
+                  // Store appointment notification for the assigned vet
+                  if (newApptVetId) {
+                    try {
+                      const petDisplayName = visitType === 'new' ? npPetName : newApptPet;
+                      const ownerDisplayName = visitType === 'new' ? npOwnerName : ownerSearch;
+                      await supabase.from('notification_events').upsert({
+                        id: `appt-assign-${finalPetId}-${Date.now()}`,
+                        type: 'appt_assign',
+                        timestamp: new Date().toISOString(),
+                        data: {
+                          petId: finalPetId,
+                          petName: petDisplayName,
+                          ownerName: ownerDisplayName,
+                          clientId: finalClientId,
+                          vetId: newApptVetId,
+                          vetName: newApptVetName,
+                          service: newApptService || 'Appointment',
+                          date: newApptDate,
+                          time: newApptTime,
+                        },
+                      });
+                      window.dispatchEvent(new Event('notifCountChanged'));
+                    } catch {}
+                  }
+
+                  setDialogOpen(false);
+                } finally {
+                  setSavingAppt(false);
+                }
+              }}
+              style={{ backgroundColor: '#2D6A4F', color: '#fff' }}
+            >
+              <CalendarIcon className="w-4 h-4 mr-1.5" />
+              {savingAppt ? 'Saving…' : 'Schedule Appointment'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Day Popup Dialog (Month View) ────────────────────── */}
+      <Dialog open={dayPopupOpen} onOpenChange={setDayPopupOpen}>
+        <DialogContent style={{ maxWidth: '600px', width: '95vw' }}>
+          <DialogHeader>
+            <DialogTitle>
+              {dayPopupDate && new Date(dayPopupDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+            </DialogTitle>
+          </DialogHeader>
+          {/* Doctor tabs */}
+          <div className="flex gap-1 p-1 bg-[var(--surface-elevated)] mb-4" style={{ borderRadius: '8px', overflowX: 'auto' }}>
+            <button
+              onClick={() => setDayPopupVet('all')}
+              className="px-3 py-1.5 whitespace-nowrap"
+              style={{
+                borderRadius: '6px', fontSize: '13px',
+                fontWeight: dayPopupVet === 'all' ? 600 : 400,
+                backgroundColor: dayPopupVet === 'all' ? 'var(--surface-white)' : 'transparent',
+                color: dayPopupVet === 'all' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                boxShadow: dayPopupVet === 'all' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+              }}
+            >
+              All Doctors
+            </button>
+            {staffList.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => setDayPopupVet(s.id)}
+                className="px-3 py-1.5 whitespace-nowrap"
+                style={{
+                  borderRadius: '6px', fontSize: '13px',
+                  fontWeight: dayPopupVet === s.id ? 600 : 400,
+                  backgroundColor: dayPopupVet === s.id ? 'var(--surface-white)' : 'transparent',
+                  color: dayPopupVet === s.id ? 'var(--text-primary)' : 'var(--text-secondary)',
+                  boxShadow: dayPopupVet === s.id ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+                }}
+              >
+                {s.name}
+              </button>
+            ))}
+          </div>
+          {/* Book Appointment CTA */}
+          <Button
+            onClick={() => {
+              setDayPopupOpen(false);
+              const prefillVetId = dayPopupVet !== 'all' ? dayPopupVet : undefined;
+              const doc = prefillVetId ? staffList.find((s) => s.id === prefillVetId) : undefined;
+              openNewApptDialog(prefillVetId, doc?.name, dayPopupDate);
+            }}
+            className="w-full"
+            style={{ backgroundColor: 'var(--brand-green)', color: '#fff', borderRadius: '8px', fontWeight: 600 }}
+          >
+            <Plus className="w-4 h-4 mr-2" /> Book Appointment
+          </Button>
+          {/* Appointments for that day */}
+          <div className="space-y-2" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+            {(() => {
+              const dayAppts = appointments.filter((a) => {
+                if (a.date !== dayPopupDate) return false;
+                if (dayPopupVet !== 'all' && (a as any).vetId !== dayPopupVet) return false;
+                return true;
+              });
+              if (dayAppts.length === 0) {
+                return (
+                  <div className="text-center py-8">
+                    <CalendarIcon className="w-10 h-10 text-[var(--border-color)] mx-auto mb-2" />
+                    <p className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>No appointments</p>
+                  </div>
+                );
+              }
+              return dayAppts.map((appt) => {
+                const st = statusStyles[appt.status] || statusStyles.Confirmed;
+                return (
+                  <div
+                    key={appt.id}
+                    className="flex items-center gap-3 p-3 border border-[var(--border-color)] cursor-pointer hover:bg-[var(--surface-elevated)] transition-colors"
+                    style={{ borderRadius: '10px' }}
+                    onClick={() => { setDayPopupOpen(false); openApptDetail(appt); }}
+                  >
+                    <div className="flex-shrink-0 text-right" style={{ width: '70px' }}>
+                      <p style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{appt.timeStart}</p>
+                      <p style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{getDurationMin(appt.timeStart, appt.timeEnd)} min</p>
+                    </div>
+                    <div className="w-px h-10 bg-[var(--brand-green-text)]" />
+                    <div className="flex-1 min-w-0">
+                      <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{appt.petName}</p>
+                      <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{appt.service} · {appt.vet}</p>
+                    </div>
+                    <span
+                      className="inline-flex items-center px-2 py-0.5 flex-shrink-0"
+                      style={{ backgroundColor: st.bg, color: st.text, borderRadius: '9999px', fontSize: '11px', fontWeight: 600 }}
+                    >
+                      {appt.status}
+                    </span>
+                  </div>
+                );
+              });
+            })()}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

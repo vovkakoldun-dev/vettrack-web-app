@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { supabase } from '../../lib/supabase';
+import { useAuth } from '../context/AuthContext';
+import { useProfile } from '../hooks/useProfile';
 import {
   Home, Users, Calendar, FileText, Settings, PawPrint,
   UserCircle, Bell, FlaskConical, Sun, Moon, Syringe,
@@ -56,6 +58,7 @@ const INITIAL_SECTIONS: NavSection[] = [
 export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTheme: () => void }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
+  const { signOut } = useAuth();
 
   const [collapsed, setCollapsed]     = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -70,9 +73,7 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
   });
 
   // Dynamic notification badge count
-  const [notifCount, setNotifCount] = useState(() => {
-    try { return parseInt(localStorage.getItem('notif_unread_count') || '0', 10); } catch { return 0; }
-  });
+  const [notifCount, setNotifCount] = useState(0);
 
   // Compute notification count from Supabase
   const computeNotifCount = async () => {
@@ -105,48 +106,29 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
       (vacRes.data || []).forEach((v) => allIds.push(`vax-${v.id}`));
       (clientRes.data || []).forEach((c) => allIds.push(`client-${c.id}`));
 
-      // Count assignment events from localStorage
-      try {
-        const assignEvents = JSON.parse(localStorage.getItem('vet_assign_events') || '[]');
-        const sevenDaysAgoMs = Date.now() - 7 * 86400000;
-        for (const evt of assignEvents) {
-          if (new Date(evt.timestamp).getTime() >= sevenDaysAgoMs) {
-            allIds.push(evt.id);
-          }
-        }
-      } catch {}
+      // Count notification events from Supabase
+      const sevenDaysAgoISO = new Date(Date.now() - 7 * 86400000).toISOString();
+      const { data: notifEvts } = await supabase
+        .from('notification_events')
+        .select('id')
+        .gte('timestamp', sevenDaysAgoISO);
+      for (const evt of (notifEvts || [])) {
+        allIds.push(evt.id);
+      }
 
-      // Count vet unassignment events
-      try {
-        const unassignEvents = JSON.parse(localStorage.getItem('vet_unassign_events') || '[]');
-        const sevenDaysAgoMs = Date.now() - 7 * 86400000;
-        for (const evt of unassignEvents) {
-          if (new Date(evt.timestamp).getTime() >= sevenDaysAgoMs) {
-            allIds.push(evt.id);
-          }
-        }
-      } catch {}
-
-      // Count appointment assignment events
-      try {
-        const apptEvents = JSON.parse(localStorage.getItem('appt_assign_events') || '[]');
-        const sevenDaysAgoMs = Date.now() - 7 * 86400000;
-        for (const evt of apptEvents) {
-          if (new Date(evt.timestamp).getTime() >= sevenDaysAgoMs) {
-            allIds.push(evt.id);
-          }
-        }
-      } catch {}
-
-      const readIds: string[] = JSON.parse(localStorage.getItem('notif_read') || '[]');
-      const dismissedIds: string[] = JSON.parse(localStorage.getItem('notif_dismissed') || '[]');
-      const readSet = new Set(readIds);
-      const dismissedSet = new Set(dismissedIds);
+      const { data: stateRows } = await supabase
+        .from('notification_state')
+        .select('notification_id, status');
+      const readSet = new Set<string>();
+      const dismissedSet = new Set<string>();
+      for (const row of (stateRows || [])) {
+        if (row.status === 'read') readSet.add(row.notification_id);
+        if (row.status === 'dismissed') dismissedSet.add(row.notification_id);
+      }
 
       const unread = allIds.filter(id => !dismissedSet.has(id) && !readSet.has(id)).length;
 
       setNotifCount(unread);
-      localStorage.setItem('notif_unread_count', String(unread));
     } catch {}
   };
 
@@ -234,31 +216,8 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
     } : s));
   }, [notifCount, chatUnread]);
 
-  // Fetch staff profile from Supabase
-  const [staffName, setStaffName] = useState('Dr. Sarah Chen');
-  const [staffRole, setStaffRole] = useState('Veterinarian');
-  const [staffEmail, setStaffEmail] = useState('sarah.chen@vettrack.com');
-  const [staffPhoto, setStaffPhoto] = useState('');
-  useEffect(() => {
-    supabase.from('staff').select('first_name, last_name, role, email, photo_url').in('role', ['veterinarian', 'senior_veterinarian', 'lead_vet_tech']).limit(1).single().then(({ data }) => {
-      if (data) {
-        setStaffName(`Dr. ${data.first_name} ${data.last_name}`);
-        setStaffRole((data.role || 'veterinarian').replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()));
-        setStaffEmail(data.email || '—');
-        setStaffPhoto(data.photo_url || '');
-      }
-    });
-  }, []);
-
-  // Listen for instant photo change events from My Portal
-  useEffect(() => {
-    const handlePhotoChanged = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      setStaffPhoto(detail?.photo_url || '');
-    };
-    window.addEventListener('staffPhotoChanged', handlePhotoChanged);
-    return () => window.removeEventListener('staffPhotoChanged', handlePhotoChanged);
-  }, []);
+  // Staff profile from hook
+  const { profile: doctorProfile } = useProfile('doctor');
 
   // Drag state for sections
   const dragSectionIndex = useRef<number | null>(null);
@@ -559,10 +518,10 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
               {/* Mini header */}
               <div className="border-b border-[var(--border-color)]" style={{ padding: '14px 16px' }}>
                 <div className="flex items-center gap-3">
-                  {staffPhoto ? (
+                  {doctorProfile.avatarUrl ? (
                     <img
-                      src={staffPhoto}
-                      alt={staffName}
+                      src={doctorProfile.avatarUrl}
+                      alt={doctorProfile.fullName}
                       className="w-10 h-10 object-cover flex-shrink-0"
                       style={{ borderRadius: '50%' }}
                     />
@@ -571,15 +530,15 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
                       className="w-10 h-10 flex-shrink-0 flex items-center justify-center"
                       style={{ borderRadius: '50%', backgroundColor: '#2D6A4F20', color: '#2D6A4F', fontSize: '14px', fontWeight: 700 }}
                     >
-                      {staffName.split(' ').filter(w => w[0] && w[0] === w[0].toUpperCase()).map(w => w[0]).join('').slice(0, 2)}
+                      {doctorProfile.initials}
                     </div>
                   )}
                   <div className="min-w-0">
                     <p className="text-[var(--text-primary)] truncate" style={{ fontSize: '14px', fontWeight: 600 }}>
-                      {staffName}
+                      {doctorProfile.fullName}
                     </p>
                     <p className="text-[var(--text-secondary)] truncate" style={{ fontSize: '12px' }}>
-                      {staffEmail}
+                      {doctorProfile.email}
                     </p>
                   </div>
                 </div>
@@ -597,7 +556,7 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
                 </button>
                 <div style={{ height: '1px', backgroundColor: 'var(--border-color)', margin: '4px 0' }} />
                 <button
-                  onClick={() => { setProfileOpen(false); navigate('/login'); }}
+                  onClick={async () => { setProfileOpen(false); await signOut(); navigate('/login'); }}
                   className="w-full flex items-center gap-3 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
                   style={{ borderRadius: '8px', padding: '9px 10px', fontSize: '14px', fontWeight: 500, color: '#d4183d' }}
                 >
@@ -611,7 +570,7 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
           {/* Trigger */}
           <button
             onClick={() => setProfileOpen(!profileOpen)}
-            title={collapsed ? staffName : undefined}
+            title={collapsed ? doctorProfile.fullName : undefined}
             className={`w-full flex items-center transition-colors overflow-hidden ${profileOpen ? 'bg-[var(--surface-elevated)]' : 'hover:bg-[var(--surface-elevated)]'}`}
             style={{
               borderRadius: '8px',
@@ -620,10 +579,10 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
               gap:            collapsed ? 0 : '10px',
             }}
           >
-            {staffPhoto ? (
+            {doctorProfile.avatarUrl ? (
               <img
-                src={staffPhoto}
-                alt={staffName}
+                src={doctorProfile.avatarUrl}
+                alt={doctorProfile.fullName}
                 className="w-9 h-9 object-cover flex-shrink-0"
                 style={{ borderRadius: '50%' }}
               />
@@ -632,17 +591,17 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
                 className="w-9 h-9 flex-shrink-0 flex items-center justify-center"
                 style={{ borderRadius: '50%', backgroundColor: '#2D6A4F20', color: '#2D6A4F', fontSize: '13px', fontWeight: 700 }}
               >
-                {staffName.split(' ').filter(w => w[0] && w[0] === w[0].toUpperCase()).map(w => w[0]).join('').slice(0, 2)}
+                {doctorProfile.initials}
               </div>
             )}
             {!collapsed && (
               <>
                 <div className="flex-1 min-w-0 text-left">
                   <p className="text-[var(--text-primary)] truncate" style={{ fontSize: '14px', fontWeight: 600 }}>
-                    {staffName}
+                    {doctorProfile.fullName}
                   </p>
                   <p className="text-[var(--text-secondary)] truncate" style={{ fontSize: '12px', fontWeight: 400 }}>
-                    {staffRole}
+                    {doctorProfile.role ? doctorProfile.role.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()) : 'Veterinarian'}
                   </p>
                 </div>
                 <ChevronUp

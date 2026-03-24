@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
+import { useProfile } from '../hooks/useProfile';
 import {
   MessageSquare,
   Send,
@@ -31,20 +32,12 @@ type Message = {
   from: 'me' | 'them';
   text: string;
   timestamp: Date;
+  imageUrl?: string;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const TODAY = new Date();
-
-function getAdminDisplayName(): string {
-  try {
-    const p = JSON.parse(localStorage.getItem('admin_profile_settings') || '{}');
-    if (p.firstName && p.lastName) return `${p.firstName} ${p.lastName}`;
-    if (p.firstName) return p.firstName;
-  } catch { /* ignore */ }
-  return 'Front Desk Admin';
-}
 
 function getInitials(name: string): string {
   return name.split(' ').map((w) => w[0]).join('').toUpperCase().slice(0, 2);
@@ -103,8 +96,7 @@ function DateSeparator({ label }: { label: string }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function ChatPage() {
-  const [adminName, setAdminName] = useState(getAdminDisplayName);
-  const [adminPhoto, setAdminPhoto] = useState('');
+  const { profile: adminProfile } = useProfile('admin');
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [unreadCount, setUnreadCount] = useState(0);
@@ -113,21 +105,19 @@ export default function ChatPage() {
   const chatReadAtRef = useRef('1970-01-01T00:00:00Z');
   const [chatReadAtLoaded, setChatReadAtLoaded] = useState(false);
 
-  // Fetch admin photo + doctor staff ID + chat_read_at on mount
+  // Image attachment state
+  const chatImageRef = useRef<HTMLInputElement>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+
+  // Admin name/photo from useProfile (single source of truth)
+  const adminName = adminProfile.fullName || 'Front Desk Admin';
+  const adminPhoto = adminProfile.avatarUrl || '';
+
+  // Fetch doctor staff ID + chat_read_at on mount (operational data only)
   useEffect(() => {
     (async () => {
-      // Get admin info
-      const { data: adminData } = await supabase
-        .from('staff')
-        .select('photo_url, first_name, last_name')
-        .in('role', ['front_desk_manager', 'receptionist', 'clinic_manager', 'superadmin'])
-        .limit(1)
-        .single();
-      if (adminData) {
-        if (adminData.photo_url) setAdminPhoto(adminData.photo_url);
-        if (adminData.first_name && adminData.last_name) setAdminName(`${adminData.first_name} ${adminData.last_name}`);
-      }
-      // Get doctor staff record for chat_read_at
       const { data: docData } = await supabase
         .from('staff')
         .select('id, chat_read_at')
@@ -153,7 +143,7 @@ export default function ChatPage() {
   async function fetchMessages() {
     const { data } = await supabase
       .from('chat_messages')
-      .select('id, sender_name, content, created_at')
+      .select('id, sender_name, content, image_url, created_at')
       .eq('conversation', CONVERSATION_KEY)
       .order('created_at', { ascending: true });
 
@@ -163,12 +153,9 @@ export default function ChatPage() {
         from: m.sender_name === DOCTOR_NAME ? 'me' as const : 'them' as const,
         text: m.content,
         timestamp: new Date(m.created_at),
+        imageUrl: m.image_url || undefined,
       }));
       setMessages(mapped);
-
-      // Update admin display name from the latest "them" message
-      const lastThemMsg = [...data].reverse().find((m: any) => m.sender_name !== DOCTOR_NAME);
-      if (lastThemMsg) setAdminName(lastThemMsg.sender_name);
 
       // Track unread — count admin messages newer than chat_read_at
       if (selected) {
@@ -223,26 +210,62 @@ export default function ChatPage() {
     setEmojiOpen(false);
   }
 
+  function handleImageSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImageFile(file);
+    setImagePreview(URL.createObjectURL(file));
+    e.target.value = '';
+  }
+
+  function clearImagePreview() {
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
+    setImageFile(null);
+    setImagePreview(null);
+  }
+
   async function handleSend() {
-    if (!inputValue.trim()) return;
+    if (!inputValue.trim() && !imageFile) return;
     const text = inputValue.trim();
     setInputValue('');
+    const pendingFile = imageFile;
+    const pendingPreview = imagePreview;
+    setImageFile(null);
+    setImagePreview(null);
 
     // Optimistic update
     const optimistic: Message = {
       id: `opt-${Date.now()}`,
       from: 'me',
-      text,
+      text: text || (pendingFile ? '📷 Image' : ''),
       timestamp: new Date(),
+      imageUrl: pendingPreview || undefined,
     };
     setMessages(prev => [...prev, optimistic]);
+
+    // Upload image to chat-images bucket if present
+    let imageUrl: string | null = null;
+    if (pendingFile) {
+      setUploadingImage(true);
+      const path = `msg-${Date.now()}.png`;
+      const { error: uploadErr } = await supabase.storage
+        .from('chat-images')
+        .upload(path, pendingFile, { upsert: true, contentType: pendingFile.type });
+      if (!uploadErr) {
+        const { data: urlData } = supabase.storage.from('chat-images').getPublicUrl(path);
+        imageUrl = urlData.publicUrl + '?t=' + Date.now();
+      }
+      setUploadingImage(false);
+      if (pendingPreview) URL.revokeObjectURL(pendingPreview);
+    }
 
     // Insert into Supabase
     await supabase.from('chat_messages').insert([{
       organization_id: ORG_ID,
       conversation: CONVERSATION_KEY,
       sender_name: DOCTOR_NAME,
-      content: text,
+      content: text || (imageUrl ? '📷 Image' : ''),
+      image_url: imageUrl,
     }]);
   }
 
@@ -380,13 +403,19 @@ export default function ChatPage() {
 
                           <div style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start', maxWidth: '60%' }}>
                             <div style={{
-                              padding: '10px 14px',
+                              padding: msg.imageUrl ? '4px' : '10px 14px',
                               borderRadius: isMe ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
                               backgroundColor: isMe ? 'var(--brand-green-text)' : 'var(--surface-elevated)',
                               color: isMe ? '#fff' : 'var(--text-primary)',
                               fontSize: '14px', lineHeight: 1.5, wordBreak: 'break-word',
+                              overflow: 'hidden',
                             }}>
-                              {msg.text}
+                              {msg.imageUrl && (
+                                <img src={msg.imageUrl} alt="Attachment" style={{ maxWidth: '240px', maxHeight: '200px', borderRadius: msg.text && msg.text !== '📷 Image' ? '12px 12px 0 0' : '12px', display: 'block', objectFit: 'cover' }} />
+                              )}
+                              {msg.text && msg.text !== '📷 Image' && (
+                                <div style={{ padding: msg.imageUrl ? '8px 10px 6px' : '0' }}>{msg.text}</div>
+                              )}
                             </div>
 
                             <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '3px' }}>
@@ -407,11 +436,28 @@ export default function ChatPage() {
               <div ref={messagesEndRef} />
             </div>
 
+            {/* Image preview */}
+            {imagePreview && (
+              <div style={{ flexShrink: 0, borderTop: '1px solid var(--border-color)', padding: '12px 16px 0', backgroundColor: 'var(--surface-white)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ position: 'relative', display: 'inline-block' }}>
+                  <img src={imagePreview} alt="Preview" style={{ maxWidth: '120px', maxHeight: '80px', borderRadius: '8px', objectFit: 'cover', border: '1px solid var(--border-color)' }} />
+                  <button
+                    onClick={clearImagePreview}
+                    style={{ position: 'absolute', top: '-6px', right: '-6px', width: '20px', height: '20px', borderRadius: '50%', backgroundColor: '#d4183d', color: '#fff', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 700 }}
+                  >×</button>
+                </div>
+                <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{imageFile?.name}</span>
+              </div>
+            )}
+
             {/* Input area */}
-            <div style={{ flexShrink: 0, borderTop: '1px solid var(--border-color)', padding: '16px', display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: 'var(--surface-white)' }}>
+            <div style={{ flexShrink: 0, borderTop: imagePreview ? 'none' : '1px solid var(--border-color)', padding: '16px', display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: 'var(--surface-white)' }}>
+              <input type="file" ref={chatImageRef} accept="image/*" style={{ display: 'none' }} onChange={handleImageSelect} />
               <button
-                title="Attach file"
-                style={{ width: '36px', height: '36px', flexShrink: 0, borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-secondary)', transition: 'background-color 0.15s' }}
+                title="Attach image"
+                onClick={() => chatImageRef.current?.click()}
+                disabled={uploadingImage}
+                style={{ width: '36px', height: '36px', flexShrink: 0, borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-secondary)', transition: 'background-color 0.15s', opacity: uploadingImage ? 0.5 : 1 }}
                 onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--surface-elevated)')}
                 onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
               >

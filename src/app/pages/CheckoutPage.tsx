@@ -12,8 +12,10 @@ import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '../components/ui/select';
 import { MOCK_APPOINTMENTS, SERVICE_PRICE_LIST, MEDICATION_PRICE_LIST } from '../data/mockAppointments';
+import type { Appointment as MockAppt } from '../data/mockAppointments';
 import { useActiveVisit } from '../context/ActiveVisitContext';
 import { useAppointmentStatus } from '../context/AppointmentStatusContext';
+import { supabase } from '../../lib/supabase';
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -122,7 +124,53 @@ export default function CheckoutPage() {
   const { clearVisit } = useActiveVisit();
   const { setApptStatus } = useAppointmentStatus();
 
-  const appt = MOCK_APPOINTMENTS.find((a) => String(a.id) === id);
+  const mockAppt = MOCK_APPOINTMENTS.find((a) => String(a.id) === id);
+  const [realAppt, setRealAppt] = useState<MockAppt | null>(null);
+  const [loadingAppt, setLoadingAppt] = useState(!mockAppt);
+
+  useEffect(() => {
+    if (mockAppt || !id) return;
+    (async () => {
+      setLoadingAppt(true);
+      const { data } = await supabase
+        .from('appointments')
+        .select('id, scheduled_at, duration_minutes, status, reason, notes, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name), staff!appointments_vet_id_fkey(id, first_name, last_name)')
+        .eq('id', id)
+        .single();
+      if (data) {
+        const start = new Date(data.scheduled_at);
+        const end = new Date(start.getTime() + (data.duration_minutes ?? 30) * 60000);
+        const fmt = (d: Date) => {
+          let h = d.getHours();
+          const m = d.getMinutes();
+          const ampm = h >= 12 ? 'PM' : 'AM';
+          if (h > 12) h -= 12;
+          if (h === 0) h = 12;
+          return `${h}:${m.toString().padStart(2, '0')} ${ampm}`;
+        };
+        const y = start.getFullYear();
+        const mo = (start.getMonth() + 1).toString().padStart(2, '0');
+        const da = start.getDate().toString().padStart(2, '0');
+        setRealAppt({
+          id: 0,
+          date: `${y}-${mo}-${da}`,
+          timeStart: fmt(start),
+          timeEnd: fmt(end),
+          petName: data.pets?.name ?? '—',
+          petImage: data.pets?.photo_url ?? '',
+          ownerName: data.clients ? `${data.clients.first_name} ${data.clients.last_name}` : '—',
+          species: data.pets?.species ?? '—',
+          service: data.reason ?? '—',
+          vet: data.staff ? `Dr. ${data.staff.first_name} ${data.staff.last_name}` : '—',
+          status: (data.status as any) ?? 'In Progress',
+          notes: data.notes ?? '',
+        });
+      }
+      setLoadingAppt(false);
+    })();
+  }, [id, mockAppt]);
+
+  const appt = mockAppt || realAppt;
 
   // ── State ────────────────────────────────────────────────────
   const [items, setItems] = useState<CheckoutItem[]>([
@@ -133,6 +181,14 @@ export default function CheckoutPage() {
   const [nextMedId, setNextMedId] = useState(1);
   const [completed, setCompleted] = useState(false);
   const [petHealthStatus, setPetHealthStatus] = useState<'Healthy' | 'Follow-up' | 'Critical'>('Healthy');
+
+  if (loadingAppt) {
+    return (
+      <div className="max-w-[960px] mx-auto p-8 text-center">
+        <p className="text-[var(--text-secondary)]" style={{ fontSize: '16px' }}>Loading checkout...</p>
+      </div>
+    );
+  }
 
   if (!appt) {
     return (
@@ -694,7 +750,42 @@ export default function CheckoutPage() {
             Back to Visit Notes
           </Button>
           <Button
-            onClick={() => { clearVisit(); setApptStatus(parseInt(id!), 'Ready for Billing'); setCompleted(true); }}
+            onClick={async () => {
+              clearVisit();
+              setApptStatus(parseInt(id!) || 0, 'Ready for Billing');
+              // Update Supabase status for real appointments
+              if (id && id.includes('-')) {
+                await supabase.from('appointments').update({ status: 'Completed' }).eq('id', id);
+              }
+
+              // Create a "Ready for Billing" front-desk task
+              if (appt) {
+                try {
+                  const today = new Date().toISOString().split('T')[0];
+                  const totalServices = items.reduce((s, i) => s + i.qty * i.unitPrice, 0);
+                  const totalMeds = meds.reduce((s, m) => s + m.qty * m.unitPrice, 0);
+                  const grandTotal = totalServices + totalMeds;
+                  await supabase.from('tasks').insert({
+                    type: 'Owner Notification',
+                    priority: 'High',
+                    status: 'Pending',
+                    due_date: today,
+                    due_time: new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
+                    pet_name: appt.petName,
+                    pet_species: appt.species || '—',
+                    owner_name: appt.ownerName,
+                    owner_phone: '',
+                    assigned_by: (appt.vet && appt.vet !== '—') ? appt.vet : 'Dr. Volodymyr Koldun',
+                    visit_date: today,
+                    doctor_notes: `Visit completed. Invoice total: $${grandTotal.toFixed(2)} (Services: $${totalServices.toFixed(2)}, Medications: $${totalMeds.toFixed(2)}). Please process payment at the front desk. Health status: ${petHealthStatus}.`,
+                    tags: ['Billing', 'Visit Complete'],
+                  });
+                  window.dispatchEvent(new Event('notifCountChanged'));
+                } catch {}
+              }
+
+              setCompleted(true);
+            }}
             style={{ backgroundColor: '#2D6A4F', color: '#fff', border: 'none', gap: '8px' }}
             className="hover:opacity-90"
           >

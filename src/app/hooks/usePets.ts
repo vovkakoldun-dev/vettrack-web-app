@@ -54,6 +54,17 @@ export function usePets() {
     fetchPets()
   }, [fetchPets])
 
+  // Listen for cross-page data changes
+  useEffect(() => {
+    const handler = () => { fetchPets() }
+    window.addEventListener('petDataChanged', handler)
+    window.addEventListener('clientDataChanged', handler)
+    return () => {
+      window.removeEventListener('petDataChanged', handler)
+      window.removeEventListener('clientDataChanged', handler)
+    }
+  }, [fetchPets])
+
   const addPet = useCallback(async (values: AddPetValues) => {
     const { data, error: err } = await supabase
       .from('pets')
@@ -62,19 +73,26 @@ export function usePets() {
       .single()
     if (!err) {
       await fetchPets()
+      window.dispatchEvent(new CustomEvent('petDataChanged'))
     }
     return { data, error: err }
   }, [fetchPets])
 
   const updatePet = useCallback(async (id: string, values: Partial<AddPetValues>) => {
     const { error: err } = await supabase.from('pets').update(values).eq('id', id)
-    if (!err) await fetchPets()
+    if (!err) {
+      await fetchPets()
+      window.dispatchEvent(new CustomEvent('petDataChanged'))
+    }
     return { error: err }
   }, [fetchPets])
 
   const deactivatePet = useCallback(async (id: string) => {
     const { error: err } = await supabase.from('pets').update({ is_active: false }).eq('id', id)
-    if (!err) setPets(prev => prev.filter(p => p.id !== id))
+    if (!err) {
+      setPets(prev => prev.filter(p => p.id !== id))
+      window.dispatchEvent(new CustomEvent('petDataChanged'))
+    }
     return { error: err }
   }, [])
 

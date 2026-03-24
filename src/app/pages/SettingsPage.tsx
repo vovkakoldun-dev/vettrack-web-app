@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useAuth } from '../context/AuthContext';
 import {
   User, Building2, Bell, Palette, Shield, CreditCard,
   Camera, Save, Eye, EyeOff, Trash2, LogOut,
@@ -8,9 +9,11 @@ import {
   ChevronsUpDown, Check, Plug, RefreshCw, ExternalLink,
   Copy, RotateCcw, Webhook, Zap, FlaskConical,
 } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
+import { updateProfile, uploadAvatar, removeAvatar } from '../hooks/useProfile';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
-import { Textarea } from '../components/ui/textarea';
+
 import { Switch } from '../components/ui/switch';
 import { Separator } from '../components/ui/separator';
 import { Badge } from '../components/ui/badge';
@@ -42,7 +45,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { id: 'profile',       label: 'Profile',       icon: User },
   { id: 'clinic',        label: 'Clinic',         icon: Building2 },
-  { id: 'notifications', label: 'Notifications',  icon: Bell, badge: '3' },
+  { id: 'notifications', label: 'Notifications',  icon: Bell },
   { id: 'appearance',    label: 'Appearance',     icon: Palette },
   { id: 'security',      label: 'Security',       icon: Shield },
   { id: 'billing',       label: 'Billing',        icon: CreditCard },
@@ -673,25 +676,76 @@ function IntegrationsSection() {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
+  const { user } = useAuth();
   const [activeSection, setActiveSection] = useState<SettingsSection>('profile');
   const [savedSection, setSavedSection] = useState<SettingsSection | null>(null);
 
-  const handleSave = (section: SettingsSection) => {
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async (section: SettingsSection) => {
+    if (section === 'profile' && staffId) {
+      setSaving(true);
+      // Profile data → profiles table
+      await updateProfile(staffId, { first_name: firstName, last_name: lastName, email, phone });
+      // Staff-specific data → staff table
+      const { error } = await supabase.from('staff').update({
+        job_title: jobTitle,
+        specialization,
+        license_no: licenseNo,
+      }).eq('id', staffId);
+      setSaving(false);
+      if (error) {
+        alert('Failed to save: ' + error.message);
+        return;
+      }
+      // Update sidebar + all useProfile('doctor') consumers instantly
+      window.dispatchEvent(new CustomEvent('doctorProfileChanged', { detail: { firstName, lastName, email, phone } }));
+    }
     setSavedSection(section);
     setTimeout(() => setSavedSection(null), 3000);
   };
 
   // ── Profile state ──────────────────────────────────────────────────────────
-  const [firstName, setFirstName] = useState('Sarah');
-  const [lastName, setLastName] = useState('Chen');
-  const [email, setEmail] = useState('sarah.chen@vettrack.com');
-  const [phone, setPhone] = useState('(555) 234-5678');
-  const [jobTitle, setJobTitle] = useState('Lead Veterinarian');
-  const [specialization, setSpecialization] = useState('Small Animal Medicine');
-  const [licenseNo, setLicenseNo] = useState('DVM-2018-04521');
-  const [bio, setBio] = useState(
-    'Board-certified veterinarian with 8 years of experience in small animal medicine and surgery. Passionate about preventive care and client education.'
-  );
+  const [staffId, setStaffId] = useState<string | null>(null);
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [jobTitle, setJobTitle] = useState('');
+  const [specialization, setSpecialization] = useState('');
+  const [licenseNo, setLicenseNo] = useState('');
+  const [profilePhoto, setProfilePhoto] = useState('');
+
+  // Load profile from Supabase
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('id, first_name, last_name, email, phone, avatar_url')
+        .eq('id', user.id)
+        .single();
+      if (profileData) {
+        setStaffId(profileData.id);
+        setFirstName(profileData.first_name || '');
+        setLastName(profileData.last_name || '');
+        setEmail(profileData.email || '');
+        setPhone(profileData.phone || '');
+        setProfilePhoto(profileData.avatar_url || '');
+        // Fetch staff-specific fields
+        const { data: staffData } = await supabase
+          .from('staff')
+          .select('job_title, specialization, license_no')
+          .eq('id', profileData.id)
+          .single();
+        if (staffData) {
+          setJobTitle(staffData.job_title || '');
+          setSpecialization(staffData.specialization || '');
+          setLicenseNo(staffData.license_no || '');
+        }
+      }
+    })();
+  }, [user]);
 
   // ── Clinic state ───────────────────────────────────────────────────────────
   const [clinicName, setClinicName] = useState('Hugory Animal Hospital');
@@ -738,7 +792,12 @@ export default function SettingsPage() {
   };
 
   // ── Appearance state ───────────────────────────────────────────────────────
-  const [themeMode, setThemeMode] = useState<'light' | 'dark' | 'system'>('light');
+  const [themeMode, setThemeMode] = useState<'light' | 'dark' | 'system'>(() => {
+    const stored = localStorage.getItem('vettrack-theme');
+    if (stored === 'dark') return 'dark';
+    if (stored === 'light') return 'light';
+    return 'system';
+  });
   const [dateFormat, setDateFormat] = useState('MM/DD/YYYY');
   const [timeFormat, setTimeFormat] = useState('12h');
   const [language, setLanguage] = useState('en-US');
@@ -841,23 +900,47 @@ export default function SettingsPage() {
                   This is shown on your appointments, records, and client portal.
                 </p>
                 <div className="flex items-center gap-5">
-                  <Avatar className="w-20 h-20">
-                    <AvatarImage
-                      src="https://images.unsplash.com/photo-1640161415278-a5ac46f82d04?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjB2ZXRlcmluYXJpYW4lMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyODYxNTB8MA&ixlib=rb-4.1.0&q=80&w=400"
-                      alt="Dr. Sarah Chen"
-                      className="object-cover"
-                    />
-                    <AvatarFallback>SC</AvatarFallback>
-                  </Avatar>
+                  {profilePhoto ? (
+                    <img src={profilePhoto} alt="Profile" className="w-20 h-20 object-cover" style={{ borderRadius: '9999px' }} />
+                  ) : (
+                    <div className="w-20 h-20 bg-[var(--brand-green-bg)] text-[var(--brand-green-text)] flex items-center justify-center" style={{ borderRadius: '9999px', fontSize: '24px', fontWeight: 700 }}>
+                      {(firstName?.[0] || '').toUpperCase()}{(lastName?.[0] || '').toUpperCase()}
+                    </div>
+                  )}
                   <div className="space-y-2">
-                    <Button variant="outline" size="sm">
+                    <Button variant="outline" size="sm" onClick={() => {
+                      const input = document.createElement('input');
+                      input.type = 'file';
+                      input.accept = 'image/*';
+                      input.onchange = async (ev: any) => {
+                        const file = ev.target.files?.[0];
+                        if (!file || !staffId) return;
+                        try {
+                          const publicUrl = await uploadAvatar(staffId, file, 'doctor');
+                          setProfilePhoto(publicUrl);
+                        } catch (err: any) {
+                          alert(err.message);
+                        }
+                      };
+                      input.click();
+                    }}>
                       <Camera className="w-4 h-4" />
                       Upload new photo
                     </Button>
-                    <Button variant="ghost" size="sm" className="text-[#d4183d] hover:text-[#d4183d]">
-                      <Trash2 className="w-4 h-4" />
-                      Remove photo
-                    </Button>
+                    {profilePhoto && (
+                      <Button variant="ghost" size="sm" className="text-[#d4183d] hover:text-[#d4183d]" onClick={async () => {
+                        if (!staffId || !confirm('Remove your profile photo?')) return;
+                        try {
+                          await removeAvatar(staffId, 'doctor');
+                          setProfilePhoto('');
+                        } catch (err: any) {
+                          console.error('Delete error:', err);
+                        }
+                      }}>
+                        <Trash2 className="w-4 h-4" />
+                        Remove photo
+                      </Button>
+                    )}
                   </div>
                   <div className="ml-auto text-right">
                     <p className="text-[var(--text-secondary)]" style={{ fontSize: '12px' }}>
@@ -923,18 +1006,6 @@ export default function SettingsPage() {
 
                 <FieldRow label="License number" hint="Your state veterinary license">
                   <Input value={licenseNo} onChange={(e) => setLicenseNo(e.target.value)} />
-                </FieldRow>
-
-                <FieldRow label="Bio" hint="Shown on the client portal">
-                  <Textarea
-                    value={bio}
-                    onChange={(e) => setBio(e.target.value)}
-                    className="min-h-[100px]"
-                    placeholder="Write a short bio..."
-                  />
-                  <p className="text-[var(--text-secondary)] mt-1.5" style={{ fontSize: '12px' }}>
-                    {bio.length}/300 characters
-                  </p>
                 </FieldRow>
 
                 <SaveBar onSave={() => handleSave('profile')} saved={savedSection === 'profile'} />
@@ -1206,7 +1277,23 @@ export default function SettingsPage() {
                     return (
                       <button
                         key={value}
-                        onClick={() => setThemeMode(value)}
+                        onClick={() => {
+                          setThemeMode(value);
+                          let shouldBeDark: boolean;
+                          if (value === 'system') {
+                            shouldBeDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                          } else {
+                            shouldBeDark = value === 'dark';
+                          }
+                          localStorage.setItem('vettrack-theme', shouldBeDark ? 'dark' : 'light');
+                          if (shouldBeDark) {
+                            document.documentElement.classList.add('dark');
+                          } else {
+                            document.documentElement.classList.remove('dark');
+                          }
+                          // Trigger re-render in useTheme hook instances
+                          window.dispatchEvent(new StorageEvent('storage', { key: 'vettrack-theme', newValue: shouldBeDark ? 'dark' : 'light' }));
+                        }}
                         className="p-4 border transition-all text-left"
                         style={{
                           borderRadius: '10px',

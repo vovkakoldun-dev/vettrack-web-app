@@ -10,6 +10,7 @@ function useIsMobile() {
   return isMobile;
 }
 import { Link, useLocation, useNavigate } from 'react-router';
+import { useAuth } from '../context/AuthContext';
 import {
   Home, BarChart2, Users, Building2, Calendar, CreditCard,
   Settings, ClipboardList, Sun, Moon, ChevronLeft, ChevronRight,
@@ -87,6 +88,7 @@ export function SuperAdminSidebar({
 }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
+  const { signOut } = useAuth();
 
   const isMobile = useIsMobile();
   const [collapsed, setCollapsed]     = useState(false);
@@ -409,7 +411,7 @@ export function SuperAdminSidebar({
                 </button>
                 <div style={{ height: '1px', backgroundColor: 'var(--border-color)', margin: '4px 0' }} />
                 <button
-                  onClick={() => { setProfileOpen(false); navigate('/login'); }}
+                  onClick={async () => { setProfileOpen(false); await signOut(); navigate('/login'); }}
                   className="w-full flex items-center gap-3 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
                   style={{ borderRadius: '8px', padding: '9px 10px', fontSize: '14px', fontWeight: 500, color: '#d4183d' }}
                 >

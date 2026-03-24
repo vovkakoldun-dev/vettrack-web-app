@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { supabase } from '../../lib/supabase';
+import { useAuth } from '../context/AuthContext';
+import { uploadAvatar, removeAvatar } from '../hooks/useProfile';
 import {
   Users, Calendar as CalendarIcon, ClipboardCheck, Clock,
   ChevronRight, ChevronLeft, Plus, Play,
@@ -545,6 +547,7 @@ function GlowStatCard({
 // ─── Component ───────────────────────────────────────────────
 
 export default function MyPortalPage() {
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
@@ -578,9 +581,10 @@ export default function MyPortalPage() {
   // Helper to get staff ID (avoids stale state after HMR)
   const getStaffId = async () => {
     if (vetId) return vetId;
-    const { data } = await supabase.from('staff').select('id')
-      .in('role', ['veterinarian', 'senior_veterinarian', 'lead_vet_tech'])
-      .limit(1).single();
+    if (!user) return null;
+    const { data } = await supabase.from('profiles').select('id')
+      .eq('id', user.id)
+      .single();
     if (data) { setVetId(data.id); return data.id; }
     return null;
   };
@@ -591,32 +595,11 @@ export default function MyPortalPage() {
     const staffId = await getStaffId();
     if (!staffId) { alert('Could not find staff record'); return; }
     try {
-      // 1) Remove old files for this vet from storage (best-effort)
-      const { data: existingFiles } = await supabase.storage.from('staff-photos').list('', { search: staffId });
-      if (existingFiles && existingFiles.length > 0) {
-        await supabase.storage.from('staff-photos').remove(existingFiles.map(f => f.name));
-      }
-
-      // 2) Upload with unique timestamped filename to avoid caching
-      const ext = file.name.split('.').pop() || 'jpg';
-      const path = `${staffId}-${Date.now()}.${ext}`;
-      const { error: uploadErr } = await supabase.storage.from('staff-photos').upload(path, file);
-      if (uploadErr) { alert('Upload failed: ' + uploadErr.message); return; }
-
-      // 3) Get public URL with cache-bust param
-      const { data: urlData } = supabase.storage.from('staff-photos').getPublicUrl(path);
-      const publicUrl = urlData.publicUrl + '?t=' + Date.now();
-
-      // 4) Save to staff record
-      const { error: dbErr } = await supabase.from('staff').update({ photo_url: publicUrl }).eq('id', staffId);
-      if (dbErr) { alert('DB update failed: ' + dbErr.message); return; }
-
-      // 5) Update local state + notify sidebar
+      const publicUrl = await uploadAvatar(staffId, file, 'doctor');
       setProfileImage(publicUrl);
       setVetProfile(prev => ({ ...prev, image: publicUrl }));
-      window.dispatchEvent(new CustomEvent('staffPhotoChanged', { detail: { photo_url: publicUrl } }));
     } catch (err: any) {
-      alert('Upload error: ' + err.message);
+      alert(err.message);
     }
     if (photoInputRef.current) photoInputRef.current.value = '';
   };
@@ -625,33 +608,15 @@ export default function MyPortalPage() {
     if (!profileImage) return;
     if (!confirm('Remove your profile photo?')) return;
     const staffId = await getStaffId();
-
-    // 1) Immediately clear local state + sidebar + file input so re-upload of same file works
-    const oldImage = profileImage;
-    setProfileImage('');
-    setVetProfile(prev => ({ ...prev, image: '' }));
-    window.dispatchEvent(new CustomEvent('staffPhotoChanged', { detail: { photo_url: '' } }));
-    if (photoInputRef.current) photoInputRef.current.value = '';
-
     if (!staffId) return;
     try {
-      // 2) Clear DB first (most important)
-      await supabase.from('staff').update({ photo_url: null }).eq('id', staffId);
-
-      // 3) Delete file from storage
-      const urlParts = oldImage.split('/staff-photos/');
-      if (urlParts[1]) {
-        const filePath = decodeURIComponent(urlParts[1].split('?')[0]);
-        await supabase.storage.from('staff-photos').remove([filePath]);
-      }
-      // 4) Also clean up any other files for this vet
-      const { data: existingFiles } = await supabase.storage.from('staff-photos').list('', { search: staffId });
-      if (existingFiles && existingFiles.length > 0) {
-        await supabase.storage.from('staff-photos').remove(existingFiles.map(f => f.name));
-      }
+      await removeAvatar(staffId, 'doctor');
+      setProfileImage('');
+      setVetProfile(prev => ({ ...prev, image: '' }));
     } catch (err: any) {
       console.error('Delete error:', err);
     }
+    if (photoInputRef.current) photoInputRef.current.value = '';
   };
 
   // ── Real appointments from Supabase ──
@@ -701,28 +666,34 @@ export default function MyPortalPage() {
   };
 
   useEffect(() => {
+    if (!user) return;
     (async () => {
-      // Fetch vet profile (doctor staff member only)
+      // Fetch vet profile from profiles table (single source of truth for identity)
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('id, first_name, last_name, email, phone, avatar_url, role')
+        .eq('id', user.id)
+        .single();
+      // Fetch operational data from staff table
       const { data: staffData } = await supabase
         .from('staff')
-        .select('id, first_name, last_name, role, email, phone, created_at, photo_url')
-        .in('role', ['veterinarian', 'senior_veterinarian', 'lead_vet_tech'])
-        .limit(1)
+        .select('id, created_at')
+        .eq('id', user.id)
         .single();
-      if (staffData) {
-        setVetId(staffData.id);
+      if (profileData && staffData) {
+        setVetId(profileData.id);
         const joinDate = new Date(staffData.created_at);
         setVetProfile({
-          name: `Dr. ${staffData.first_name} ${staffData.last_name}`,
-          role: (staffData.role || 'veterinarian').replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
+          name: `Dr. ${profileData.first_name} ${profileData.last_name}`,
+          role: (profileData.role || 'veterinarian').replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
           specialization: 'Small Animal Medicine',
-          email: staffData.email || '—',
-          phone: staffData.phone || '—',
-          licenseNo: `DVM-${joinDate.getFullYear()}-${staffData.id.slice(0, 5).toUpperCase()}`,
+          email: profileData.email || '—',
+          phone: profileData.phone || '—',
+          licenseNo: `DVM-${joinDate.getFullYear()}-${profileData.id.slice(0, 5).toUpperCase()}`,
           joinedDate: joinDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
-          image: staffData.photo_url || '',
+          image: profileData.avatar_url || '',
         });
-        setProfileImage(staffData.photo_url || '');
+        setProfileImage(profileData.avatar_url || '');
 
         // Fetch appointments for this vet
         const { data: apptData } = await supabase
@@ -788,7 +759,34 @@ export default function MyPortalPage() {
       }
       setDataLoaded(true);
     })();
+  }, [user]);
+
+  // Listen for profile changes from settings pages → update vet profile card instantly
+  useEffect(() => {
+    const handleProfileChanged = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (!d) return;
+      setVetProfile(prev => ({
+        ...prev,
+        name: `Dr. ${d.firstName ?? prev.name.replace(/^Dr\.\s*/, '').split(' ')[0]} ${d.lastName ?? prev.name.replace(/^Dr\.\s*/, '').split(' ').slice(1).join(' ')}`.trim(),
+        email: d.email ?? prev.email,
+        phone: d.phone ?? prev.phone,
+      }));
+    };
+    const handlePhotoChanged = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      const url = d?.photo_url ?? d?.avatar_url ?? '';
+      setProfileImage(url);
+      setVetProfile(prev => ({ ...prev, image: url }));
+    };
+    window.addEventListener('doctorProfileChanged', handleProfileChanged);
+    window.addEventListener('staffPhotoChanged', handlePhotoChanged);
+    return () => {
+      window.removeEventListener('doctorProfileChanged', handleProfileChanged);
+      window.removeEventListener('staffPhotoChanged', handlePhotoChanged);
+    };
   }, []);
+
   const [blockDialogOpen, setBlockDialogOpen] = useState(false);
   const [blockType, setBlockType] = useState<BlockType>('Lunch Break');
   const todayStr = `${new Date().getFullYear()}-${(new Date().getMonth()+1).toString().padStart(2,'0')}-${new Date().getDate().toString().padStart(2,'0')}`;

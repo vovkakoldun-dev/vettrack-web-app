@@ -59,6 +59,17 @@ export function useAppointments(dateFilter?: string) {
     fetchAppointments()
   }, [fetchAppointments])
 
+  // Listen for cross-page data changes (client/pet edits may affect joined data)
+  useEffect(() => {
+    const handler = () => { fetchAppointments() }
+    window.addEventListener('clientDataChanged', handler)
+    window.addEventListener('petDataChanged', handler)
+    return () => {
+      window.removeEventListener('clientDataChanged', handler)
+      window.removeEventListener('petDataChanged', handler)
+    }
+  }, [fetchAppointments])
+
   const addAppointment = useCallback(async (values: AddAppointmentValues) => {
     const { data, error: err } = await supabase
       .from('appointments')
@@ -72,6 +83,7 @@ export function useAppointments(dateFilter?: string) {
       .single()
     if (!err) {
       await fetchAppointments()
+      window.dispatchEvent(new CustomEvent('appointmentDataChanged'))
     }
     return { data, error: err }
   }, [fetchAppointments])
@@ -82,18 +94,20 @@ export function useAppointments(dateFilter?: string) {
       .update({ status })
       .eq('id', id)
     if (!err) {
-      setAppointments(prev => prev.map(a => a.id === id ? { ...a, status } : a))
+      await fetchAppointments()
+      window.dispatchEvent(new CustomEvent('appointmentDataChanged'))
     }
     return { error: err }
-  }, [])
+  }, [fetchAppointments])
 
   const deleteAppointment = useCallback(async (id: string) => {
     const { error: err } = await supabase.from('appointments').delete().eq('id', id)
     if (!err) {
-      setAppointments(prev => prev.filter(a => a.id !== id))
+      await fetchAppointments()
+      window.dispatchEvent(new CustomEvent('appointmentDataChanged'))
     }
     return { error: err }
-  }, [])
+  }, [fetchAppointments])
 
   return { appointments, loading, error, refetch: fetchAppointments, addAppointment, updateStatus, deleteAppointment }
 }

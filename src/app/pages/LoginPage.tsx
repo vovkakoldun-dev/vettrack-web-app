@@ -2,9 +2,10 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
   Stethoscope, ShieldCheck, Crown, PawPrint, Code2,
-  Eye, EyeOff, ArrowLeft, ChevronRight, Sun, Moon,
+  Eye, EyeOff, ArrowLeft, ChevronRight, Sun, Moon, UserPlus,
 } from 'lucide-react';
 import { useTheme } from '../hooks/useTheme';
+import { useAuth } from '../context/AuthContext';
 
 type Role = 'doctor' | 'admin' | 'superadmin' | 'patient' | 'sysadmin';
 
@@ -87,11 +88,15 @@ const ROLES: RoleCard[] = [
 export default function LoginPage() {
   const navigate = useNavigate();
   const { isDark, toggle } = useTheme();
+  const { signIn, signUp } = useAuth();
   const [selected, setSelected] = useState<Role | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [signUpSuccess, setSignUpSuccess] = useState(false);
 
   const activeRole = ROLES.find(r => r.id === selected);
 
@@ -99,6 +104,8 @@ export default function LoginPage() {
     setSelected(role);
     setEmail(ROLES.find(r => r.id === role)!.defaultEmail);
     setPassword('');
+    setAuthError(null);
+    setSignUpSuccess(false);
   }
 
   function handleBack() {
@@ -106,25 +113,47 @@ export default function LoginPage() {
     setEmail('');
     setPassword('');
     setShowPass(false);
+    setAuthError(null);
+    setIsSignUp(false);
+    setSignUpSuccess(false);
   }
 
-  function handleSignIn(e: React.FormEvent) {
+  async function handleSignIn(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    // Simulate auth delay, then navigate to the appropriate portal
-    setTimeout(() => {
-      if (selected === 'sysadmin') {
-        navigate('/sysadmin');
-      } else if (selected === 'superadmin') {
-        navigate('/superadmin');
-      } else if (selected === 'admin') {
-        navigate('/admin');
-      } else if (selected === 'patient') {
-        navigate('/owner');
-      } else {
-        navigate('/');
+    setAuthError(null);
+
+    if (isSignUp) {
+      // Sign up flow
+      const { error } = await signUp(email, password);
+      setLoading(false);
+      if (error) {
+        setAuthError(error);
+        return;
       }
-    }, 900);
+      setSignUpSuccess(true);
+      return;
+    }
+
+    // Sign in flow
+    const { error } = await signIn(email, password);
+    setLoading(false);
+    if (error) {
+      setAuthError(error);
+      return;
+    }
+    // Navigation happens automatically via auth state change → App.tsx redirect
+    if (selected === 'sysadmin') {
+      navigate('/sysadmin');
+    } else if (selected === 'superadmin') {
+      navigate('/superadmin');
+    } else if (selected === 'admin') {
+      navigate('/admin');
+    } else if (selected === 'patient') {
+      navigate('/owner');
+    } else {
+      navigate('/');
+    }
   }
 
   const pageBg = isDark
@@ -435,14 +464,36 @@ export default function LoginPage() {
                   </div>
                 </div>
 
+                {/* Auth error */}
+                {authError && (
+                  <div style={{
+                    marginBottom: '16px', padding: '10px 14px', borderRadius: '10px',
+                    backgroundColor: 'rgba(212,24,61,0.08)', border: '1px solid rgba(212,24,61,0.2)',
+                    color: '#d4183d', fontSize: '13px', lineHeight: 1.5,
+                  }}>
+                    {authError}
+                  </div>
+                )}
+
+                {/* Sign up success */}
+                {signUpSuccess && (
+                  <div style={{
+                    marginBottom: '16px', padding: '10px 14px', borderRadius: '10px',
+                    backgroundColor: 'rgba(45,106,79,0.08)', border: '1px solid rgba(45,106,79,0.2)',
+                    color: '#2D6A4F', fontSize: '13px', lineHeight: 1.5,
+                  }}>
+                    Account created! Check your email to confirm, then sign in.
+                  </div>
+                )}
+
                 {/* Submit */}
                 <button
                   type="submit"
-                  disabled={loading}
+                  disabled={loading || signUpSuccess}
                   className="w-full flex items-center justify-center gap-2 transition-all duration-200"
                   style={{
                     padding: '13px 20px',
-                    background: loading
+                    background: (loading || signUpSuccess)
                       ? 'rgba(45,106,79,0.5)'
                       : `linear-gradient(135deg, ${activeRole.color}, ${activeRole.color}dd)`,
                     border: 'none',
@@ -450,8 +501,8 @@ export default function LoginPage() {
                     color: '#ffffff',
                     fontSize: '15px',
                     fontWeight: 700,
-                    cursor: loading ? 'not-allowed' : 'pointer',
-                    boxShadow: loading ? 'none' : `0 4px 20px ${activeRole.ring}`,
+                    cursor: (loading || signUpSuccess) ? 'not-allowed' : 'pointer',
+                    boxShadow: (loading || signUpSuccess) ? 'none' : `0 4px 20px ${activeRole.ring}`,
                     letterSpacing: '-0.1px',
                   }}
                 >
@@ -465,7 +516,12 @@ export default function LoginPage() {
                       >
                         <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="30 70" strokeLinecap="round" />
                       </svg>
-                      Signing in…
+                      {isSignUp ? 'Creating account…' : 'Signing in…'}
+                    </>
+                  ) : isSignUp ? (
+                    <>
+                      <UserPlus style={{ width: '16px', height: '16px' }} />
+                      Create account
                     </>
                   ) : (
                     `Sign in as ${activeRole.label}`
@@ -473,9 +529,16 @@ export default function LoginPage() {
                 </button>
               </form>
 
-              {/* Demo hint */}
-              <p style={{ marginTop: '20px', textAlign: 'center', fontSize: '12px', color: '#475569' }}>
-                Demo mode — any password works
+              {/* Toggle sign in / sign up */}
+              <p style={{ marginTop: '20px', textAlign: 'center', fontSize: '13px', color: isDark ? '#94A3B8' : '#475569' }}>
+                {isSignUp ? 'Already have an account?' : "Don't have an account?"}{' '}
+                <button
+                  type="button"
+                  onClick={() => { setIsSignUp(v => !v); setAuthError(null); setSignUpSuccess(false); }}
+                  style={{ background: 'none', border: 'none', color: activeRole.color, cursor: 'pointer', fontWeight: 600, fontSize: '13px', padding: 0 }}
+                >
+                  {isSignUp ? 'Sign in' : 'Sign up'}
+                </button>
               </p>
             </div>
           </>

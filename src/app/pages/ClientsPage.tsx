@@ -74,8 +74,6 @@ export default function ClientsPage() {
   const handleAddClient = async (values: AddClientValues): Promise<string | void> => {
     const { data, error } = await addClient(values);
     if (!error && data) {
-      // Refetch after a short delay to pick up the pet record created by AddClientDialog
-      setTimeout(() => refetch(), 500);
       return (data as any).id as string;
     }
   };
@@ -83,6 +81,7 @@ export default function ClientsPage() {
   const updateStatus = async (clientId: string, newStatus: Status) => {
     setStatusOverrides((prev) => ({ ...prev, [clientId]: newStatus }));
     await supabase.from('clients').update({ health_status: newStatus }).eq('id', clientId);
+    window.dispatchEvent(new CustomEvent('clientDataChanged'));
   };
 
   // Map Supabase rows to display shape — one row per pet
@@ -441,6 +440,27 @@ export default function ClientsPage() {
                                   if (client.petId) {
                                     setVetOverrides((prev) => ({ ...prev, [client.petId!]: v }));
                                     await supabase.from('pets').update({ assigned_vet_id: v.id }).eq('id', client.petId);
+                                    window.dispatchEvent(new CustomEvent('petDataChanged'));
+                                    // Store assignment event for doctor notification
+                                    try {
+                                      await supabase.from('notification_events').delete().eq('type', 'vet_assign').ilike('id', `assign-${client.petId}-%`);
+                                      await supabase.from('notification_events').upsert({
+                                        id: `assign-${client.petId}-${Date.now()}`,
+                                        type: 'vet_assign',
+                                        timestamp: new Date().toISOString(),
+                                        data: {
+                                          petId: client.petId,
+                                          petName: client.petName,
+                                          species: client.species,
+                                          breed: client.breed,
+                                          ownerName: client.ownerName,
+                                          clientId: client.id,
+                                          vetId: v.id,
+                                          vetName: v.name,
+                                        },
+                                      });
+                                    } catch {}
+                                    window.dispatchEvent(new CustomEvent('notifCountChanged'));
                                   }
                                 }}
                               >
@@ -455,8 +475,26 @@ export default function ClientsPage() {
                                 <DropdownMenuItem
                                   onClick={async () => {
                                     if (client.petId) {
+                                      const prevVetName = currentVet?.name || '';
                                       setVetOverrides((prev) => ({ ...prev, [client.petId!]: null }));
                                       await supabase.from('pets').update({ assigned_vet_id: null }).eq('id', client.petId);
+                                      window.dispatchEvent(new CustomEvent('petDataChanged'));
+                                      try {
+                                        await supabase.from('notification_events').upsert({
+                                          id: `unassign-${client.petId}-${Date.now()}`,
+                                          type: 'vet_unassign',
+                                          timestamp: new Date().toISOString(),
+                                          data: {
+                                            petId: client.petId,
+                                            petName: client.petName,
+                                            ownerName: client.ownerName,
+                                            clientId: client.id,
+                                            vetName: prevVetName,
+                                          },
+                                        });
+                                        await supabase.from('notification_events').delete().eq('type', 'vet_assign').ilike('id', `assign-${client.petId}-%`);
+                                      } catch {}
+                                      window.dispatchEvent(new CustomEvent('notifCountChanged'));
                                     }
                                   }}
                                 >
@@ -596,7 +634,7 @@ export default function ClientsPage() {
       </div>
     </div>
 
-      <AddClientDialog open={addClientOpen} onOpenChange={setAddClientOpen} onSave={handleAddClient} />
+      <AddClientDialog open={addClientOpen} onOpenChange={(open) => { setAddClientOpen(open); if (!open) { setTimeout(() => { refetch(); window.dispatchEvent(new CustomEvent('notifCountChanged')); }, 300); } }} onSave={handleAddClient} />
     </>
   );
 }

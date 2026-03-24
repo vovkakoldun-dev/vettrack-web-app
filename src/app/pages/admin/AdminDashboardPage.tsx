@@ -13,6 +13,8 @@ import {
 import { useDashboardStats } from '../../hooks/useDashboardStats';
 import { useAppointments } from '../../hooks/useAppointments';
 import { useClients } from '../../hooks/useClients';
+import { supabase } from '../../../lib/supabase';
+import { useProfile } from '../../hooks/useProfile';
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -405,6 +407,9 @@ export default function AdminDashboardPage() {
   const navigate = useNavigate();
   const { overrides, setApptStatus } = useAppointmentStatus();
 
+  // ── Admin name from useProfile hook ──
+  const { profile: adminProfile } = useProfile('admin');
+
   // ── Supabase hooks ──────────────────────────────────────────
   const dashStats = useDashboardStats();
   const todayStr = useMemo(() => {
@@ -612,7 +617,7 @@ export default function AdminDashboardPage() {
       {/* Header */}
       <div style={{ marginBottom: '28px' }}>
         <h1 className="text-[var(--text-primary)]" style={{ marginBottom: '6px' }}>
-          Good morning, Sarah 👋
+          Good morning, {adminProfile.firstName || 'Sarah'} 👋
         </h1>
         <p className="text-[var(--text-secondary)]" style={{ fontSize: '16px' }}>
           Here's your clinic overview for today

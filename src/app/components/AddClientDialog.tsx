@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { Users, Loader2, Camera } from 'lucide-react';
 import type { AddClientValues } from '../hooks/useClients';
 import { supabase } from '../../lib/supabase';
@@ -15,6 +15,125 @@ interface AddClientDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSave?: (values: AddClientValues) => Promise<string | void>;
+}
+
+// Generate weight options: 0.5, 1.0, 1.5, ... up to 100 kg
+const WEIGHT_OPTIONS = Array.from({ length: 200 }, (_, i) => {
+  const val = (i + 1) * 0.5;
+  return { value: val.toString(), label: `${val} kg` };
+});
+
+function WeightPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  const filtered = useMemo(() => {
+    if (!search) return WEIGHT_OPTIONS;
+    return WEIGHT_OPTIONS.filter(w => w.value.startsWith(search) || w.label.includes(search));
+  }, [search]);
+
+  // Scroll to selected value when opening
+  useEffect(() => {
+    if (open && value && listRef.current) {
+      const timer = setTimeout(() => {
+        const idx = WEIGHT_OPTIONS.findIndex(w => w.value === value);
+        if (idx >= 0 && listRef.current) {
+          listRef.current.scrollTop = Math.max(0, idx * 36 - 72);
+        }
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [open, value]);
+
+  // Focus search input when opened
+  useEffect(() => {
+    if (open) setTimeout(() => inputRef.current?.focus(), 50);
+  }, [open]);
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Weight</p>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="border-input flex h-9 w-full min-w-0 rounded-md border px-3 py-1 text-base bg-input-background md:text-sm dark:bg-input/30"
+        style={{ textAlign: 'left', cursor: 'pointer', color: value ? 'var(--text-primary)' : 'var(--text-secondary)' }}
+      >
+        {value ? `${value} kg` : 'Select weight…'}
+        <svg className="ml-auto" style={{ width: '14px', height: '14px', opacity: 0.5, alignSelf: 'center' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      {open && (
+        <div
+          style={{
+            position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
+            marginTop: '4px', borderRadius: '8px', overflow: 'hidden',
+            border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-white)',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
+          }}
+        >
+          <div style={{ padding: '6px', borderBottom: '1px solid var(--border-color)' }}>
+            <input
+              ref={inputRef}
+              type="text"
+              inputMode="decimal"
+              placeholder="Search weight…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="border-input flex h-8 w-full min-w-0 rounded-md border px-3 py-1 text-sm bg-input-background dark:bg-input/30"
+              style={{ outline: 'none' }}
+            />
+          </div>
+          <div ref={listRef} style={{ maxHeight: '200px', overflowY: 'auto' }}>
+            {filtered.length === 0 ? (
+              <div style={{ padding: '12px', fontSize: '13px', color: 'var(--text-secondary)', textAlign: 'center' }}>
+                No match — type a custom value
+              </div>
+            ) : (
+              filtered.map(w => (
+                <button
+                  key={w.value}
+                  type="button"
+                  onClick={() => { onChange(w.value); setOpen(false); setSearch(''); }}
+                  style={{
+                    display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px',
+                    fontSize: '13px', fontWeight: w.value === value ? 600 : 400, cursor: 'pointer',
+                    backgroundColor: w.value === value ? '#2D6A4F15' : 'transparent',
+                    color: w.value === value ? 'var(--brand-green-text)' : 'var(--text-primary)',
+                    border: 'none', outline: 'none',
+                  }}
+                  className="hover:bg-[var(--surface-elevated)] transition-colors"
+                >
+                  {w.label}
+                </button>
+              ))
+            )}
+          </div>
+          {search && !WEIGHT_OPTIONS.find(w => w.value === search) && (
+            <div style={{ padding: '6px', borderTop: '1px solid var(--border-color)' }}>
+              <button
+                type="button"
+                onClick={() => { onChange(search); setOpen(false); setSearch(''); }}
+                className="hover:bg-[var(--surface-elevated)] transition-colors"
+                style={{
+                  display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px',
+                  fontSize: '13px', fontWeight: 500, cursor: 'pointer',
+                  color: 'var(--brand-green-text)', border: 'none', borderRadius: '6px',
+                  backgroundColor: 'transparent',
+                }}
+              >
+                Use "{search} kg"
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      {open && <div style={{ position: 'fixed', inset: 0, zIndex: 49 }} onClick={() => { setOpen(false); setSearch(''); }} />}
+    </div>
+  );
 }
 
 const EMPTY = {
@@ -87,10 +206,10 @@ export function AddClientDialog({ open, onOpenChange, onSave }: AddClientDialogP
           if (photoFile) {
             const ext = photoFile.name.split('.').pop() || 'jpg';
             const path = `${clientId}/${Date.now()}.${ext}`;
-            const { error: uploadErr } = await supabase.storage.from('pet-photos').upload(path, photoFile, { upsert: true });
+            const { error: uploadErr } = await supabase.storage.from('pet-images').upload(path, photoFile, { upsert: true, contentType: photoFile.type });
             if (!uploadErr) {
-              const { data: urlData } = supabase.storage.from('pet-photos').getPublicUrl(path);
-              photoUrl = urlData.publicUrl;
+              const { data: urlData } = supabase.storage.from('pet-images').getPublicUrl(path);
+              photoUrl = urlData.publicUrl + '?t=' + Date.now();
             }
           }
           const { error: petErr } = await supabase.from('pets').insert([{
@@ -105,7 +224,31 @@ export function AddClientDialog({ open, onOpenChange, onSave }: AddClientDialogP
             is_active: true,
             assigned_vet_id: form.assignedVetId || null,
           }]);
-          if (petErr) console.error('[AddClientDialog] pet insert error:', petErr);
+          if (petErr) {
+            console.error('[AddClientDialog] pet insert error:', petErr);
+          } else if (form.assignedVetId) {
+            // Store assignment event for doctor notification
+            try {
+              const vet = vets.find(v => v.id === form.assignedVetId);
+              const petRes = await supabase.from('pets').select('id').eq('client_id', clientId).eq('name', form.petName.trim()).limit(1).single();
+              const petId = petRes.data?.id || `new-${Date.now()}`;
+              await supabase.from('notification_events').upsert({
+                id: `assign-${petId}-${Date.now()}`,
+                type: 'vet_assign',
+                timestamp: new Date().toISOString(),
+                data: {
+                  petId,
+                  petName: form.petName.trim(),
+                  species: form.species,
+                  breed: form.breed || '',
+                  ownerName: form.ownerName.trim(),
+                  clientId,
+                  vetId: form.assignedVetId,
+                  vetName: vet?.name || '',
+                },
+              });
+            } catch {}
+          }
       }
 
       handleClose();
@@ -206,10 +349,7 @@ export function AddClientDialog({ open, onOpenChange, onSave }: AddClientDialogP
                 <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Date of Birth</p>
                 <Input type="date" value={form.dob} onChange={e => set('dob')(e.target.value)} />
               </div>
-              <div>
-                <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Weight</p>
-                <Input placeholder="e.g. 12.5 kg" value={form.weight} onChange={e => set('weight')(e.target.value)} />
-              </div>
+              <WeightPicker value={form.weight} onChange={set('weight')} />
               <div>
                 <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Assigned Doctor</p>
                 <Select value={form.assignedVetId} onValueChange={set('assignedVetId')}>

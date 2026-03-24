@@ -29,21 +29,20 @@ type DisplayAppt = {
 };
 
 function adaptAppt(a: AppointmentRow): DisplayAppt {
-  // Treat scheduled_at as UTC and display as-is (user enters local time, stored as UTC)
   const start = new Date(a.scheduled_at);
   const end = new Date(start.getTime() + (a.duration_minutes ?? 30) * 60000);
-  const fmtUTC = (d: Date) => {
-    let h = d.getUTCHours();
-    const m = d.getUTCMinutes();
+  const fmtLocal = (d: Date) => {
+    let h = d.getHours();
+    const m = d.getMinutes();
     const ampm = h >= 12 ? 'PM' : 'AM';
     if (h > 12) h -= 12;
     if (h === 0) h = 12;
     return `${h}:${m.toString().padStart(2, '0')} ${ampm}`;
   };
   const validStatuses = ['Confirmed', 'Pending', 'Completed', 'Cancelled', 'In Progress'];
-  const y = start.getUTCFullYear();
-  const mo = (start.getUTCMonth() + 1).toString().padStart(2, '0');
-  const da = start.getUTCDate().toString().padStart(2, '0');
+  const y = start.getFullYear();
+  const mo = (start.getMonth() + 1).toString().padStart(2, '0');
+  const da = start.getDate().toString().padStart(2, '0');
   return {
     id: a.id,
     petName: a.pets?.name ?? '—',
@@ -52,8 +51,8 @@ function adaptAppt(a: AppointmentRow): DisplayAppt {
     service: a.services?.name ?? a.reason ?? '—',
     vet: a.staff ? `Dr. ${a.staff.last_name}` : 'TBD',
     date: `${y}-${mo}-${da}`,
-    timeStart: fmtUTC(start),
-    timeEnd: fmtUTC(end),
+    timeStart: fmtLocal(start),
+    timeEnd: fmtLocal(end),
     status: (validStatuses.includes(a.status) ? a.status : 'Pending') as DisplayAppt['status'],
     petHealth: 'Healthy',
     duration: `${a.duration_minutes ?? 30} min`,
@@ -252,6 +251,9 @@ export default function AppointmentsPage() {
       prefillClientName?: string;
       prefillPetId?: string;
       prefillPetName?: string;
+      prefillVetId?: string;
+      prefillVetName?: string;
+      prefillDate?: string;
     } | null;
     if (state?.openNewAppt) {
       setTimeout(() => {
@@ -265,6 +267,16 @@ export default function AppointmentsPage() {
         if (state.prefillPetId) {
           setNewApptPetId(state.prefillPetId);
           setNewApptPet(state.prefillPetName || '');
+        }
+        // Pre-fill vet if passed from admin bookings day popup
+        if (state.prefillVetId) {
+          setNewApptVetId(state.prefillVetId);
+          setNewApptVetName(state.prefillVetName || '');
+          fetchVetTimeBlocks(state.prefillVetId);
+        }
+        // Pre-fill date if passed
+        if (state.prefillDate) {
+          setNewApptDate(state.prefillDate);
         }
       }, 0);
     }
@@ -462,7 +474,19 @@ export default function AppointmentsPage() {
     const dateAppts = appointments.filter(
       (a) => a.date === dateStr && a.status !== 'Cancelled' && (excludeId == null || a.id !== excludeId),
     );
-    const bookedTimes = new Map(dateAppts.map((a) => [a.timeStart, a]));
+    // Mark all slots that overlap with any appointment's full duration
+    const bookedTimes = new Map<string, DisplayAppt>();
+    dateAppts.forEach((a) => {
+      const startMin = (() => { const [tp, ap] = a.timeStart.split(' '); let [h, m] = tp.split(':').map(Number); if (ap === 'PM' && h !== 12) h += 12; if (ap === 'AM' && h === 12) h = 0; return h * 60 + m; })();
+      const dur = getDurationMin(a.timeStart, a.timeEnd);
+      SCHEDULE_SLOTS.forEach((slot) => {
+        const slotMin = (() => { const [tp, ap] = slot.split(' '); let [h, m] = tp.split(':').map(Number); if (ap === 'PM' && h !== 12) h += 12; if (ap === 'AM' && h === 12) h = 0; return h * 60 + m; })();
+        // Slot overlaps if it starts within the appointment's time range
+        if (slotMin >= startMin && slotMin < startMin + dur) {
+          bookedTimes.set(slot, a);
+        }
+      });
+    });
 
     // Check vet time blocks for this date
     const dateBlocks = vetTimeBlocks.filter((b) => b.date === dateStr);
@@ -1263,7 +1287,7 @@ export default function AppointmentsPage() {
                   {newApptClientId && (
                     <div>
                       <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Pet</p>
-                      <Select value={newApptPetId} onValueChange={setNewApptPetId}>
+                      <Select value={newApptPetId} onValueChange={(val) => { setNewApptPetId(val); const p = allPets.find(p => p.id === val); if (p) setNewApptPet(p.name); }}>
                         <SelectTrigger><SelectValue placeholder="Select pet…" /></SelectTrigger>
                         <SelectContent>
                           {allPets.filter(p => p.client_id === newApptClientId).map(p => (
@@ -1609,7 +1633,8 @@ export default function AppointmentsPage() {
                 if (savingAppt) return;
                 setSavingAppt(true);
                 try {
-                  const scheduled_at = `${newApptDate}T${newApptTime}:00`;
+                  const tzOffset = (() => { const off = new Date().getTimezoneOffset(); const sign = off <= 0 ? '+' : '-'; const h = String(Math.floor(Math.abs(off) / 60)).padStart(2, '0'); const m = String(Math.abs(off) % 60).padStart(2, '0'); return `${sign}${h}:${m}`; })();
+                  const scheduled_at = `${newApptDate}T${newApptTime}:00${tzOffset}`;
                   const durationMin = parseInt(newApptDuration) || 30;
 
                   let finalClientId = newApptClientId;
@@ -1659,6 +1684,7 @@ export default function AppointmentsPage() {
                   // Update pet's assigned vet when booking for returning patient
                   if (visitType === 'returning' && newApptVetId && finalPetId) {
                     await supabase.from('pets').update({ assigned_vet_id: newApptVetId }).eq('id', finalPetId);
+                    window.dispatchEvent(new CustomEvent('petDataChanged'));
                   }
 
                   await addAppointment({
@@ -1671,6 +1697,32 @@ export default function AppointmentsPage() {
                     notes: newApptNotes || undefined,
                     status: newApptStatus,
                   });
+
+                  // Store appointment notification for the assigned vet
+                  if (newApptVetId) {
+                    try {
+                      const petDisplayName = visitType === 'new' ? npPetName : newApptPet;
+                      const ownerDisplayName = visitType === 'new' ? npOwnerName : ownerSearch;
+                      await supabase.from('notification_events').upsert({
+                        id: `appt-assign-${finalPetId}-${Date.now()}`,
+                        type: 'appt_assign',
+                        timestamp: new Date().toISOString(),
+                        data: {
+                          petId: finalPetId,
+                          petName: petDisplayName,
+                          ownerName: ownerDisplayName,
+                          clientId: finalClientId,
+                          vetId: newApptVetId,
+                          vetName: newApptVetName,
+                          service: newApptService || 'Appointment',
+                          date: newApptDate,
+                          time: newApptTime,
+                        },
+                      });
+                      window.dispatchEvent(new Event('notifCountChanged'));
+                    } catch {}
+                  }
+
                   setDialogOpen(false);
                 } finally {
                   setSavingAppt(false);

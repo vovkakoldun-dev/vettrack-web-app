@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { supabase } from '../../lib/supabase';
+import { useAuth } from '../context/AuthContext';
+import { useProfile } from '../hooks/useProfile';
 import {
   Home, Calendar, CreditCard, MessageSquare, MessageCircle, Users, FileText, UserCircle,
   PawPrint, Sun, Moon, ChevronLeft, ChevronRight, LogOut, ChevronUp, Settings, CheckSquare,
@@ -48,18 +50,11 @@ const NAV_SECTIONS: NavSection[] = [
 export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTheme: () => void }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
+  const { signOut } = useAuth();
 
   const [collapsed, setCollapsed]     = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [adminPhoto, setAdminPhoto]   = useState(() => {
-    try { return localStorage.getItem('admin_profile_photo') || ''; } catch { return ''; }
-  });
-  const [adminName, setAdminName]     = useState(() => {
-    try {
-      const cached = JSON.parse(localStorage.getItem('admin_profile_settings') || '{}');
-      return (cached.firstName && cached.lastName) ? `${cached.firstName} ${cached.lastName}` : '';
-    } catch { return ''; }
-  });
+  const { profile: adminProfile } = useProfile('admin');
   const [sections, setSections]       = useState<NavSection[]>(NAV_SECTIONS);
 
   // ── Chat unread badge from Supabase (timestamp-based) ─────
@@ -125,56 +120,6 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
       ),
     } : s));
   }, [chatUnread]);
-  const adminInitials = adminName.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
-
-  // Fetch admin profile from Supabase on mount
-  useEffect(() => {
-    (async () => {
-      const { data } = await supabase
-        .from('staff')
-        .select('id, first_name, last_name, email, phone, photo_url, role')
-        .in('role', ['front_desk_manager', 'receptionist', 'clinic_manager', 'superadmin'])
-        .limit(1)
-        .single();
-      if (data) {
-        const name = (data.first_name && data.last_name) ? `${data.first_name} ${data.last_name}` : 'Sarah Mitchell';
-        setAdminName(name);
-        setAdminPhoto(data.photo_url || '');
-        // Cache in localStorage
-        localStorage.setItem('admin_profile_settings', JSON.stringify({
-          firstName: data.first_name || '',
-          lastName: data.last_name || '',
-          email: data.email || '',
-          phone: data.phone || '',
-        }));
-        if (data.photo_url) {
-          localStorage.setItem('admin_profile_photo', data.photo_url);
-        }
-      }
-    })();
-  }, []);
-
-  // Listen for admin photo changes from AdminSettingsPage
-  useEffect(() => {
-    const handlePhotoChanged = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      setAdminPhoto(detail?.photo_url || '');
-    };
-    window.addEventListener('adminPhotoChanged', handlePhotoChanged);
-    return () => window.removeEventListener('adminPhotoChanged', handlePhotoChanged);
-  }, []);
-
-  // Listen for admin profile changes from AdminSettingsPage
-  useEffect(() => {
-    const handleProfileChanged = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail?.firstName && detail?.lastName) {
-        setAdminName(`${detail.firstName} ${detail.lastName}`);
-      }
-    };
-    window.addEventListener('adminProfileChanged', handleProfileChanged);
-    return () => window.removeEventListener('adminProfileChanged', handleProfileChanged);
-  }, []);
 
   const profileRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -394,10 +339,10 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
               {/* Mini header */}
               <div className="border-b border-[var(--border-color)]" style={{ padding: '14px 16px' }}>
                 <div className="flex items-center gap-3">
-                  {adminPhoto ? (
+                  {adminProfile.avatarUrl ? (
                     <img
-                      src={adminPhoto}
-                      alt={adminName}
+                      src={adminProfile.avatarUrl}
+                      alt={adminProfile.fullName}
                       className="flex-shrink-0 object-cover"
                       style={{ width: '40px', height: '40px', borderRadius: '50%' }}
                     />
@@ -410,15 +355,15 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
                         fontSize: '14px',
                       }}
                     >
-                      {adminInitials}
+                      {adminProfile.initials}
                     </div>
                   )}
                   <div className="min-w-0">
                     <p className="text-[var(--text-primary)] truncate" style={{ fontSize: '14px', fontWeight: 600 }}>
-                      {adminName}
+                      {adminProfile.fullName}
                     </p>
                     <p className="text-[var(--text-secondary)] truncate" style={{ fontSize: '12px' }}>
-                      sarah.mitchell@vettrack.com
+                      {adminProfile.email}
                     </p>
                   </div>
                 </div>
@@ -436,7 +381,7 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
                 </button>
                 <div style={{ height: '1px', backgroundColor: 'var(--border-color)', margin: '4px 0' }} />
                 <button
-                  onClick={() => { setProfileOpen(false); navigate('/login'); }}
+                  onClick={async () => { setProfileOpen(false); await signOut(); navigate('/login'); }}
                   className="w-full flex items-center gap-3 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
                   style={{ borderRadius: '8px', padding: '9px 10px', fontSize: '14px', fontWeight: 500, color: '#d4183d' }}
                 >
@@ -450,7 +395,7 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
           {/* Trigger */}
           <button
             onClick={() => setProfileOpen(!profileOpen)}
-            title={collapsed ? adminName : undefined}
+            title={collapsed ? adminProfile.fullName : undefined}
             className={`w-full flex items-center transition-colors overflow-hidden ${profileOpen ? 'bg-[var(--surface-elevated)]' : 'hover:bg-[var(--surface-elevated)]'}`}
             style={{
               borderRadius: '8px',
@@ -459,10 +404,10 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
               gap:            collapsed ? 0 : '10px',
             }}
           >
-            {adminPhoto ? (
+            {adminProfile.avatarUrl ? (
               <img
-                src={adminPhoto}
-                alt={adminName}
+                src={adminProfile.avatarUrl}
+                alt={adminProfile.fullName}
                 className="flex-shrink-0 object-cover"
                 style={{ width: '36px', height: '36px', borderRadius: '50%' }}
               />
@@ -475,14 +420,14 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
                   fontSize: '13px',
                 }}
               >
-                {adminInitials}
+                {adminProfile.initials}
               </div>
             )}
             {!collapsed && (
               <>
                 <div className="flex-1 min-w-0 text-left">
                   <p className="text-[var(--text-primary)] truncate" style={{ fontSize: '14px', fontWeight: 600 }}>
-                    {adminName}
+                    {adminProfile.fullName}
                   </p>
                   <p className="text-[var(--text-secondary)] truncate" style={{ fontSize: '12px', fontWeight: 400 }}>
                     Front Desk Admin

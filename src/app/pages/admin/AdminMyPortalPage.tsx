@@ -15,6 +15,8 @@ import { Button } from '../../components/ui/button';
 import { Textarea } from '../../components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../../components/ui/dialog';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../../components/ui/select';
+import { supabase } from '../../../lib/supabase';
+import { useAuth } from '../../context/AuthContext';
 
 // ─── GlowStatCard infrastructure (mirrored from MyPortalPage) ─
 
@@ -276,11 +278,22 @@ function dateToStr(d: Date): string {
 
 // ─── Mock Data ────────────────────────────────────────────────
 
-const ADMIN_PROFILE = {
+type AdminProfile = {
+  name: string;
+  role: string;
+  email: string;
+  phone: string;
+  photo_url: string;
+  shift: string;
+  since: string;
+};
+
+const DEFAULT_ADMIN_PROFILE: AdminProfile = {
   name: 'Sarah Mitchell',
   role: 'Front Desk Admin',
   email: 'sarah.mitchell@vettrack.com',
   phone: '(555) 201-4400',
+  photo_url: '',
   shift: '8:00 AM – 5:00 PM',
   since: 'Jan 2022',
 };
@@ -367,9 +380,61 @@ const QUICK_ACTIONS = [
 // ─── Page ─────────────────────────────────────────────────────
 
 export default function AdminMyPortalPage() {
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [tasks, setTasks]   = useState<Task[]>(INITIAL_TASKS);
   const [newTask, setNewTask] = useState('');
+  const [ADMIN_PROFILE, setAdminProfile] = useState<AdminProfile>(DEFAULT_ADMIN_PROFILE);
+  const [profileLoading, setProfileLoading] = useState(true);
+
+  // Fetch admin profile from Supabase on mount
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, first_name, last_name, email, phone, avatar_url, role')
+        .eq('id', user.id)
+        .single();
+      if (data) {
+        setAdminProfile({
+          name: (data.first_name && data.last_name) ? `${data.first_name} ${data.last_name}` : 'Sarah Mitchell',
+          role: 'Front Desk Admin',
+          email: data.email || 'sarah.mitchell@vettrack.com',
+          phone: data.phone || '(555) 201-4400',
+          photo_url: data.avatar_url || '',
+          shift: '8:00 AM – 5:00 PM',
+          since: 'Jan 2022',
+        });
+      }
+      setProfileLoading(false);
+    })();
+  }, [user]);
+
+  // Listen for profile changes from settings pages → update admin profile card instantly
+  useEffect(() => {
+    const handleProfileChanged = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (!d) return;
+      setAdminProfile(prev => ({
+        ...prev,
+        name: (d.firstName && d.lastName) ? `${d.firstName} ${d.lastName}` : prev.name,
+        email: d.email ?? prev.email,
+        phone: d.phone ?? prev.phone,
+      }));
+    };
+    const handlePhotoChanged = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      const url = d?.photo_url ?? d?.avatar_url ?? '';
+      setAdminProfile(prev => ({ ...prev, photo_url: url }));
+    };
+    window.addEventListener('adminProfileChanged', handleProfileChanged);
+    window.addEventListener('adminPhotoChanged', handlePhotoChanged);
+    return () => {
+      window.removeEventListener('adminProfileChanged', handleProfileChanged);
+      window.removeEventListener('adminPhotoChanged', handlePhotoChanged);
+    };
+  }, []);
 
   // Schedule + PTO state
   const [selectedDate, setSelectedDate] = useState<Date>(new Date(2026, 2, 15));
@@ -443,6 +508,17 @@ export default function AdminMyPortalPage() {
   const ptoLeft = PTO_ALLOWANCE - ptoUsed;
   const sickLeft = SICK_ALLOWANCE - sickUsed;
 
+  if (profileLoading) {
+    return (
+      <div className="max-w-[1440px] mx-auto p-8 flex items-center justify-center" style={{ minHeight: '60vh' }}>
+        <div className="text-center">
+          <div className="w-8 h-8 border-3 border-[var(--border-color)] border-t-[var(--brand-green-text)] rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>Loading portal…</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-[1440px] mx-auto p-8">
 
@@ -454,9 +530,16 @@ export default function AdminMyPortalPage() {
         <div className="flex items-center gap-6">
           {/* Avatar with camera overlay */}
           <div style={{ position: 'relative', flexShrink: 0 }}>
-            <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'linear-gradient(135deg, #3B82F6, #6366F1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 700, color: '#fff' }}>
-              SM
-            </div>
+            {(() => {
+              const initials = ADMIN_PROFILE.name.split(' ').map(w => w[0]).join('').substring(0, 2);
+              return ADMIN_PROFILE.photo_url ? (
+                <img src={ADMIN_PROFILE.photo_url} alt={ADMIN_PROFILE.name} style={{ width: 64, height: 64, borderRadius: '50%', objectFit: 'cover' }} />
+              ) : (
+                <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'linear-gradient(135deg, #3B82F6, #6366F1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 700, color: '#fff' }}>
+                  {initials}
+                </div>
+              );
+            })()}
             <button
               title="Change photo"
               style={{ position: 'absolute', bottom: 0, right: 0, width: 22, height: 22, borderRadius: '50%', backgroundColor: '#2D6A4F', border: '2px solid var(--surface-white)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}

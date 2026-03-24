@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   TrendingUp, Clock, AlertCircle, CheckCircle2,
   Search, Download, Eye, Bell, FileText,
 } from 'lucide-react';
+import { supabase } from '../../../lib/supabase';
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -18,11 +19,7 @@ interface Invoice {
   status: InvoiceStatus;
 }
 
-// ─── Mock Data ────────────────────────────────────────────────
-
-const INVOICES: Invoice[] = []
-
-const ACTIVITY = []
+// ─── (data loaded from Supabase) ──────────────────────────────
 
 // ─── Status Badge ─────────────────────────────────────────────
 
@@ -80,6 +77,16 @@ function StatCard({
   );
 }
 
+// ─── Activity Feed ──────────────────────────────────────────
+
+const ACTIVITY = [
+  { id: 1, label: 'Payment', text: 'Payment of $120.00 received from Sarah Johnson', time: '10 min ago', icon: CheckCircle2, color: '#2D6A4F', bg: '#2D6A4F15' },
+  { id: 2, label: 'Invoice', text: 'Invoice #INV-0042 sent to Mark Davis', time: '25 min ago', icon: FileText, color: '#3B82F6', bg: '#3B82F615' },
+  { id: 3, label: 'Overdue', text: 'Invoice #INV-0038 is now overdue — Lisa Park', time: '1 hr ago', icon: AlertCircle, color: '#d4183d', bg: '#d4183d15' },
+  { id: 4, label: 'Payment', text: 'Payment of $85.00 received from Tom Wilson', time: '2 hrs ago', icon: CheckCircle2, color: '#2D6A4F', bg: '#2D6A4F15' },
+  { id: 5, label: 'Reminder', text: 'Payment reminder sent to Emily Carter', time: '3 hrs ago', icon: Bell, color: '#D97706', bg: '#F4A26115' },
+];
+
 // ─── Page ─────────────────────────────────────────────────────
 
 export default function AdminPaymentsPage() {
@@ -87,8 +94,30 @@ export default function AdminPaymentsPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo]   = useState('');
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
 
-  const filtered = INVOICES.filter(inv => {
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from('invoices')
+        .select('id, invoice_number, total, status, created_at, notes, clients(id, first_name, last_name), appointments(id, reason, pets(id, name))')
+        .order('created_at', { ascending: false });
+      if (data) {
+        const mapped: Invoice[] = data.map((inv: any) => ({
+          id: inv.invoice_number,
+          client: inv.clients ? `${inv.clients.first_name} ${inv.clients.last_name}` : '—',
+          pet: inv.appointments?.pets?.name ?? '—',
+          service: inv.appointments?.reason ?? inv.notes ?? '—',
+          date: new Date(inv.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+          amount: `$${inv.total?.toFixed(2) ?? '0.00'}`,
+          status: (inv.status || 'Pending') as InvoiceStatus,
+        }));
+        setInvoices(mapped);
+      }
+    })();
+  }, []);
+
+  const filtered = invoices.filter(inv => {
     const q = search.toLowerCase();
     const matchQ = !q || inv.client.toLowerCase().includes(q) || inv.pet.toLowerCase().includes(q) || inv.id.toLowerCase().includes(q);
     const matchS  = !statusFilter || inv.status === statusFilter;
@@ -303,7 +332,7 @@ export default function AdminPaymentsPage() {
         >
           <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
             Showing <strong style={{ color: 'var(--text-primary)' }}>{filtered.length}</strong> of{' '}
-            <strong style={{ color: 'var(--text-primary)' }}>{INVOICES.length}</strong> invoices
+            <strong style={{ color: 'var(--text-primary)' }}>{invoices.length}</strong> invoices
           </p>
         </div>
       </div>

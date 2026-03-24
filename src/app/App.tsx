@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { Routes, Route, useLocation, useNavigate } from 'react-router';
+import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router';
 import { Sidebar } from './components/Sidebar';
 import { AdminSidebar } from './components/AdminSidebar';
 import { useTheme } from './hooks/useTheme';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import DashboardPage from './pages/DashboardPage';
 import ClientsPage from './pages/ClientsPage';
 import ClientDetailPage from './pages/ClientDetailPage';
@@ -359,21 +360,73 @@ function SuperAdminApp() {
   );
 }
 
+// ─── Auth Loading Screen ──────────────────────────────────────
+
+function AuthLoading() {
+  return (
+    <div style={{
+      height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      backgroundColor: 'var(--bg-offwhite)',
+    }}>
+      <div style={{ textAlign: 'center' }}>
+        <div style={{
+          width: 44, height: 44, borderRadius: 12, margin: '0 auto 16px',
+          background: 'linear-gradient(135deg, #2D6A4F, #74C69D)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <PawPrint style={{ width: 24, height: 24, color: '#fff' }} />
+        </div>
+        <p style={{ fontSize: 14, color: 'var(--text-secondary)' }}>Loading…</p>
+      </div>
+    </div>
+  );
+}
+
+// ─── Protected Route ──────────────────────────────────────────
+
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth();
+
+  if (loading) return <AuthLoading />;
+  if (!user) return <Navigate to="/login" replace />;
+
+  return <>{children}</>;
+}
+
+// ─── Public Route (redirect if already logged in) ─────────────
+
+function PublicRoute({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth();
+
+  if (loading) return <AuthLoading />;
+  if (user) return <Navigate to="/" replace />;
+
+  return <>{children}</>;
+}
+
 // ─── Root ─────────────────────────────────────────────────────
 
-export default function App() {
+function AppRoutes() {
   return (
     <AppointmentStatusProvider>
     <ActiveVisitProvider>
       <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/sysadmin" element={<SystemAdminPage />} />
-        <Route path="/superadmin/*" element={<SuperAdminApp />} />
-        <Route path="/admin/*" element={<AdminApp />} />
-        <Route path="/owner/*" element={<OwnerApp />} />
-        <Route path="/*" element={<MainApp />} />
+        <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
+        <Route path="/sysadmin" element={<ProtectedRoute><SystemAdminPage /></ProtectedRoute>} />
+        <Route path="/superadmin/*" element={<ProtectedRoute><SuperAdminApp /></ProtectedRoute>} />
+        <Route path="/admin/*" element={<ProtectedRoute><AdminApp /></ProtectedRoute>} />
+        <Route path="/owner/*" element={<ProtectedRoute><OwnerApp /></ProtectedRoute>} />
+        <Route path="/*" element={<ProtectedRoute><MainApp /></ProtectedRoute>} />
       </Routes>
     </ActiveVisitProvider>
     </AppointmentStatusProvider>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppRoutes />
+    </AuthProvider>
   );
 }

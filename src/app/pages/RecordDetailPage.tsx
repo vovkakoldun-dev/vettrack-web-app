@@ -1,5 +1,6 @@
 import { useParams, Link, useLocation } from 'react-router';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { supabase } from '../../lib/supabase';
 import {
   ArrowLeft, Download, Share2, Printer, Copy, Mail, Check,
   Heart, Thermometer, Activity, Wind, Gauge, Scale,
@@ -431,8 +432,104 @@ export default function RecordDetailPage() {
   const { id } = useParams();
   const { pathname } = useLocation();
   const basePath = pathname.startsWith('/admin') ? '/admin/records' : '/records';
-  const record = DETAILED_RECORDS[Number(id)] ?? DEFAULT_RECORD;
+  const mockRecord = Number(id) ? DETAILED_RECORDS[Number(id)] : null;
+  const [realRecord, setRealRecord] = useState<DetailedRecord | null>(null);
+  const [loading, setLoading] = useState(!mockRecord);
+
+  useEffect(() => {
+    if (mockRecord || !id || !id.includes('-')) return;
+    (async () => {
+      setLoading(true);
+      const { data } = await supabase
+        .from('medical_records')
+        .select('*, pets(id, name, species, breed, photo_url, date_of_birth, sex, weight_kg, color, microchip_no), clients(id, first_name, last_name, email, phone), staff!medical_records_vet_id_fkey(id, first_name, last_name)')
+        .eq('id', id)
+        .single();
+      if (data) {
+        const visitDate = new Date(data.visit_date + 'T12:00:00');
+        setRealRecord({
+          id: 0,
+          recordNumber: data.record_number,
+          patient: (() => {
+            const pet = data.pets;
+            let age = '—';
+            let dobStr = '—';
+            if (pet?.date_of_birth) {
+              const dob = new Date(pet.date_of_birth + 'T12:00:00');
+              dobStr = dob.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+              const now = new Date();
+              const years = now.getFullYear() - dob.getFullYear();
+              const months = now.getMonth() - dob.getMonth();
+              const totalMonths = years * 12 + months;
+              age = totalMonths >= 12 ? `${Math.floor(totalMonths / 12)} years, ${totalMonths % 12} months` : `${totalMonths} months`;
+            }
+            const weightKg = pet?.weight_kg;
+            const weightStr = weightKg ? `${weightKg} kg (${(weightKg * 2.205).toFixed(1)} lbs)` : '—';
+            return {
+              name: pet?.name ?? '—',
+              species: pet?.species ?? '—',
+              breed: pet?.breed ?? '—',
+              dob: dobStr,
+              age,
+              sex: pet?.sex ?? '—',
+              weight: weightStr,
+              microchip: pet?.microchip_no ?? '—',
+              color: pet?.color ?? '—',
+              image: pet?.photo_url ?? '',
+            };
+          })(),
+          owner: {
+            name: data.clients ? `${data.clients.first_name} ${data.clients.last_name}` : '—',
+            email: data.clients?.email ?? '—',
+            phone: data.clients?.phone ?? '—',
+            address: '—',
+          },
+          visit: {
+            date: visitDate.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
+            time: data.visit_time ?? '—',
+            reason: data.reason ?? '—',
+            vet: data.staff ? `Dr. ${data.staff.first_name} ${data.staff.last_name}` : '—',
+            vetLicense: '—',
+            clinic: 'HugoIT Veterinary Clinic',
+            clinicAddress: '—',
+            clinicPhone: '—',
+            duration: data.duration_minutes ? `${data.duration_minutes} minutes` : '—',
+            recordType: (data.record_type || 'Visit') as RecordType,
+            status: (data.status || 'Final') as RecordStatus,
+          },
+          vitals: { weight: '—', temperature: '—', heartRate: '—', respiratoryRate: '—', bloodPressure: '—', bodyConditionScore: '—', painScore: '—', hydrationStatus: '—' },
+          diagnosis: { primary: data.clinical_notes || '—', secondary: [], differentials: [], notes: '', icdCodes: [] },
+          treatmentPlan: { procedures: [], instructions: '', restrictions: [], homeCarePlan: '' },
+          medications: [],
+          labResults: [],
+          followUp: {
+            nextVisitDate: data.follow_up_date ?? '—',
+            nextVisitReason: data.follow_up_reason ?? '—',
+            notes: data.follow_up_notes ?? '',
+            reminderSet: false,
+          },
+          createdAt: new Date(data.created_at).toLocaleString(),
+          lastModified: new Date(data.updated_at).toLocaleString(),
+          modifiedBy: '—',
+        });
+      }
+      setLoading(false);
+    })();
+  }, [id, mockRecord]);
+
+  const record = mockRecord || realRecord || DEFAULT_RECORD;
   const [linkCopied, setLinkCopied] = useState(false);
+
+  if (loading) {
+    return (
+      <div className="max-w-[1200px] mx-auto p-8 flex items-center justify-center" style={{ minHeight: '60vh' }}>
+        <div className="text-center">
+          <div className="w-8 h-8 border-3 border-[var(--border-color)] border-t-[var(--brand-green-text)] rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>Loading record…</p>
+        </div>
+      </div>
+    );
+  }
 
   const typeStyle = recordTypeColors[record.visit.recordType];
   const sttStyle = statusColors[record.visit.status];
@@ -516,7 +613,11 @@ export default function RecordDetailPage() {
         <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6" style={{ borderRadius: '12px' }}>
           <SectionHeader icon={User} title="Patient Information" />
           <div className="flex items-center gap-4 mb-4">
-            <img src={record.patient.image} alt={record.patient.name} className="w-16 h-16 object-cover" style={{ borderRadius: '9999px' }} />
+            {record.patient.image ? (
+              <img src={record.patient.image} alt={record.patient.name} className="w-16 h-16 object-cover" style={{ borderRadius: '9999px' }} />
+            ) : (
+              <div className="w-16 h-16 flex items-center justify-center text-white font-bold flex-shrink-0" style={{ borderRadius: '9999px', backgroundColor: '#2D6A4F', fontSize: '18px' }}>{record.patient.name.slice(0, 2).toUpperCase()}</div>
+            )}
             <div>
               <p className="text-[var(--text-primary)]" style={{ fontSize: '20px', fontWeight: 700 }}>{record.patient.name}</p>
               <p className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>{record.patient.species} • {record.patient.breed}</p>

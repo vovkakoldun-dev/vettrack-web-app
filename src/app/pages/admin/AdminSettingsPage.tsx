@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   User, Bell, Palette, Shield,
   Camera, Save, Eye, EyeOff, Trash2, LogOut,
@@ -8,9 +8,10 @@ import {
   ChevronsUpDown, Check, Plug, RefreshCw, ExternalLink,
   Copy, RotateCcw, Webhook, Zap, FlaskConical,
 } from 'lucide-react';
+import { supabase } from '../../../lib/supabase';
+import { useAuth } from '../../context/AuthContext';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
-import { Textarea } from '../../components/ui/textarea';
 import { Switch } from '../../components/ui/switch';
 import { Separator } from '../../components/ui/separator';
 import { Badge } from '../../components/ui/badge';
@@ -18,6 +19,7 @@ import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '../../components/ui/select';
 import { Avatar, AvatarImage, AvatarFallback } from '../../components/ui/avatar';
+import { updateProfile, uploadAvatar, removeAvatar } from '../../hooks/useProfile';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -669,23 +671,80 @@ function IntegrationsSection() {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function AdminSettingsPage() {
+  const { user } = useAuth();
   const [activeSection, setActiveSection] = useState<SettingsSection>('profile');
   const [savedSection, setSavedSection] = useState<SettingsSection | null>(null);
 
-  const handleSave = (section: SettingsSection) => {
+  const [staffId, setStaffId] = useState<string | null>(null);
+
+  const handleSave = async (section: SettingsSection) => {
+    if (section === 'profile' && staffId) {
+      // Save to Supabase
+      await updateProfile(staffId, { first_name: firstName, last_name: lastName, email, phone });
+
+      const profileData = { firstName, lastName, email, phone, location };
+      window.dispatchEvent(new CustomEvent('adminProfileChanged', { detail: profileData }));
+    }
     setSavedSection(section);
     setTimeout(() => setSavedSection(null), 3000);
   };
 
   // ── Profile state ──────────────────────────────────────────────────────────
-  const [firstName, setFirstName] = useState('Sarah');
-  const [lastName, setLastName] = useState('Mitchell');
-  const [email, setEmail] = useState('sarah.mitchell@vettrack.com');
-  const [phone, setPhone] = useState('(555) 789-0123');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [location, setLocation] = useState('Austin, TX');
-  const [bio, setBio] = useState(
-    'Front desk administrator with 4 years managing clinic operations, scheduling, and client communications.'
-  );
+
+  // ── Profile photo state & handlers ────────────────────────────────────────
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const [adminPhoto, setAdminPhoto] = useState('');
+
+  // ── Fetch admin profile from Supabase on mount ────────────────────────────
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, first_name, last_name, email, phone, avatar_url, role')
+        .eq('id', user.id)
+        .single();
+      if (data) {
+        setStaffId(data.id);
+        setFirstName(data.first_name || '');
+        setLastName(data.last_name || '');
+        setEmail(data.email || '');
+        setPhone(data.phone || '');
+        setAdminPhoto(data.avatar_url || '');
+      }
+    })();
+  }, [user]);
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      if (!staffId) return;
+      const publicUrl = await uploadAvatar(staffId, file, 'admin');
+      setAdminPhoto(publicUrl);
+    } catch (err: any) {
+      alert(err.message);
+    }
+    if (photoInputRef.current) photoInputRef.current.value = '';
+  };
+
+  const handleRemovePhoto = async () => {
+    if (!adminPhoto) return;
+    if (!confirm('Remove your profile photo?')) return;
+    if (!staffId) return;
+    try {
+      await removeAvatar(staffId, 'admin');
+      setAdminPhoto('');
+    } catch (err: any) {
+      console.error('Delete error:', err);
+    }
+    if (photoInputRef.current) photoInputRef.current.value = '';
+  };
 
   // ── Notification state ─────────────────────────────────────────────────────
   const [notifs, setNotifs] = useState({
@@ -811,21 +870,40 @@ export default function AdminSettingsPage() {
                 <p className="text-[var(--text-secondary)] mb-5" style={{ fontSize: '14px' }}>
                   This is shown on your appointments, records, and client portal.
                 </p>
+                <input
+                  type="file"
+                  ref={photoInputRef}
+                  className="hidden"
+                  accept="image/*"
+                  onChange={handlePhotoUpload}
+                />
                 <div className="flex items-center gap-5">
                   <Avatar className="w-20 h-20">
-                    <AvatarImage
-                      src="https://images.unsplash.com/photo-1640161415278-a5ac46f82d04?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjB2ZXRlcmluYXJpYW4lMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyODYxNTB8MA&ixlib=rb-4.1.0&q=80&w=400"
-                      alt="Sarah Mitchell"
-                      className="object-cover"
-                    />
+                    {adminPhoto ? (
+                      <AvatarImage
+                        src={adminPhoto}
+                        alt="Sarah Mitchell"
+                        className="object-cover"
+                      />
+                    ) : null}
                     <AvatarFallback>SM</AvatarFallback>
                   </Avatar>
                   <div className="space-y-2">
-                    <Button variant="outline" size="sm">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => { if (photoInputRef.current) { photoInputRef.current.value = ''; photoInputRef.current.click(); } }}
+                    >
                       <Camera className="w-4 h-4" />
                       Upload new photo
                     </Button>
-                    <Button variant="ghost" size="sm" className="text-[#d4183d] hover:text-[#d4183d]">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-[#d4183d] hover:text-[#d4183d]"
+                      onClick={handleRemovePhoto}
+                      disabled={!adminPhoto}
+                    >
                       <Trash2 className="w-4 h-4" />
                       Remove photo
                     </Button>
@@ -845,7 +923,7 @@ export default function AdminSettingsPage() {
               <SectionCard>
                 <h3 className="text-[var(--text-primary)] mb-1">Personal information</h3>
                 <p className="text-[var(--text-secondary)] mb-2" style={{ fontSize: '14px' }}>
-                  Update your name, contact details, and bio.
+                  Update your name and contact details.
                 </p>
                 <Separator className="mb-2" />
 
@@ -866,18 +944,6 @@ export default function AdminSettingsPage() {
 
                 <FieldRow label="Location">
                   <Input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="City, State" />
-                </FieldRow>
-
-                <FieldRow label="Bio" hint="Shown on the client portal">
-                  <Textarea
-                    value={bio}
-                    onChange={(e) => setBio(e.target.value)}
-                    className="min-h-[100px]"
-                    placeholder="Write a short bio..."
-                  />
-                  <p className="text-[var(--text-secondary)] mt-1.5" style={{ fontSize: '12px' }}>
-                    {bio.length}/300 characters
-                  </p>
                 </FieldRow>
 
                 <SaveBar onSave={() => handleSave('profile')} saved={savedSection === 'profile'} />
