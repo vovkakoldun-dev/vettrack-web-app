@@ -133,6 +133,9 @@ export default function VisitPage() {
   const [realAppt, setRealAppt] = useState<MockAppt | null>(null);
   const [loadingAppt, setLoadingAppt] = useState(!mockAppt);
 
+  // IDs for linking tasks to real DB records
+  const [apptIds, setApptIds] = useState<{ petId?: string; clientId?: string; staffId?: string }>({});
+
   useEffect(() => {
     if (mockAppt || !id) return;
     (async () => {
@@ -169,6 +172,11 @@ export default function VisitPage() {
           vet: data.staff ? `Dr. ${data.staff.first_name} ${data.staff.last_name}` : '—',
           status: (data.status as any) ?? 'In Progress',
           notes: data.notes ?? '',
+        });
+        setApptIds({
+          petId: data.pets?.id,
+          clientId: data.clients?.id,
+          staffId: data.staff?.id,
         });
       }
       setLoadingAppt(false);
@@ -1018,11 +1026,9 @@ export default function VisitPage() {
                     status: 'Pending',
                     due_date: t.dueDate || today,
                     due_time: t.dueTime || null,
-                    pet_name: appt.petName,
-                    pet_species: appt.species || '—',
-                    owner_name: appt.ownerName,
-                    owner_phone: '',
-                    assigned_by: (appt.vet && appt.vet !== '—') ? appt.vet : 'Dr. Volodymyr Koldun',
+                    pet_id: apptIds.petId || null,
+                    client_id: apptIds.clientId || null,
+                    assigned_by_id: apptIds.staffId || null,
                     visit_date: today,
                     doctor_notes: t.notes,
                     tags: [],

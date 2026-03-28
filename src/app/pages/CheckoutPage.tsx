@@ -127,6 +127,7 @@ export default function CheckoutPage() {
   const mockAppt = MOCK_APPOINTMENTS.find((a) => String(a.id) === id);
   const [realAppt, setRealAppt] = useState<MockAppt | null>(null);
   const [loadingAppt, setLoadingAppt] = useState(!mockAppt);
+  const [apptIds, setApptIds] = useState<{ petId?: string; clientId?: string; staffId?: string }>({});
 
   useEffect(() => {
     if (mockAppt || !id) return;
@@ -164,6 +165,11 @@ export default function CheckoutPage() {
           vet: data.staff ? `Dr. ${data.staff.first_name} ${data.staff.last_name}` : '—',
           status: (data.status as any) ?? 'In Progress',
           notes: data.notes ?? '',
+        });
+        setApptIds({
+          petId: data.pets?.id,
+          clientId: data.clients?.id,
+          staffId: data.staff?.id,
         });
       }
       setLoadingAppt(false);
@@ -758,6 +764,11 @@ export default function CheckoutPage() {
                 await supabase.from('appointments').update({ status: 'Completed' }).eq('id', id);
               }
 
+              // Persist pet health status to client profile
+              if (apptIds.clientId) {
+                await supabase.from('clients').update({ health_status: petHealthStatus }).eq('id', apptIds.clientId);
+              }
+
               // Create a "Ready for Billing" front-desk task
               if (appt) {
                 try {
@@ -771,11 +782,9 @@ export default function CheckoutPage() {
                     status: 'Pending',
                     due_date: today,
                     due_time: new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
-                    pet_name: appt.petName,
-                    pet_species: appt.species || '—',
-                    owner_name: appt.ownerName,
-                    owner_phone: '',
-                    assigned_by: (appt.vet && appt.vet !== '—') ? appt.vet : 'Dr. Volodymyr Koldun',
+                    pet_id: apptIds.petId || null,
+                    client_id: apptIds.clientId || null,
+                    assigned_by_id: apptIds.staffId || null,
                     visit_date: today,
                     doctor_notes: `Visit completed. Invoice total: $${grandTotal.toFixed(2)} (Services: $${totalServices.toFixed(2)}, Medications: $${totalMeds.toFixed(2)}). Please process payment at the front desk. Health status: ${petHealthStatus}.`,
                     tags: ['Billing', 'Visit Complete'],

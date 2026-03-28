@@ -102,15 +102,48 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean): Promise<Notific
   const notifications: Notification[] = [];
   // IDs use DB record IDs for stability (must match Sidebar computation)
 
-  // ── 1. Today's upcoming appointments ──────────────────────
-  const { data: todayAppointments } = await supabase
-    .from('appointments')
-    .select('id, scheduled_at, duration_minutes, status, reason, pets(id, name, species, breed), clients(id, first_name, last_name), staff(id, first_name, last_name)')
-    .gte('scheduled_at', `${today}T00:00:00`)
-    .lte('scheduled_at', `${today}T23:59:59`)
-    .in('status', ['Scheduled', 'Confirmed'])
-    .order('scheduled_at', { ascending: true });
+  // ── Fire all queries in parallel ───────────────────────────
+  const [
+    { data: todayAppointments },
+    { data: completedAppointments },
+    { data: cancelledAppointments },
+    { data: vaccinesDue },
+    { data: newClients },
+    { data: noShowAppointments },
+    ...rest
+  ] = await Promise.all([
+    supabase.from('appointments')
+      .select('id, scheduled_at, duration_minutes, status, reason, pets(id, name, species, breed), clients(id, first_name, last_name), staff(id, first_name, last_name)')
+      .gte('scheduled_at', `${today}T00:00:00`).lte('scheduled_at', `${today}T23:59:59`)
+      .in('status', ['Scheduled', 'Confirmed']).order('scheduled_at', { ascending: true }),
+    supabase.from('appointments')
+      .select('id, scheduled_at, status, reason, pets(id, name, species, breed), clients(id, first_name, last_name)')
+      .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`).lt('scheduled_at', `${today}T00:00:00`)
+      .eq('status', 'Completed').order('scheduled_at', { ascending: false }).limit(10),
+    supabase.from('appointments')
+      .select('id, scheduled_at, reason, pets(id, name), clients(id, first_name, last_name)')
+      .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`).eq('status', 'Cancelled')
+      .order('scheduled_at', { ascending: false }).limit(5),
+    supabase.from('vaccinations')
+      .select('id, vaccine_name, next_due_date, administered_date, pets(id, name, species, breed)')
+      .not('next_due_date', 'is', null).lte('next_due_date', thirtyDaysFromNowStr)
+      .order('next_due_date', { ascending: true }).limit(10),
+    supabase.from('clients')
+      .select('id, first_name, last_name, created_at')
+      .gte('created_at', `${sevenDaysAgoStr}T00:00:00`)
+      .order('created_at', { ascending: false }).limit(5),
+    supabase.from('appointments')
+      .select('id, scheduled_at, reason, pets(id, name), clients(id, first_name, last_name)')
+      .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`).eq('status', 'No Show')
+      .order('scheduled_at', { ascending: false }).limit(5),
+    ...(!isAdmin ? [
+      supabase.from('notification_events').select('*')
+        .gte('timestamp', new Date(now.getTime() - 7 * 86400000).toISOString()),
+    ] : []),
+  ]);
+  const notifEvents = !isAdmin ? (rest[0] as any)?.data : null;
 
+  // ── 1. Today's upcoming appointments ──────────────────────
   if (todayAppointments) {
     for (const appt of todayAppointments) {
       const pet = appt.pets as { id: string; name: string; species: string; breed: string | null } | null;
@@ -156,15 +189,6 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean): Promise<Notific
   }
 
   // ── 2. Recently completed appointments (last 7 days) ──────
-  const { data: completedAppointments } = await supabase
-    .from('appointments')
-    .select('id, scheduled_at, status, reason, pets(id, name, species, breed), clients(id, first_name, last_name)')
-    .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`)
-    .lt('scheduled_at', `${today}T00:00:00`)
-    .eq('status', 'Completed')
-    .order('scheduled_at', { ascending: false })
-    .limit(10);
-
   if (completedAppointments) {
     for (const appt of completedAppointments) {
       const pet = appt.pets as { id: string; name: string; species: string; breed: string | null } | null;
@@ -189,14 +213,6 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean): Promise<Notific
   }
 
   // ── 3. Cancelled appointments (last 7 days) ───────────────
-  const { data: cancelledAppointments } = await supabase
-    .from('appointments')
-    .select('id, scheduled_at, reason, pets(id, name), clients(id, first_name, last_name)')
-    .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`)
-    .eq('status', 'Cancelled')
-    .order('scheduled_at', { ascending: false })
-    .limit(5);
-
   if (cancelledAppointments) {
     for (const appt of cancelledAppointments) {
       const pet = appt.pets as { id: string; name: string } | null;
@@ -220,14 +236,6 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean): Promise<Notific
   }
 
   // ── 4. Vaccines due / overdue ─────────────────────────────
-  const { data: vaccinesDue } = await supabase
-    .from('vaccinations')
-    .select('id, vaccine_name, next_due_date, administered_date, pets(id, name, species, breed)')
-    .not('next_due_date', 'is', null)
-    .lte('next_due_date', thirtyDaysFromNowStr)
-    .order('next_due_date', { ascending: true })
-    .limit(10);
-
   if (vaccinesDue) {
     for (const vax of vaccinesDue) {
       const pet = vax.pets as { id: string; name: string; species: string; breed: string | null } | null;
@@ -269,24 +277,15 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean): Promise<Notific
   }
 
   // ── 5. New clients registered (last 7 days) ───────────────
-  const { data: newClients } = await supabase
-    .from('clients')
-    .select('id, first_name, last_name, created_at')
-    .gte('created_at', `${sevenDaysAgoStr}T00:00:00`)
-    .order('created_at', { ascending: false })
-    .limit(5);
-
   if (newClients) {
     for (const client of newClients) {
       const ownerLabel = `${client.first_name} ${client.last_name}`;
-      const createdDate = new Date(client.created_at);
-      const isRecent = (now.getTime() - createdDate.getTime()) < 86400000; // within 24h
 
       notifications.push({
         id: `client-${client.id}`,
         category: 'Patient',
         title: `New client registered — ${ownerLabel}`,
-        description: `${ownerLabel} has been added to the system on ${createdDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}. Review their profile and assign to a veterinarian.`,
+        description: `${ownerLabel} has been added to the system on ${new Date(client.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}. Review their profile and assign to a veterinarian.`,
         time: formatRelativeTime(client.created_at),
         timeISO: client.created_at,
         read: false,
@@ -298,14 +297,6 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean): Promise<Notific
   }
 
   // ── 6. No-show appointments (last 7 days) ─────────────────
-  const { data: noShowAppointments } = await supabase
-    .from('appointments')
-    .select('id, scheduled_at, reason, pets(id, name), clients(id, first_name, last_name)')
-    .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`)
-    .eq('status', 'No Show')
-    .order('scheduled_at', { ascending: false })
-    .limit(5);
-
   if (noShowAppointments) {
     for (const appt of noShowAppointments) {
       const pet = appt.pets as { id: string; name: string } | null;
@@ -329,15 +320,8 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean): Promise<Notific
   }
 
   // ── 7. New patients assigned to current vet (doctor portal only) ──
-  if (!isAdmin) {
-  // Fetch notification events from Supabase
-  const sevenDaysAgo = new Date(now.getTime() - 7 * 86400000).toISOString();
-  const { data: notifEvents } = await supabase
-    .from('notification_events')
-    .select('*')
-    .gte('timestamp', sevenDaysAgo);
-
-  for (const evt of (notifEvents || [])) {
+  if (!isAdmin && notifEvents) {
+  for (const evt of notifEvents) {
     const d = evt.data as any;
     if (evt.type === 'vet_assign') {
       const petLabel = `${d.petName}${d.breed ? ` (${d.breed})` : ''}`;
