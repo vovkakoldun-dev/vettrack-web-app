@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useProfile } from '../hooks/useProfile';
+import { showToast } from './ToastNotification';
 import {
   Home, Users, Calendar, FileText, Settings, PawPrint,
   UserCircle, Bell, FlaskConical, Sun, Moon, Syringe,
@@ -58,7 +59,7 @@ const INITIAL_SECTIONS: NavSection[] = [
 export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTheme: () => void }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
-  const { signOut } = useAuth();
+  const { signOut, user } = useAuth();
 
   const [collapsed, setCollapsed]     = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -128,6 +129,16 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
 
       const unread = allIds.filter(id => !dismissedSet.has(id) && !readSet.has(id)).length;
 
+      // Show toast when notification count increases
+      if (prevNotifCountRef.current >= 0 && unread > prevNotifCountRef.current && pathname !== '/notifications') {
+        showToast({
+          type: 'notification',
+          title: 'New notification',
+          message: `You have ${unread} unread notification${unread > 1 ? 's' : ''}`,
+          link: '/notifications',
+        });
+      }
+      prevNotifCountRef.current = unread;
       setNotifCount(unread);
     } catch {}
   };
@@ -150,57 +161,78 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
     return () => window.removeEventListener('notifCountChanged', handler);
   }, []);
 
-  // ── Chat unread badge from Supabase (timestamp-based) ─────
+  // ── Chat unread badge from Supabase (all conversations) ──────────
   const [chatUnread, setChatUnread] = useState(0);
-  const doctorStaffIdRef = useRef('');
-  const myNameRef = useRef('');
-  const chatReadAtRef = useRef('1970-01-01T00:00:00Z');
+  const prevChatCountRef = useRef(-1);
+  const prevNotifCountRef = useRef(-1);
 
   useEffect(() => {
+    if (!user) return;
     let mounted = true;
     let interval: ReturnType<typeof setInterval>;
 
     async function checkChatUnread() {
-      if (!mounted || !myNameRef.current) return;
-      const { count } = await supabase
-        .from('chat_messages')
-        .select('id', { count: 'exact', head: true })
-        .eq('conversation', 'admin-doctor')
-        .neq('sender_name', myNameRef.current)
-        .gt('created_at', chatReadAtRef.current);
-      // Show 1 if any unread messages exist (1 conversation), not total message count
-      if (mounted) setChatUnread((count && count > 0) ? 1 : 0);
+      if (!mounted) return;
+      // Get all conversations where user is a participant
+      const { data: parts } = await supabase
+        .from('conversation_participants')
+        .select('conversation_id, last_read_at')
+        .eq('profile_id', user!.id);
+      if (!parts || parts.length === 0) { if (mounted) setChatUnread(0); return; }
+
+      let totalUnread = 0;
+      for (const part of parts) {
+        const readAt = part.last_read_at || '1970-01-01T00:00:00Z';
+        const { count } = await supabase
+          .from('messages')
+          .select('id', { count: 'exact', head: true })
+          .eq('conversation_id', part.conversation_id)
+          .neq('sender_id', user!.id)
+          .gt('created_at', readAt);
+        totalUnread += (count || 0);
+      }
+
+      const c = totalUnread > 0 ? totalUnread : 0;
+      // Show toast when new message detected
+      if (mounted && c > 0 && prevChatCountRef.current === 0 && pathname !== '/chat') {
+        // Fetch latest unread message across all conversations
+        for (const part of parts) {
+          const readAt = part.last_read_at || '1970-01-01T00:00:00Z';
+          const { data: latest } = await supabase
+            .from('messages')
+            .select('sender_id, content, profiles:profiles!messages_sender_id_fkey(first_name, last_name)')
+            .eq('conversation_id', part.conversation_id)
+            .neq('sender_id', user!.id)
+            .gt('created_at', readAt)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+          if (latest && mounted) {
+            const p = (latest as any).profiles;
+            const senderName = p ? `${p.first_name || ''} ${p.last_name || ''}`.trim() : 'New message';
+            showToast({
+              type: 'chat',
+              title: senderName,
+              message: latest.content || 'Sent a message',
+              link: '/chat',
+            });
+            break; // Only show one toast
+          }
+        }
+      }
+      if (mounted) { prevChatCountRef.current = c; setChatUnread(c); }
     }
 
-    // Fetch doctor staff ID + chat_read_at + name FIRST, then start polling
-    (async () => {
-      const { data } = await supabase
-        .from('staff')
-        .select('id, first_name, last_name, chat_read_at')
-        .in('role', ['veterinarian', 'senior_veterinarian', 'lead_vet_tech'])
-        .limit(1)
-        .single();
-      if (data && mounted) {
-        doctorStaffIdRef.current = data.id;
-        myNameRef.current = `Dr. ${data.first_name || ''} ${data.last_name || ''}`.trim();
-        chatReadAtRef.current = data.chat_read_at || '1970-01-01T00:00:00Z';
-      }
-      if (!mounted) return;
-      checkChatUnread();
-      interval = setInterval(checkChatUnread, 3000);
-    })();
+    checkChatUnread();
+    interval = setInterval(checkChatUnread, 3000);
 
     return () => { mounted = false; if (interval) clearInterval(interval); };
-  }, [pathname]);
+  }, [pathname, user]);
 
   // Listen for chat read events from ChatPage
   useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail?.chat_read_at) {
-        chatReadAtRef.current = detail.chat_read_at;
-        setChatUnread(0);
-      }
+    const handler = () => {
+      setChatUnread(0);
     };
     window.addEventListener('doctorChatRead', handler);
     return () => window.removeEventListener('doctorChatRead', handler);
@@ -332,7 +364,7 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
       </button>
 
       {/* ── Navigation ──────────────────────────────────────────────────────── */}
-      <nav className="flex-1 overflow-y-auto overflow-x-hidden" style={{ padding: '12px 8px' }}>
+      <nav className="flex-1" style={{ padding: '12px 8px 12px 14px', overflowY: 'auto' }}>
         {sections.map((section, si) => {
           const isBeingDragged = dragSectionIndex.current === si && isDraggingSection;
           const isDropTarget   = dragOverSection === si && !isBeingDragged;
@@ -393,6 +425,33 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
 
                   return (
                     <li key={item.name} style={{ position: 'relative', marginBottom: '2px' }}>
+                      {isActive && (
+                        <>
+                          <span style={{
+                            position: 'absolute',
+                            left: '-6px',
+                            top: '18%',
+                            bottom: '18%',
+                            width: '4px',
+                            borderRadius: '3px',
+                            backgroundColor: 'var(--brand-green-text)',
+                            boxShadow: '0 0 12px 3px var(--brand-green-text)',
+                            zIndex: 2,
+                          }} />
+                          <span style={{
+                            position: 'absolute',
+                            left: 0,
+                            top: 0,
+                            bottom: 0,
+                            width: '40%',
+                            background: 'radial-gradient(ellipse at -5% 50%, var(--brand-green-text) 0%, transparent 65%)',
+                            opacity: 0.15,
+                            pointerEvents: 'none',
+                            borderRadius: '8px 0 0 8px',
+                            zIndex: 1,
+                          }} />
+                        </>
+                      )}
                       <Link
                         to={item.path}
                         draggable={false}

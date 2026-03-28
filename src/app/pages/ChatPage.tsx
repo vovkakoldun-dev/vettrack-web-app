@@ -1,14 +1,15 @@
-import { useState, useRef, useEffect } from 'react';
-import { supabase } from '../../lib/supabase';
-import { useAuth } from '../context/AuthContext';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   MessageSquare,
+  Search,
   Send,
   Paperclip,
   Smile,
   Check,
 } from 'lucide-react';
 import { Input } from '../components/ui/input';
+import { supabase } from '../../lib/supabase';
+import { useAuth } from '../context/AuthContext';
 
 // ─── Emoji picker data ────────────────────────────────────────────────────────
 
@@ -21,13 +22,9 @@ const EMOJI_GROUPS = [
   { label: 'Objects', emojis: ['⭐','✨','🔥','💯','✅','❌','⚠️','📌','📎','🔒','🔓','💡','📋','📝','🗓️','⏰','📞','💬','📧','🔔'] },
 ];
 
-const ORG_ID = '00000000-0000-0000-0000-000000000001';
-const CONVERSATION_KEY = 'admin-doctor';
-// Doctor name is now dynamic — fetched from the logged-in user's profile
-
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Message = {
+type DisplayMessage = {
   id: string;
   from: 'me' | 'them';
   text: string;
@@ -35,9 +32,38 @@ type Message = {
   imageUrl?: string;
 };
 
+type ConversationItem = {
+  id: string;
+  otherProfileId: string;
+  otherName: string;
+  otherRole: string;
+  otherAvatarUrl: string;
+  lastMessage: string;
+  lastMessageTime: Date | null;
+  lastMessageIsMe: boolean;
+  unread: number;
+};
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const TODAY = new Date();
+
+const ROLE_LABELS: Record<string, string> = {
+  veterinarian: 'Veterinarian',
+  senior_veterinarian: 'Senior Veterinarian',
+  clinic_manager: 'Clinic Manager',
+  front_desk_manager: 'Front Desk Manager',
+  receptionist: 'Receptionist',
+  superadmin: 'Super Administrator',
+};
+
+const AVATAR_COLORS: string[] = ['#2D6A4F', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261', '#06B6D4', '#DC2626', '#0891B2', '#7C3AED', '#059669'];
+
+function getAvatarColor(id: string): string {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = id.charCodeAt(i) + ((hash << 5) - hash);
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
 
 function getInitials(name: string): string {
   return name.split(' ').map((w) => w[0]).join('').toUpperCase().slice(0, 2);
@@ -59,9 +85,18 @@ function getDateLabel(date: Date): string {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
+function getTimeLabel(date: Date | null): string {
+  if (!date) return '';
+  if (isSameDay(date, TODAY)) return formatTime(date);
+  const yesterday = new Date(TODAY);
+  yesterday.setDate(TODAY.getDate() - 1);
+  if (isSameDay(date, yesterday)) return 'Yesterday';
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
 // ─── Avatar component ─────────────────────────────────────────────────────────
 
-function Avatar({ name, color, size = 40, online, photoUrl }: { name: string; color: string; size?: number; online?: boolean; photoUrl?: string }) {
+function ChatAvatar({ name, color, size = 40, online, photoUrl }: { name: string; color: string; size?: number; online?: boolean; photoUrl?: string }) {
   const dotSize = size <= 28 ? 8 : 10;
   return (
     <div style={{ position: 'relative', flexShrink: 0, width: size, height: size }}>
@@ -97,14 +132,13 @@ function DateSeparator({ label }: { label: string }) {
 
 export default function ChatPage() {
   const { user } = useAuth();
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [conversations, setConversations] = useState<ConversationItem[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [selected, setSelected] = useState(false);
-  const doctorStaffId = useRef('');
-  const myNameRef = useRef('Doctor');
-  const chatReadAtRef = useRef('1970-01-01T00:00:00Z');
-  const [chatReadAtLoaded, setChatReadAtLoaded] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [loadingConvs, setLoadingConvs] = useState(true);
+  const [loadingMsgs, setLoadingMsgs] = useState(false);
 
   // Image attachment state
   const chatImageRef = useRef<HTMLInputElement>(null);
@@ -112,131 +146,151 @@ export default function ChatPage() {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
 
-  // Fetch actual admin name/photo from profiles table (not the logged-in user)
-  const [adminName, setAdminName] = useState('Front Desk Admin');
-  const [adminPhoto, setAdminPhoto] = useState('');
-  const [adminLoaded, setAdminLoaded] = useState(false);
-
-  // Fetch doctor staff ID + chat_read_at + admin profile on mount
-  useEffect(() => {
-    (async () => {
-      const { data: docData } = await supabase
-        .from('staff')
-        .select('id, chat_read_at')
-        .in('role', ['veterinarian', 'senior_veterinarian', 'lead_vet_tech'])
-        .limit(1)
-        .single();
-      if (docData) {
-        doctorStaffId.current = docData.id;
-        chatReadAtRef.current = docData.chat_read_at || '1970-01-01T00:00:00Z';
-      }
-      setChatReadAtLoaded(true);
-
-      // Fetch logged-in doctor's name for sender_name
-      if (user) {
-        const { data: myProfile } = await supabase
-          .from('profiles')
-          .select('first_name, last_name')
-          .eq('id', user.id)
-          .single();
-        if (myProfile) {
-          myNameRef.current = `Dr. ${myProfile.first_name || ''} ${myProfile.last_name || ''}`.trim();
-        }
-      }
-
-      // Fetch admin profile (the person the doctor chats with)
-      const { data: adminData } = await supabase
-        .from('profiles')
-        .select('first_name, last_name, avatar_url')
-        .in('role', ['front_desk_manager', 'receptionist', 'clinic_manager'])
-        .limit(1)
-        .single();
-      if (adminData) {
-        const name = `${adminData.first_name || ''} ${adminData.last_name || ''}`.trim();
-        if (name) setAdminName(name);
-        if (adminData.avatar_url) setAdminPhoto(adminData.avatar_url);
-      }
-      setAdminLoaded(true);
-    })();
-  }, [user]);
-
   // Emoji picker
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [emojiTab, setEmojiTab] = useState(0);
   const emojiRef = useRef<HTMLDivElement>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const lastReadAtRef = useRef<string | null>(null);
 
-  // ── Fetch messages from Supabase ──────────────────────────
-  async function fetchMessages() {
+  const selectedConv = conversations.find((c) => c.id === selectedId) ?? null;
+
+  // ── Load conversations ──────────────────────────────────────────────────────
+
+  const fetchConversations = useCallback(async () => {
+    if (!user) return;
+    const { data: parts } = await supabase
+      .from('conversation_participants')
+      .select('conversation_id')
+      .eq('profile_id', user.id);
+    if (!parts || parts.length === 0) { setLoadingConvs(false); return; }
+
+    const convIds = parts.map(p => p.conversation_id);
+    const items: ConversationItem[] = [];
+
+    for (const convId of convIds) {
+      const { data: otherParts } = await supabase
+        .from('conversation_participants')
+        .select('profile_id, last_read_at, profiles:profiles!conversation_participants_profile_id_fkey(id, first_name, last_name, role, avatar_url)')
+        .eq('conversation_id', convId)
+        .neq('profile_id', user.id);
+      const other = otherParts?.[0];
+      if (!other) continue;
+      const otherProfile = other.profiles as any;
+
+      const { data: myPart } = await supabase
+        .from('conversation_participants')
+        .select('last_read_at')
+        .eq('conversation_id', convId)
+        .eq('profile_id', user.id)
+        .single();
+
+      const { data: lastMsgs } = await supabase
+        .from('messages')
+        .select('content, sender_id, created_at')
+        .eq('conversation_id', convId)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      const lastMsg = lastMsgs?.[0];
+
+      let unread = 0;
+      if (myPart?.last_read_at) {
+        const { count } = await supabase
+          .from('messages')
+          .select('id', { count: 'exact', head: true })
+          .eq('conversation_id', convId)
+          .neq('sender_id', user.id)
+          .gt('created_at', myPart.last_read_at);
+        unread = count || 0;
+      } else {
+        const { count } = await supabase
+          .from('messages')
+          .select('id', { count: 'exact', head: true })
+          .eq('conversation_id', convId)
+          .neq('sender_id', user.id);
+        unread = count || 0;
+      }
+
+      const otherName = otherProfile
+        ? `${otherProfile.first_name} ${otherProfile.last_name}`.trim()
+        : 'Unknown';
+
+      items.push({
+        id: convId,
+        otherProfileId: otherProfile?.id || '',
+        otherName,
+        otherRole: ROLE_LABELS[otherProfile?.role] || otherProfile?.role || '',
+        otherAvatarUrl: otherProfile?.avatar_url || '',
+        lastMessage: lastMsg?.content || '',
+        lastMessageTime: lastMsg ? new Date(lastMsg.created_at) : null,
+        lastMessageIsMe: lastMsg?.sender_id === user.id,
+        unread,
+      });
+    }
+
+    items.sort((a, b) => {
+      if (!a.lastMessageTime) return 1;
+      if (!b.lastMessageTime) return -1;
+      return b.lastMessageTime.getTime() - a.lastMessageTime.getTime();
+    });
+
+    setConversations(items);
+    setLoadingConvs(false);
+  }, [user]);
+
+  useEffect(() => { fetchConversations(); }, [fetchConversations]);
+
+  // ── Load messages for selected conversation ─────────────────────────────────
+
+  const fetchMessages = useCallback(async (convId: string) => {
+    if (!user) return;
+    setLoadingMsgs(true);
     const { data } = await supabase
-      .from('chat_messages')
-      .select('id, sender_name, content, image_url, created_at')
-      .eq('conversation', CONVERSATION_KEY)
+      .from('messages')
+      .select('id, content, sender_id, image_url, created_at')
+      .eq('conversation_id', convId)
       .order('created_at', { ascending: true });
 
     if (data) {
-      const mapped: Message[] = data.map((m: any) => ({
+      setMessages(data.map(m => ({
         id: m.id,
-        from: m.sender_name === myNameRef.current ? 'me' as const : 'them' as const,
+        from: m.sender_id === user.id ? 'me' as const : 'them' as const,
         text: m.content,
         timestamp: new Date(m.created_at),
         imageUrl: m.image_url || undefined,
-      }));
-      setMessages(mapped);
+      })));
+    }
+    setLoadingMsgs(false);
+  }, [user]);
 
-      // Track unread — count admin messages newer than chat_read_at
-      if (selected) {
-        setUnreadCount(0);
-      } else {
-        const readAt = new Date(chatReadAtRef.current).getTime();
-        const unread = data.filter((m: any) => m.sender_name !== myNameRef.current && new Date(m.created_at).getTime() > readAt).length;
-        setUnreadCount(unread);
-      }
+  // ── Select conversation ─────────────────────────────────────────────────────
+
+  async function handleSelectConversation(convId: string) {
+    setSelectedId(convId);
+    setInputValue('');
+    clearImagePreview();
+    await fetchMessages(convId);
+
+    if (user) {
+      const now = new Date().toISOString();
+      lastReadAtRef.current = now;
+      await supabase
+        .from('conversation_participants')
+        .update({ last_read_at: now })
+        .eq('conversation_id', convId)
+        .eq('profile_id', user.id);
+
+      setConversations(prev => prev.map(c =>
+        c.id === convId ? { ...c, unread: 0 } : c
+      ));
+
+      // Notify Sidebar to clear badge
+      window.dispatchEvent(new CustomEvent('doctorChatRead', { detail: { last_read_at: now } }));
     }
   }
 
-  // Initial fetch + polling — wait for chat_read_at to load first to avoid flash
-  useEffect(() => {
-    if (!chatReadAtLoaded) return;
-    fetchMessages();
-    const interval = setInterval(fetchMessages, 2000);
-    return () => clearInterval(interval);
-  }, [selected, chatReadAtLoaded]);
-
-  // Auto-scroll to bottom
-  useEffect(() => {
-    if (messagesEndRef.current && selected) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [messages.length, selected]);
-
-  // Close emoji picker on outside click
-  useEffect(() => {
-    function onOutside(e: MouseEvent) {
-      if (emojiRef.current && !emojiRef.current.contains(e.target as Node)) setEmojiOpen(false);
-    }
-    if (emojiOpen) document.addEventListener('mousedown', onOutside);
-    return () => document.removeEventListener('mousedown', onOutside);
-  }, [emojiOpen]);
-
-  function handleSelect() {
-    setSelected(true);
-    setUnreadCount(0);
-    // Update chat_read_at in Supabase
-    const now = new Date().toISOString();
-    chatReadAtRef.current = now;
-    if (doctorStaffId.current) {
-      supabase.from('staff').update({ chat_read_at: now }).eq('id', doctorStaffId.current).then();
-    }
-    // Notify Sidebar to clear badge instantly
-    window.dispatchEvent(new CustomEvent('doctorChatRead', { detail: { chat_read_at: now } }));
-  }
-
-  function insertEmoji(emoji: string) {
-    setInputValue((prev) => prev + emoji);
-    setEmojiOpen(false);
-  }
+  // ── Image handling ─────────────────────────────────────────────────────────
 
   function handleImageSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -252,9 +306,11 @@ export default function ChatPage() {
     setImagePreview(null);
   }
 
+  // ── Send message ────────────────────────────────────────────────────────────
+
   async function handleSend() {
-    if (!inputValue.trim() && !imageFile) return;
-    const text = inputValue.trim();
+    if ((!inputValue.trim() && !imageFile) || !selectedId || !user) return;
+    const content = inputValue.trim();
     setInputValue('');
     const pendingFile = imageFile;
     const pendingPreview = imagePreview;
@@ -262,16 +318,23 @@ export default function ChatPage() {
     setImagePreview(null);
 
     // Optimistic update
-    const optimistic: Message = {
-      id: `opt-${Date.now()}`,
+    const tempId = `temp-${Date.now()}`;
+    const now = new Date();
+    setMessages(prev => [...prev, {
+      id: tempId,
       from: 'me',
-      text: text || (pendingFile ? '📷 Image' : ''),
-      timestamp: new Date(),
+      text: content || (pendingFile ? '📷 Image' : ''),
+      timestamp: now,
       imageUrl: pendingPreview || undefined,
-    };
-    setMessages(prev => [...prev, optimistic]);
+    }]);
 
-    // Upload image to chat-images bucket if present
+    setConversations(prev => prev.map(c =>
+      c.id === selectedId
+        ? { ...c, lastMessage: content || '📷 Image', lastMessageTime: now, lastMessageIsMe: true }
+        : c
+    ));
+
+    // Upload image if present
     let imageUrl: string | null = null;
     if (pendingFile) {
       setUploadingImage(true);
@@ -288,117 +351,218 @@ export default function ChatPage() {
     }
 
     // Insert into Supabase
-    await supabase.from('chat_messages').insert([{
-      organization_id: ORG_ID,
-      conversation: CONVERSATION_KEY,
-      sender_name: myNameRef.current,
-      content: text || (imageUrl ? '📷 Image' : ''),
-      image_url: imageUrl,
-    }]);
+    const { data } = await supabase
+      .from('messages')
+      .insert({
+        conversation_id: selectedId,
+        sender_id: user.id,
+        content: content || (imageUrl ? '📷 Image' : ''),
+        image_url: imageUrl,
+      })
+      .select('id')
+      .single();
+
+    if (data) {
+      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, id: data.id, imageUrl: imageUrl || m.imageUrl } : m));
+    }
+
+    // Update my last_read_at
+    const nowStr = now.toISOString();
+    lastReadAtRef.current = nowStr;
+    await supabase
+      .from('conversation_participants')
+      .update({ last_read_at: nowStr })
+      .eq('conversation_id', selectedId)
+      .eq('profile_id', user.id);
+  }
+
+  // ── Realtime subscription ───────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!user) return;
+    const channel = supabase
+      .channel('doctor-chat')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
+        const msg = payload.new as any;
+        if (msg.conversation_id === selectedId && msg.sender_id !== user.id) {
+          setMessages(prev => [...prev, {
+            id: msg.id,
+            from: 'them',
+            text: msg.content,
+            timestamp: new Date(msg.created_at),
+            imageUrl: msg.image_url || undefined,
+          }]);
+          const now = new Date().toISOString();
+          lastReadAtRef.current = now;
+          supabase
+            .from('conversation_participants')
+            .update({ last_read_at: now })
+            .eq('conversation_id', selectedId)
+            .eq('profile_id', user.id)
+            .then();
+        }
+        fetchConversations();
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [user, selectedId, fetchConversations]);
+
+  // ── Auto-scroll ─────────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages.length]);
+
+  // Close emoji picker on outside click
+  useEffect(() => {
+    function onOutside(e: MouseEvent) {
+      if (emojiRef.current && !emojiRef.current.contains(e.target as Node)) setEmojiOpen(false);
+    }
+    if (emojiOpen) document.addEventListener('mousedown', onOutside);
+    return () => document.removeEventListener('mousedown', onOutside);
+  }, [emojiOpen]);
+
+  function insertEmoji(emoji: string) {
+    setInputValue((prev) => prev + emoji);
+    setEmojiOpen(false);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
   }
 
+  // Filter conversations by search
+  const filteredConversations = conversations.filter((c) => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase();
+    return c.otherName.toLowerCase().includes(q) || c.otherRole.toLowerCase().includes(q) || c.lastMessage.toLowerCase().includes(q);
+  });
+
   // Group messages by date
-  function groupMessagesByDate(msgs: Message[]): { label: string; msgs: Message[] }[] {
-    const groups: { label: string; msgs: Message[] }[] = [];
+  function groupMessagesByDate(msgs: DisplayMessage[]): { label: string; msgs: DisplayMessage[] }[] {
+    const groups: { label: string; msgs: DisplayMessage[] }[] = [];
     for (const msg of msgs) {
       const label = getDateLabel(msg.timestamp);
       const last = groups[groups.length - 1];
-      if (last && last.label === label) last.msgs.push(msg);
-      else groups.push({ label, msgs: [msg] });
+      if (last && last.label === label) { last.msgs.push(msg); } else { groups.push({ label, msgs: [msg] }); }
     }
     return groups;
   }
 
-  function getLastMineIndex(msgs: Message[]): number {
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      if (msgs[i].from === 'me') return i;
-    }
+  function getLastMineIndex(msgs: DisplayMessage[]): number {
+    for (let i = msgs.length - 1; i >= 0; i--) { if (msgs[i].from === 'me') return i; }
     return -1;
   }
-
-  // Preview for conversation list
-  const lastMsg = messages[messages.length - 1];
-  const previewText = lastMsg ? (lastMsg.from === 'me' ? 'You: ' : '') + lastMsg.text : 'Start a conversation...';
-  const previewTime = lastMsg ? (isSameDay(lastMsg.timestamp, TODAY) ? formatTime(lastMsg.timestamp) : lastMsg.timestamp.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })) : '';
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', backgroundColor: 'var(--bg-offwhite)' }}>
-      {/* ── Left panel ── */}
+
+      {/* ── Left panel ──────────────────────────────────────────────────────── */}
       <div style={{ width: '320px', flexShrink: 0, display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: 'var(--surface-white)', borderRight: '1px solid var(--border-color)' }}>
+
         {/* Panel header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 20px 16px', flexShrink: 0 }}>
           <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>Messages</h2>
         </div>
 
-        {/* Conversation list — single item (wait for admin data) */}
+        {/* Search */}
+        <div style={{ padding: '0 16px 12px', flexShrink: 0 }}>
+          <div style={{ position: 'relative' }}>
+            <Search style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', width: '15px', height: '15px', color: 'var(--text-secondary)', pointerEvents: 'none' }} />
+            <Input
+              type="text"
+              placeholder="Search conversations..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{ paddingLeft: '32px', fontSize: '13px', height: '36px' }}
+            />
+          </div>
+        </div>
+
+        {/* Conversation list */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
-          {adminLoaded && (
-            <button
-              onClick={handleSelect}
-              style={{
-                width: '100%', display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px',
-                backgroundColor: selected ? 'var(--surface-elevated)' : 'transparent',
-                border: 'none', cursor: 'pointer', textAlign: 'left', transition: 'background-color 0.15s',
-              }}
-              onMouseEnter={(e) => { if (!selected) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--surface-elevated)'; }}
-              onMouseLeave={(e) => { if (!selected) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}
-            >
-              <Avatar name={adminName} color="#7C3AED" size={40} online photoUrl={adminPhoto} />
+          {loadingConvs ? (
+            <div style={{ padding: '32px', textAlign: 'center' }}>
+              <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Loading conversations...</p>
+            </div>
+          ) : filteredConversations.length === 0 ? (
+            <div style={{ padding: '32px', textAlign: 'center' }}>
+              <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>No conversations yet</p>
+            </div>
+          ) : filteredConversations.map((conv) => {
+            const isActive = conv.id === selectedId;
+            const previewText = conv.lastMessage
+              ? (conv.lastMessageIsMe ? `You: ${conv.lastMessage}` : conv.lastMessage)
+              : 'Start a conversation...';
 
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
-                  <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '160px' }}>
-                    {adminName}
-                  </span>
-                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)', flexShrink: 0, marginLeft: '8px' }}>
-                    {previewTime}
-                  </span>
-                </div>
+            return (
+              <button
+                key={conv.id}
+                onClick={() => handleSelectConversation(conv.id)}
+                style={{
+                  width: '100%', display: 'flex', alignItems: 'center', gap: '12px',
+                  padding: '12px 16px',
+                  backgroundColor: isActive ? 'var(--surface-elevated)' : 'transparent',
+                  border: 'none', cursor: 'pointer', textAlign: 'left', transition: 'background-color 0.15s',
+                }}
+                onMouseEnter={(e) => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--surface-elevated)'; }}
+                onMouseLeave={(e) => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}
+              >
+                <ChatAvatar name={conv.otherName} color={getAvatarColor(conv.otherProfileId)} size={40} photoUrl={conv.otherAvatarUrl} />
 
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '1px', display: 'block' }}>Front Desk Admin</span>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: '13px', color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0 }}>
-                    {previewText}
-                  </span>
-                  {unreadCount > 0 && (
-                    <span style={{ flexShrink: 0, marginLeft: '8px', backgroundColor: '#d4183d', color: '#fff', fontSize: '11px', fontWeight: 700, borderRadius: '999px', minWidth: '20px', height: '20px', padding: '0 6px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                      {unreadCount > 99 ? '99+' : unreadCount}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
+                    <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '160px' }}>
+                      {conv.otherName}
                     </span>
-                  )}
+                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)', flexShrink: 0, marginLeft: '8px' }}>
+                      {getTimeLabel(conv.lastMessageTime)}
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '1px', display: 'block' }}>
+                      {conv.otherRole}
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: '13px', color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0 }}>
+                      {previewText}
+                    </span>
+                    {conv.unread > 0 && (
+                      <span style={{ flexShrink: 0, marginLeft: '8px', backgroundColor: '#d4183d', color: '#fff', fontSize: '11px', fontWeight: 700, borderRadius: '999px', minWidth: '20px', height: '20px', padding: '0 6px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {conv.unread > 99 ? '99+' : conv.unread}
+                      </span>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </button>
-          )}
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      {/* ── Right panel ── */}
+      {/* ── Right panel ─────────────────────────────────────────────────────── */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', backgroundColor: 'var(--surface-white)' }}>
-        {selected ? (
+        {selectedConv ? (
           <>
             {/* Chat header */}
             <div style={{ height: '64px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--surface-white)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <Avatar name={adminName} color="#7C3AED" size={40} online photoUrl={adminPhoto} />
+                <ChatAvatar name={selectedConv.otherName} color={getAvatarColor(selectedConv.otherProfileId)} size={40} photoUrl={selectedConv.otherAvatarUrl} />
                 <div>
-                  <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.3 }}>{adminName}</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Front Desk Admin</span>
-                    <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>·</span>
-                    <span style={{ fontSize: '12px', fontWeight: 500, color: '#22c55e' }}>Online</span>
+                  <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.3 }}>
+                    {selectedConv.otherName}
                   </div>
+                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                    {selectedConv.otherRole}
+                  </span>
                 </div>
               </div>
               <div />
@@ -406,28 +570,32 @@ export default function ChatPage() {
 
             {/* Messages area */}
             <div style={{ flex: 1, overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column' }}>
-              {messages.length === 0 && (
+              {loadingMsgs ? (
                 <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <p style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>No messages yet. Say hello!</p>
+                  <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Loading messages...</p>
                 </div>
-              )}
-              {(() => {
+              ) : messages.length === 0 ? (
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '8px' }}>
+                  <MessageSquare style={{ width: 40, height: 40, color: 'var(--border-color)' }} />
+                  <p style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>No messages yet. Start the conversation!</p>
+                </div>
+              ) : (() => {
                 const groups = groupMessagesByDate(messages);
-                const lastMineIdx = getLastMineIndex(messages);
+                const lastMineIndex = getLastMineIndex(messages);
 
                 return groups.map((group) => (
                   <div key={group.label}>
                     <DateSeparator label={group.label} />
                     {group.msgs.map((msg) => {
                       const globalIndex = messages.findIndex((m) => m.id === msg.id);
-                      const isLastMine = globalIndex === lastMineIdx;
+                      const isLastMine = globalIndex === lastMineIndex;
                       const isMe = msg.from === 'me';
 
                       return (
                         <div key={msg.id} style={{ display: 'flex', flexDirection: isMe ? 'row-reverse' : 'row', alignItems: 'flex-end', gap: '8px', marginBottom: '8px' }}>
                           {!isMe && (
-                            <div style={{ flexShrink: 0, marginBottom: isLastMine ? '20px' : '0' }}>
-                              <Avatar name={adminName} color="#7C3AED" size={28} photoUrl={adminPhoto} />
+                            <div style={{ flexShrink: 0 }}>
+                              <ChatAvatar name={selectedConv.otherName} color={getAvatarColor(selectedConv.otherProfileId)} size={28} photoUrl={selectedConv.otherAvatarUrl} />
                             </div>
                           )}
 
@@ -474,7 +642,7 @@ export default function ChatPage() {
                   <button
                     onClick={clearImagePreview}
                     style={{ position: 'absolute', top: '-6px', right: '-6px', width: '20px', height: '20px', borderRadius: '50%', backgroundColor: '#d4183d', color: '#fff', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 700 }}
-                  >×</button>
+                  >x</button>
                 </div>
                 <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{imageFile?.name}</span>
               </div>
@@ -508,13 +676,7 @@ export default function ChatPage() {
                 <button
                   title="Emoji"
                   onClick={() => setEmojiOpen((v) => !v)}
-                  style={{
-                    width: '36px', height: '36px', borderRadius: '8px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: emojiOpen ? 'var(--surface-elevated)' : 'transparent',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    cursor: 'pointer', color: 'var(--text-secondary)', transition: 'background-color 0.15s',
-                  }}
+                  style={{ width: '36px', height: '36px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: emojiOpen ? 'var(--surface-elevated)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-secondary)', transition: 'background-color 0.15s' }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--surface-elevated)')}
                   onMouseLeave={(e) => { if (!emojiOpen) e.currentTarget.style.backgroundColor = 'transparent'; }}
                 >
@@ -525,28 +687,14 @@ export default function ChatPage() {
                   <div style={{ position: 'absolute', bottom: 'calc(100% + 8px)', right: 0, width: '420px', backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)', borderRadius: '12px', boxShadow: '0 8px 24px rgba(0,0,0,0.14)', zIndex: 40, overflow: 'hidden' }}>
                     <div style={{ display: 'flex', borderBottom: '1px solid var(--border-color)', padding: '8px 8px 0', gap: '2px' }}>
                       {EMOJI_GROUPS.map((g, i) => (
-                        <button
-                          key={g.label}
-                          onClick={() => setEmojiTab(i)}
-                          style={{
-                            flex: 1, padding: '6px 4px', borderRadius: '6px 6px 0 0', border: 'none',
-                            cursor: 'pointer', fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap',
-                            backgroundColor: emojiTab === i ? 'var(--surface-elevated)' : 'transparent',
-                            color: emojiTab === i ? 'var(--text-primary)' : 'var(--text-secondary)',
-                            borderBottom: emojiTab === i ? '2px solid #2D6A4F' : '2px solid transparent',
-                            transition: 'all 0.15s',
-                          }}
-                        >
+                        <button key={g.label} onClick={() => setEmojiTab(i)} style={{ flex: 1, padding: '6px 4px', borderRadius: '6px 6px 0 0', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap', backgroundColor: emojiTab === i ? 'var(--surface-elevated)' : 'transparent', color: emojiTab === i ? 'var(--text-primary)' : 'var(--text-secondary)', borderBottom: emojiTab === i ? '2px solid #2D6A4F' : '2px solid transparent', transition: 'all 0.15s' }}>
                           {g.label}
                         </button>
                       ))}
                     </div>
-                    <div style={{ padding: '12px', display: 'grid', gridTemplateColumns: 'repeat(10, 1fr)', gap: '4px' }}>
-                      {EMOJI_GROUPS[emojiTab].emojis.map((emoji) => (
-                        <button
-                          key={emoji}
-                          onClick={() => insertEmoji(emoji)}
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '24px', padding: '6px', borderRadius: '8px', lineHeight: 1, transition: 'background-color 0.1s' }}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(10, 1fr)', gap: '2px', padding: '12px 8px', maxHeight: '200px', overflowY: 'auto' }}>
+                      {EMOJI_GROUPS[emojiTab].emojis.map((emoji, i) => (
+                        <button key={`${emoji}-${i}`} onClick={() => insertEmoji(emoji)} style={{ width: '36px', height: '36px', borderRadius: '8px', border: 'none', backgroundColor: 'transparent', cursor: 'pointer', fontSize: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background-color 0.15s' }}
                           onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--surface-elevated)')}
                           onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
                         >
@@ -561,12 +709,12 @@ export default function ChatPage() {
               <button
                 title="Send"
                 onClick={handleSend}
-                disabled={!inputValue.trim()}
+                disabled={!inputValue.trim() && !imageFile}
                 style={{
                   width: '36px', height: '36px', flexShrink: 0, borderRadius: '999px', border: 'none',
-                  backgroundColor: inputValue.trim() ? 'var(--brand-green-text)' : 'var(--border-color)',
+                  backgroundColor: (inputValue.trim() || imageFile) ? 'var(--brand-green-text)' : 'var(--border-color)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  cursor: inputValue.trim() ? 'pointer' : 'not-allowed', color: '#fff', transition: 'background-color 0.15s',
+                  cursor: (inputValue.trim() || imageFile) ? 'pointer' : 'not-allowed', color: '#fff', transition: 'background-color 0.15s',
                 }}
               >
                 <Send style={{ width: '16px', height: '16px' }} />
@@ -575,18 +723,14 @@ export default function ChatPage() {
           </>
         ) : (
           /* Empty state */
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', padding: '40px' }}>
-            <div style={{ width: '80px', height: '80px', borderRadius: '50%', backgroundColor: 'rgba(45,106,79,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <MessageSquare style={{ width: '40px', height: '40px', color: 'var(--brand-green-text)' }} />
-            </div>
-            <div style={{ textAlign: 'center' }}>
-              <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 8px' }}>
-                Select a conversation
-              </h3>
-              <p style={{ fontSize: '14px', color: 'var(--text-secondary)', margin: 0 }}>
-                Click on {adminName} to start messaging
-              </p>
-            </div>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
+            <MessageSquare style={{ width: '48px', height: '48px', color: 'var(--brand-green-text)', opacity: 0.6 }} />
+            <h3 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
+              Select a conversation
+            </h3>
+            <p style={{ fontSize: '14px', color: 'var(--text-secondary)', margin: 0 }}>
+              Choose a staff member to start messaging
+            </p>
           </div>
         )}
       </div>

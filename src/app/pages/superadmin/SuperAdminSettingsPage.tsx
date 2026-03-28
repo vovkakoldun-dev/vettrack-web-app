@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { supabase } from '../../../lib/supabase';
+import { uploadAvatar, removeAvatar } from '../../hooks/useProfile';
 import {
   User, Building2, Bell, Palette, Shield, CreditCard,
   Camera, Save, Eye, EyeOff, Trash2,
@@ -12,7 +14,6 @@ import {
 } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
-import { Textarea } from '../../components/ui/textarea';
 import { Switch } from '../../components/ui/switch';
 import { Separator } from '../../components/ui/separator';
 import {
@@ -154,15 +155,50 @@ function SaveBar({ onSave, saved }: { onSave: () => void; saved: boolean }) {
 export default function SuperAdminSettingsPage() {
   const [active, setActive] = useState<Section>('profile');
   const [savedSection, setSavedSection] = useState<Section | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [avatarUrl, setAvatarUrl] = useState('');
+
   const save = (s: Section) => { setSavedSection(s); setTimeout(() => setSavedSection(null), 3000); };
   const saved = (s: Section) => savedSection === s;
 
   // Profile
-  const [firstName, setFirstName] = useState('Victoria');
-  const [lastName,  setLastName]  = useState('Cross');
-  const [email,     setEmail]     = useState('v.cross@hugory.com');
-  const [phone,     setPhone]     = useState('(512) 555-0001');
-  const [bio,       setBio]       = useState('Administrator of Hugory Animal Hospital. Overseeing clinic operations, staff management, and client experience.');
+  const [profileId, setProfileId] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName,  setLastName]  = useState('');
+  const [email,     setEmail]     = useState('');
+  const [phone,     setPhone]     = useState('');
+  const [profileRole, setProfileRole] = useState('');
+
+  // Load the superadmin profile from Supabase (by role, not auth user)
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, first_name, last_name, email, phone, role, avatar_url')
+        .eq('role', 'superadmin')
+        .single();
+      if (data) {
+        setProfileId(data.id);
+        setFirstName(data.first_name || '');
+        setLastName(data.last_name || '');
+        setEmail(data.email || '');
+        setPhone(data.phone || '');
+        setProfileRole(data.role || '');
+        setAvatarUrl(data.avatar_url || '');
+      }
+      setProfileLoading(false);
+    })();
+  }, []);
+
+  // Save profile to Supabase
+  async function saveProfile() {
+    if (!profileId) return;
+    await supabase
+      .from('profiles')
+      .update({ first_name: firstName, last_name: lastName, email, phone })
+      .eq('id', profileId);
+    save('profile');
+  }
 
   // Clinic
   const [clinicName,    setClinicName]    = useState('Hugory Animal Hospital');
@@ -328,6 +364,11 @@ export default function SuperAdminSettingsPage() {
 
           {/* ═══════════════════════════════════════════ PROFILE */}
           {active === 'profile' && (
+            profileLoading ? (
+              <SectionCard>
+                <p className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>Loading profile...</p>
+              </SectionCard>
+            ) : (
             <>
               <SectionCard>
                 <h3 className="text-[var(--text-primary)] mb-1">Profile photo</h3>
@@ -335,15 +376,48 @@ export default function SuperAdminSettingsPage() {
                   Shown on records, audit logs, and staff views.
                 </p>
                 <div className="flex items-center gap-5">
-                  <div style={{
-                    width: 80, height: 80, borderRadius: '50%',
-                    background: `linear-gradient(135deg, ${ACCENT}, ${ACCENT_D})`,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: '24px', fontWeight: 800, color: '#fff', flexShrink: 0,
-                  }}>VC</div>
+                  {avatarUrl ? (
+                    <img src={avatarUrl} alt={`${firstName} ${lastName}`} style={{ width: 80, height: 80, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
+                  ) : (
+                    <div style={{
+                      width: 80, height: 80, borderRadius: '50%',
+                      background: `linear-gradient(135deg, ${ACCENT}, ${ACCENT_D})`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: '24px', fontWeight: 800, color: '#fff', flexShrink: 0,
+                    }}>{(firstName[0] || '').toUpperCase()}{(lastName[0] || '').toUpperCase()}</div>
+                  )}
                   <div className="space-y-2">
-                    <Button variant="outline" size="sm"><Camera className="w-4 h-4" /> Upload photo</Button>
-                    <Button variant="ghost" size="sm" className="text-[#d4183d] hover:text-[#d4183d]"><Trash2 className="w-4 h-4" /> Remove</Button>
+                    <Button variant="outline" size="sm" onClick={() => {
+                      const input = document.createElement('input');
+                      input.type = 'file';
+                      input.accept = 'image/*';
+                      input.onchange = async (ev: any) => {
+                        const file = ev.target.files?.[0];
+                        if (!file || !profileId) return;
+                        try {
+                          const publicUrl = await uploadAvatar(profileId, file, 'admin');
+                          setAvatarUrl(publicUrl);
+                        } catch (err: any) {
+                          alert(err.message);
+                        }
+                      };
+                      input.click();
+                    }}>
+                      <Camera className="w-4 h-4" /> Upload photo
+                    </Button>
+                    {avatarUrl && (
+                      <Button variant="ghost" size="sm" className="text-[#d4183d] hover:text-[#d4183d]" onClick={async () => {
+                        if (!profileId || !confirm('Remove profile photo?')) return;
+                        try {
+                          await removeAvatar(profileId, 'admin');
+                          setAvatarUrl('');
+                        } catch (err: any) {
+                          console.error('Delete error:', err);
+                        }
+                      }}>
+                        <Trash2 className="w-4 h-4" /> Remove
+                      </Button>
+                    )}
                   </div>
                   <p className="ml-auto text-right text-[var(--text-secondary)]" style={{ fontSize: '12px' }}>
                     JPG, GIF or PNG · Max 2 MB<br />Recommended: 400×400 px
@@ -371,16 +445,13 @@ export default function SuperAdminSettingsPage() {
                 </FieldRow>
                 <FieldRow label="Role" hint="System-assigned">
                   <span style={{ padding: '4px 12px', borderRadius: '9999px', backgroundColor: ACCENT_BG, color: ACCENT_D, fontSize: '13px', fontWeight: 700 }}>
-                    Administrator
+                    {profileRole === 'superadmin' ? 'Super Administrator' : profileRole === 'clinic_manager' ? 'Clinic Manager' : profileRole === 'veterinarian' ? 'Veterinarian' : profileRole || 'Staff'}
                   </span>
                 </FieldRow>
-                <FieldRow label="Bio" hint="Optional — shown on internal views">
-                  <Textarea value={bio} onChange={e => setBio(e.target.value)} className="min-h-[80px]" />
-                  <p className="text-[var(--text-secondary)] mt-1.5" style={{ fontSize: '12px' }}>{bio.length}/300 characters</p>
-                </FieldRow>
-                <SaveBar onSave={() => save('profile')} saved={saved('profile')} />
+                <SaveBar onSave={saveProfile} saved={saved('profile')} />
               </SectionCard>
             </>
+            )
           )}
 
           {/* ════════════════════════════════════════════ CLINIC */}

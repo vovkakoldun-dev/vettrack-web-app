@@ -3,48 +3,52 @@ import { supabase } from '../../lib/supabase'
 
 export interface ChatMessage {
   id: string
-  conversation: string
-  sender_name: string
+  conversation_id: string
+  sender_id: string
   content: string
+  image_url: string | null
   created_at: string
 }
 
-const DEFAULT_SENDER = 'Sarah Chen'
-
-export function useMessages(conversation: string) {
+export function useMessages(conversationId: string) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [loading, setLoading] = useState(false)
 
   const fetchMessages = useCallback(async () => {
     setLoading(true)
     const { data } = await supabase
-      .from('chat_messages')
-      .select('id, conversation, sender_name, content, created_at')
-      .eq('conversation', conversation)
+      .from('messages')
+      .select('id, conversation_id, sender_id, content, image_url, created_at')
+      .eq('conversation_id', conversationId)
       .order('created_at', { ascending: true })
       .limit(200)
     if (data) setMessages(data as ChatMessage[])
     setLoading(false)
-  }, [conversation])
+  }, [conversationId])
 
-  const sendMessage = useCallback(async (content: string, senderName = DEFAULT_SENDER) => {
+  const sendMessage = useCallback(async (content: string, senderId: string, imageUrl?: string) => {
     const optimistic: ChatMessage = {
       id: crypto.randomUUID(),
-      conversation,
-      sender_name: senderName,
+      conversation_id: conversationId,
+      sender_id: senderId,
       content,
+      image_url: imageUrl || null,
       created_at: new Date().toISOString(),
     }
     setMessages(prev => [...prev, optimistic])
     const { error } = await supabase
-      .from('chat_messages')
-      .insert([{ conversation, sender_name: senderName, content }])
+      .from('messages')
+      .insert([{
+        conversation_id: conversationId,
+        sender_id: senderId,
+        content,
+        image_url: imageUrl || null,
+      }])
     if (error) {
-      // Roll back optimistic update on failure
       setMessages(prev => prev.filter(m => m.id !== optimistic.id))
       console.warn('Message send error:', error.message)
     }
-  }, [conversation])
+  }, [conversationId])
 
   return { messages, loading, fetchMessages, sendMessage }
 }

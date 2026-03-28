@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
+import { getOrgContext } from './useOrgContext'
 
 export interface AppointmentRow {
   id: string
@@ -71,11 +72,12 @@ export function useAppointments(dateFilter?: string) {
   }, [fetchAppointments])
 
   const addAppointment = useCallback(async (values: AddAppointmentValues) => {
+    const { organizationId, clinicId } = await getOrgContext();
     const { data, error: err } = await supabase
       .from('appointments')
       .insert([{
-        organization_id: '00000000-0000-0000-0000-000000000001',
-        clinic_id: '00000000-0000-0000-0000-000000000002',
+        organization_id: organizationId,
+        clinic_id: clinicId,
         status: 'Scheduled',
         ...values,
       }])

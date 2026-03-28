@@ -34,17 +34,30 @@ interface Task {
   petSpecies: string;
   ownerName: string;
   ownerPhone: string;
-  assignedBy: string;           // doctor name
+  assignedBy: string;           // doctor display name
   visitDate: string;
   doctorNotes: string;
-  assignedTo?: string;          // front-desk staff
+  assignedTo?: string;          // front-desk staff display name
   completedAt?: string;
   tags?: string[];
 }
 
-// ─── Supabase row → Task mapper ───────────────────────────────
+// ─── Supabase select with joins ──────────────────────────────
+
+const TASKS_SELECT = `
+  id, type, priority, status, due_date, due_time,
+  visit_date, doctor_notes, completed_at, tags,
+  pet:pets!tasks_pet_id_fkey(id, name, species),
+  client:clients!tasks_client_id_fkey(id, first_name, last_name, phone),
+  assignedByProfile:profiles!tasks_assigned_by_id_fkey(id, first_name, last_name),
+  assignedToProfile:profiles!tasks_assigned_to_id_fkey(id, first_name, last_name)
+`;
 
 function mapRow(r: any): Task {
+  const pet = r.pet;
+  const client = r.client;
+  const byP = r.assignedByProfile;
+  const toP = r.assignedToProfile;
   return {
     id: r.id,
     type: r.type,
@@ -52,14 +65,14 @@ function mapRow(r: any): Task {
     status: r.status,
     dueDate: r.due_date,
     dueTime: r.due_time || undefined,
-    petName: r.pet_name,
-    petSpecies: r.pet_species || '',
-    ownerName: r.owner_name,
-    ownerPhone: r.owner_phone || '',
-    assignedBy: r.assigned_by,
+    petName: pet?.name || 'Unknown Pet',
+    petSpecies: pet?.species || '',
+    ownerName: client ? `${client.first_name} ${client.last_name}`.trim() : 'Unknown Owner',
+    ownerPhone: client?.phone || '',
+    assignedBy: byP ? `Dr. ${byP.last_name}` : 'Unknown',
     visitDate: r.visit_date,
     doctorNotes: r.doctor_notes || '',
-    assignedTo: r.assigned_to || undefined,
+    assignedTo: toP ? `${toP.first_name} ${toP.last_name}`.trim() : undefined,
     completedAt: r.completed_at || undefined,
     tags: r.tags || [],
   };
@@ -207,11 +220,15 @@ function TaskCard({
                 <User style={{ width: 11, height: 11, color: 'var(--text-secondary)' }} />
                 <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{task.ownerName}</span>
               </div>
-              <span style={{ color: 'var(--border-color)', fontSize: 12 }}>·</span>
-              <div className="flex items-center gap-1">
-                <Phone style={{ width: 11, height: 11, color: 'var(--text-secondary)' }} />
-                <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{task.ownerPhone}</span>
-              </div>
+              {task.ownerPhone && (
+                <>
+                  <span style={{ color: 'var(--border-color)', fontSize: 12 }}>·</span>
+                  <div className="flex items-center gap-1">
+                    <Phone style={{ width: 11, height: 11, color: 'var(--text-secondary)' }} />
+                    <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{task.ownerPhone}</span>
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Row 3: assigned by + due */}
@@ -349,12 +366,12 @@ export default function AdminTasksPage() {
   const [priorityOpen, setPriorityOpen] = useState(false);
   const [typeOpen, setTypeOpen] = useState(false);
 
-  // Load tasks from Supabase on mount
+  // Load tasks from Supabase with joins
   useEffect(() => {
     (async () => {
       const { data } = await supabase
         .from('tasks')
-        .select('*')
+        .select(TASKS_SELECT)
         .order('due_date', { ascending: true });
       if (data) setTasks(data.map(mapRow));
     })();

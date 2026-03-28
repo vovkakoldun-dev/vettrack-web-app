@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
+import { getOrgContext } from './useOrgContext'
 
 export interface ClientPet {
   id: string
@@ -76,9 +77,10 @@ export function useClients() {
   }, [fetchClients])
 
   const addClient = useCallback(async (values: AddClientValues) => {
+    const { organizationId } = await getOrgContext();
     const { data, error: err } = await supabase
       .from('clients')
-      .insert([{ organization_id: '00000000-0000-0000-0000-000000000001', ...values }])
+      .insert([{ organization_id: organizationId, ...values }])
       .select('id, first_name, last_name, email, phone, address, city, state, zip, notes, portal_status, health_status, created_at, pets(id, name, species, breed, photo_url, assigned_vet_id, assigned_vet:staff!pets_assigned_vet_id_fkey(id, first_name, last_name))')
       .single()
     if (!err && data) {

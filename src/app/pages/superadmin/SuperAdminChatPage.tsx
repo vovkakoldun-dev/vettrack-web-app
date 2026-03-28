@@ -1,18 +1,15 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   MessageSquare,
   Search,
-  Pencil,
   Send,
   Paperclip,
   Smile,
   CheckCheck,
   X,
-  Users,
-  ChevronLeft,
-  Check,
 } from 'lucide-react';
 import { Input } from '../../components/ui/input';
+import { supabase } from '../../../lib/supabase';
 
 // ─── Emoji picker data ────────────────────────────────────────────────────────
 
@@ -27,143 +24,49 @@ const EMOJI_GROUPS = [
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Message = {
+type DisplayMessage = {
   id: string;
   from: 'me' | 'them';
   text: string;
   timestamp: Date;
-  senderName?: string;
+  imageUrl?: string;
 };
 
-type Conversation = {
+type ConversationItem = {
   id: string;
-  name: string;
-  role: string;
-  avatarColor: string;
-  online: boolean;
+  otherProfileId: string;
+  otherName: string;
+  otherRole: string;
+  otherAvatarUrl: string;
+  lastMessage: string;
+  lastMessageTime: Date | null;
+  lastMessageIsMe: boolean;
   unread: number;
-  messages: Message[];
-  isGroup?: boolean;
-  members?: { id: string; name: string; color: string }[];
 };
-
-// ─── Mock data helpers ────────────────────────────────────────────────────────
-
-function d(year: number, month: number, day: number, h: number, m: number): Date {
-  return new Date(year, month - 1, day, h, m);
-}
-
-// "Today" = March 14 2026, "Yesterday" = March 13 2026
-const TODAY = new Date(2026, 2, 14); // month is 0-indexed
-
-// ─── Mock conversations ───────────────────────────────────────────────────────
-
-const INITIAL_CONVERSATIONS: Conversation[] = [
-  {
-    id: '1',
-    name: 'Marcus Webb',
-    role: 'Clinic Manager at Springfield Clinic',
-    avatarColor: '#7C3AED',
-    online: true,
-    unread: 2,
-    messages: [
-      { id: 'm1', from: 'them', text: 'Morning Victoria! The Springfield clinic had its best revenue week — $48k gross', timestamp: d(2026, 3, 14, 9, 5) },
-      { id: 'm2', from: 'me',   text: "Fantastic news! That's a 12% jump from last month",                             timestamp: d(2026, 3, 14, 9, 8) },
-      { id: 'm3', from: 'them', text: 'Exactly. The new evening slots really filled up fast',                          timestamp: d(2026, 3, 14, 9, 10) },
-      { id: 'm4', from: 'me',   text: "Great work Marcus. Let's keep that momentum going",                             timestamp: d(2026, 3, 14, 9, 12) },
-      { id: 'm5', from: 'them', text: "One thing — we're short one vet tech from next Monday, Sarah is on leave",      timestamp: d(2026, 3, 14, 9, 45) },
-      { id: 'm6', from: 'them', text: 'Do you want me to post a temp role or can we cover internally?',                timestamp: d(2026, 3, 14, 9, 46) },
-    ],
-  },
-  {
-    id: '2',
-    name: 'Dr. Priya Sharma',
-    role: 'Head Veterinarian at Riverside Clinic',
-    avatarColor: '#0891B2',
-    online: true,
-    unread: 0,
-    messages: [
-      { id: 'm1', from: 'them', text: 'Victoria, the new lab integration is working perfectly',              timestamp: d(2026, 3, 13, 15, 0) },
-      { id: 'm2', from: 'me',   text: 'Wonderful! How are the turnaround times?',                            timestamp: d(2026, 3, 13, 15, 5) },
-      { id: 'm3', from: 'them', text: 'Down from 6 hours to under 2. Staff are thrilled',                   timestamp: d(2026, 3, 13, 15, 8) },
-      { id: 'm4', from: 'me',   text: "Quick check — how's the onboarding going for the new front desk staff?", timestamp: d(2026, 3, 14, 8, 45) },
-      { id: 'm5', from: 'them', text: "Going great, they're picking it up faster than expected",             timestamp: d(2026, 3, 14, 8, 50) },
-    ],
-  },
-  {
-    id: '3',
-    name: 'Daniel Frost',
-    role: 'IT & Integrations Lead',
-    avatarColor: '#DC2626',
-    online: false,
-    unread: 1,
-    messages: [
-      { id: 'm1', from: 'me',   text: 'Daniel, the Stripe webhook seems to be dropping some events',        timestamp: d(2026, 3, 12, 10, 0) },
-      { id: 'm2', from: 'them', text: 'On it — looks like a timeout issue. Will push a fix today',          timestamp: d(2026, 3, 12, 11, 30) },
-      { id: 'm3', from: 'me',   text: "Thanks. Let me know when it's resolved",                             timestamp: d(2026, 3, 12, 12, 0) },
-      { id: 'm4', from: 'them', text: 'Fix is live. Tested with 50 events — all processing correctly now',  timestamp: d(2026, 3, 14, 7, 50) },
-    ],
-  },
-  {
-    id: '4',
-    name: 'Lena Park',
-    role: 'Head of Client Success',
-    avatarColor: '#D97706',
-    online: true,
-    unread: 0,
-    messages: [
-      { id: 'm1', from: 'them', text: 'Good morning! NPS scores are up to 4.8 this week',                   timestamp: d(2026, 3, 14, 8, 0) },
-      { id: 'm2', from: 'me',   text: "That's excellent Lena! Any patterns in the feedback?",               timestamp: d(2026, 3, 14, 8, 2) },
-      { id: 'm3', from: 'them', text: 'Clients love the new appointment reminders and the portal layout',   timestamp: d(2026, 3, 14, 8, 4) },
-      { id: 'm4', from: 'me',   text: "Perfect — let's highlight that in the monthly report",               timestamp: d(2026, 3, 14, 8, 6) },
-    ],
-  },
-  {
-    id: '5',
-    name: 'James Okafor',
-    role: 'Billing & Finance',
-    avatarColor: '#059669',
-    online: true,
-    unread: 0,
-    messages: [
-      { id: 'm1', from: 'them', text: 'March invoices are all out. 3 outstanding from last month',          timestamp: d(2026, 3, 13, 13, 0) },
-      { id: 'm2', from: 'me',   text: 'Can you send me the outstanding list?',                              timestamp: d(2026, 3, 13, 13, 5) },
-      { id: 'm3', from: 'them', text: 'Sent to your email. Two are clinics on net-30 terms',                timestamp: d(2026, 3, 13, 13, 6) },
-      { id: 'm4', from: 'me',   text: "Thanks James, I'll follow up with them directly",                    timestamp: d(2026, 3, 13, 13, 8) },
-    ],
-  },
-  {
-    id: '6',
-    name: 'All Clinic Managers',
-    role: 'Group',
-    avatarColor: '#F4A261',
-    online: false,
-    unread: 0,
-    isGroup: true,
-    members: [
-      { id: '1',  name: 'Marcus Webb',      color: '#7C3AED' },
-      { id: 'x2', name: 'Dr. Priya Sharma', color: '#0891B2' },
-      { id: 'x3', name: 'Anna Kowalski',    color: '#EC4899' },
-    ],
-    messages: [
-      { id: 'm1', from: 'them', text: 'Heads up — system maintenance scheduled for this Sunday 2-4am', timestamp: d(2026, 3, 10, 10, 0),  senderName: 'Marcus Webb' },
-      { id: 'm2', from: 'me',   text: 'Thanks for the heads up everyone. Please inform your staff',    timestamp: d(2026, 3, 10, 10, 5) },
-      { id: 'm3', from: 'them', text: 'Will do. Any patient-facing impact?',                           timestamp: d(2026, 3, 10, 10, 30), senderName: 'Dr. Priya Sharma' },
-      { id: 'm4', from: 'me',   text: 'No patient data affected, just a brief portal downtime',        timestamp: d(2026, 3, 10, 10, 35) },
-      { id: 'm5', from: 'them', text: "Perfect, I'll send a notice to the front desk teams",           timestamp: d(2026, 3, 10, 11, 0),  senderName: 'Anna Kowalski' },
-    ],
-  },
-];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+const TODAY = new Date();
+
+const ROLE_LABELS: Record<string, string> = {
+  veterinarian: 'Veterinarian',
+  senior_veterinarian: 'Senior Veterinarian',
+  clinic_manager: 'Clinic Manager',
+  front_desk_manager: 'Front Desk Manager',
+  receptionist: 'Receptionist',
+  superadmin: 'Super Administrator',
+};
+
+const AVATAR_COLORS: string[] = ['#2D6A4F', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261', '#06B6D4', '#DC2626', '#0891B2', '#7C3AED', '#059669'];
+
+function getAvatarColor(id: string): string {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = id.charCodeAt(i) + ((hash << 5) - hash);
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+
 function getInitials(name: string): string {
-  return name
-    .split(' ')
-    .map((w) => w[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2);
+  return name.split(' ').map((w) => w[0]).join('').toUpperCase().slice(0, 2);
 }
 
 function formatTime(date: Date): string {
@@ -171,11 +74,7 @@ function formatTime(date: Date): string {
 }
 
 function isSameDay(a: Date, b: Date): boolean {
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  );
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
 function getDateLabel(date: Date): string {
@@ -186,64 +85,30 @@ function getDateLabel(date: Date): string {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-function getLastMessagePreview(conv: Conversation): { text: string; time: string } {
-  const last = conv.messages[conv.messages.length - 1];
-  if (!last) return { text: '', time: '' };
-  const prefix = last.from === 'me' ? 'You: ' : '';
-  const time = isSameDay(last.timestamp, TODAY)
-    ? formatTime(last.timestamp)
-    : isSameDay(last.timestamp, new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate() - 1))
-    ? 'Yesterday'
-    : last.timestamp.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  return { text: prefix + last.text, time };
+function getTimeLabel(date: Date | null): string {
+  if (!date) return '';
+  if (isSameDay(date, TODAY)) return formatTime(date);
+  const yesterday = new Date(TODAY);
+  yesterday.setDate(TODAY.getDate() - 1);
+  if (isSameDay(date, yesterday)) return 'Yesterday';
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 // ─── Avatar component ─────────────────────────────────────────────────────────
 
-function Avatar({
-  name,
-  color,
-  size = 40,
-  online,
-}: {
-  name: string;
-  color: string;
-  size?: number;
-  online?: boolean;
-}) {
+function ChatAvatar({ name, color, size = 40, online, photoUrl }: { name: string; color: string; size?: number; online?: boolean; photoUrl?: string }) {
   const dotSize = size <= 28 ? 8 : 10;
   return (
     <div style={{ position: 'relative', flexShrink: 0, width: size, height: size }}>
-      <div
-        style={{
-          width: size,
-          height: size,
-          borderRadius: '50%',
-          backgroundColor: color,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: size <= 28 ? '10px' : '13px',
-          fontWeight: 700,
-          color: '#fff',
-          userSelect: 'none',
-        }}
-      >
-        {getInitials(name)}
-      </div>
+      {photoUrl ? (
+        <img src={photoUrl} alt={name} style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover' }} />
+      ) : (
+        <div style={{ width: size, height: size, borderRadius: '50%', backgroundColor: color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size <= 28 ? '10px' : '13px', fontWeight: 700, color: '#fff', userSelect: 'none' }}>
+          {getInitials(name)}
+        </div>
+      )}
       {online && (
-        <div
-          style={{
-            position: 'absolute',
-            bottom: 0,
-            right: 0,
-            width: dotSize,
-            height: dotSize,
-            borderRadius: '50%',
-            backgroundColor: '#22c55e',
-            border: '2px solid var(--surface-white)',
-          }}
-        />
+        <div style={{ position: 'absolute', bottom: 0, right: 0, width: dotSize, height: dotSize, borderRadius: '50%', backgroundColor: '#22c55e', border: '2px solid var(--surface-white)' }} />
       )}
     </div>
   );
@@ -253,27 +118,9 @@ function Avatar({
 
 function DateSeparator({ label }: { label: string }) {
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '12px',
-        margin: '16px 0',
-      }}
-    >
+    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: '16px 0' }}>
       <div style={{ flex: 1, height: '1px', backgroundColor: 'var(--border-color)' }} />
-      <span
-        style={{
-          fontSize: '11px',
-          fontWeight: 600,
-          color: 'var(--text-secondary)',
-          whiteSpace: 'nowrap',
-          padding: '2px 10px',
-          backgroundColor: 'var(--bg-offwhite)',
-          borderRadius: '999px',
-          border: '1px solid var(--border-color)',
-        }}
-      >
+      <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', whiteSpace: 'nowrap', padding: '2px 10px', backgroundColor: 'var(--bg-offwhite)', borderRadius: '999px', border: '1px solid var(--border-color)' }}>
         {label}
       </span>
       <div style={{ flex: 1, height: '1px', backgroundColor: 'var(--border-color)' }} />
@@ -284,430 +131,316 @@ function DateSeparator({ label }: { label: string }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function SuperAdminChatPage() {
-  const [conversations, setConversations] = useState<Conversation[]>(INITIAL_CONVERSATIONS);
+  const [saProfileId, setSaProfileId] = useState<string | null>(null);
+  const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Resolve the superadmin profile ID (not the auth user)
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('role', 'superadmin')
+        .single();
+      if (data) setSaProfileId(data.id);
+    })();
+  }, []);
+  const [loadingConvs, setLoadingConvs] = useState(true);
+  const [loadingMsgs, setLoadingMsgs] = useState(false);
 
   // Emoji picker
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [emojiTab, setEmojiTab] = useState(0);
   const emojiRef = useRef<HTMLDivElement>(null);
 
-  // New conversation search
-  const [newChatOpen, setNewChatOpen] = useState(false);
-  const [newChatSearch, setNewChatSearch] = useState('');
-  const newChatRef = useRef<HTMLDivElement>(null);
-  const newChatInputRef = useRef<HTMLInputElement>(null);
-
-  // Group creation
-  const [groupStep, setGroupStep] = useState<'idle' | 'members' | 'name'>('idle');
-  const [groupSelected, setGroupSelected] = useState<Set<string>>(new Set());
-  const [groupName, setGroupName] = useState('');
-
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const lastReadAtRef = useRef<string | null>(null);
 
   const selectedConv = conversations.find((c) => c.id === selectedId) ?? null;
 
-  // Auto-scroll to bottom when conversation changes or new message sent
+  // ── Load conversations ──────────────────────────────────────────────────────
+
+  const fetchConversations = useCallback(async () => {
+    if (!saProfileId) return;
+    // Get all conversations where superadmin is a participant
+    const { data: parts } = await supabase
+      .from('conversation_participants')
+      .select('conversation_id')
+      .eq('profile_id', saProfileId);
+    if (!parts || parts.length === 0) { setLoadingConvs(false); return; }
+
+    const convIds = parts.map(p => p.conversation_id);
+    const items: ConversationItem[] = [];
+
+    for (const convId of convIds) {
+      // Get the other participant
+      const { data: otherParts } = await supabase
+        .from('conversation_participants')
+        .select('profile_id, last_read_at, profiles:profiles!conversation_participants_profile_id_fkey(id, first_name, last_name, role, avatar_url)')
+        .eq('conversation_id', convId)
+        .neq('profile_id', saProfileId);
+      const other = otherParts?.[0];
+      if (!other) continue;
+      const otherProfile = other.profiles as any;
+
+      // Get my last_read_at
+      const { data: myPart } = await supabase
+        .from('conversation_participants')
+        .select('last_read_at')
+        .eq('conversation_id', convId)
+        .eq('profile_id', saProfileId)
+        .single();
+
+      // Get last message
+      const { data: lastMsgs } = await supabase
+        .from('messages')
+        .select('content, sender_id, created_at')
+        .eq('conversation_id', convId)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      const lastMsg = lastMsgs?.[0];
+
+      // Count unread
+      let unread = 0;
+      if (myPart?.last_read_at) {
+        const { count } = await supabase
+          .from('messages')
+          .select('id', { count: 'exact', head: true })
+          .eq('conversation_id', convId)
+          .neq('sender_id', saProfileId)
+          .gt('created_at', myPart.last_read_at);
+        unread = count || 0;
+      } else {
+        const { count } = await supabase
+          .from('messages')
+          .select('id', { count: 'exact', head: true })
+          .eq('conversation_id', convId)
+          .neq('sender_id', saProfileId);
+        unread = count || 0;
+      }
+
+      const otherName = otherProfile
+        ? `${otherProfile.first_name} ${otherProfile.last_name}`.trim()
+        : 'Unknown';
+
+      items.push({
+        id: convId,
+        otherProfileId: otherProfile?.id || '',
+        otherName,
+        otherRole: ROLE_LABELS[otherProfile?.role] || otherProfile?.role || '',
+        otherAvatarUrl: otherProfile?.avatar_url || '',
+        lastMessage: lastMsg?.content || '',
+        lastMessageTime: lastMsg ? new Date(lastMsg.created_at) : null,
+        lastMessageIsMe: lastMsg?.sender_id === saProfileId,
+        unread,
+      });
+    }
+
+    // Sort by last message time desc
+    items.sort((a, b) => {
+      if (!a.lastMessageTime) return 1;
+      if (!b.lastMessageTime) return -1;
+      return b.lastMessageTime.getTime() - a.lastMessageTime.getTime();
+    });
+
+    setConversations(items);
+    setLoadingConvs(false);
+  }, [saProfileId]);
+
+  useEffect(() => { fetchConversations(); }, [fetchConversations]);
+
+  // ── Load messages for selected conversation ─────────────────────────────────
+
+  const fetchMessages = useCallback(async (convId: string) => {
+    if (!saProfileId) return;
+    setLoadingMsgs(true);
+    const { data } = await supabase
+      .from('messages')
+      .select('id, content, sender_id, image_url, created_at')
+      .eq('conversation_id', convId)
+      .order('created_at', { ascending: true });
+
+    if (data) {
+      setMessages(data.map(m => ({
+        id: m.id,
+        from: m.sender_id === saProfileId ? 'me' as const : 'them' as const,
+        text: m.content,
+        timestamp: new Date(m.created_at),
+        imageUrl: m.image_url || undefined,
+      })));
+    }
+    setLoadingMsgs(false);
+  }, [saProfileId]);
+
+  // ── Select conversation ─────────────────────────────────────────────────────
+
+  async function handleSelectConversation(convId: string) {
+    setSelectedId(convId);
+    setInputValue('');
+    await fetchMessages(convId);
+
+    // Mark as read
+    if (saProfileId) {
+      const now = new Date().toISOString();
+      lastReadAtRef.current = now;
+      await supabase
+        .from('conversation_participants')
+        .update({ last_read_at: now })
+        .eq('conversation_id', convId)
+        .eq('profile_id', saProfileId);
+
+      // Clear unread in local state
+      setConversations(prev => prev.map(c =>
+        c.id === convId ? { ...c, unread: 0 } : c
+      ));
+    }
+  }
+
+  // ── Send message ────────────────────────────────────────────────────────────
+
+  async function handleSend() {
+    if (!inputValue.trim() || !selectedId || !saProfileId) return;
+    const content = inputValue.trim();
+    setInputValue('');
+
+    // Optimistic update
+    const tempId = `temp-${Date.now()}`;
+    const now = new Date();
+    setMessages(prev => [...prev, { id: tempId, from: 'me', text: content, timestamp: now }]);
+
+    // Update conversation preview
+    setConversations(prev => prev.map(c =>
+      c.id === selectedId
+        ? { ...c, lastMessage: content, lastMessageTime: now, lastMessageIsMe: true }
+        : c
+    ));
+
+    // Insert into Supabase
+    const { data } = await supabase
+      .from('messages')
+      .insert({ conversation_id: selectedId, sender_id: saProfileId, content })
+      .select('id')
+      .single();
+
+    if (data) {
+      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, id: data.id } : m));
+    }
+
+    // Update my last_read_at
+    const nowStr = now.toISOString();
+    lastReadAtRef.current = nowStr;
+    await supabase
+      .from('conversation_participants')
+      .update({ last_read_at: nowStr })
+      .eq('conversation_id', selectedId)
+      .eq('profile_id', saProfileId);
+  }
+
+  // ── Realtime subscription ───────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!saProfileId) return;
+    const channel = supabase
+      .channel('superadmin-chat')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
+        const msg = payload.new as any;
+        // Check if this message is for the currently selected conversation
+        if (msg.conversation_id === selectedId && msg.sender_id !== saProfileId) {
+          setMessages(prev => [...prev, {
+            id: msg.id,
+            from: 'them',
+            text: msg.content,
+            timestamp: new Date(msg.created_at),
+            imageUrl: msg.image_url || undefined,
+          }]);
+          // Auto mark as read since we're viewing
+          const now = new Date().toISOString();
+          lastReadAtRef.current = now;
+          supabase
+            .from('conversation_participants')
+            .update({ last_read_at: now })
+            .eq('conversation_id', selectedId)
+            .eq('profile_id', saProfileId)
+            .then();
+        }
+        // Refresh conversation list for unread counts
+        fetchConversations();
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [saProfileId, selectedId, fetchConversations]);
+
+  // ── Auto-scroll ─────────────────────────────────────────────────────────────
+
   useEffect(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [selectedId, selectedConv?.messages.length]);
+  }, [messages.length]);
 
   // Close emoji picker on outside click
   useEffect(() => {
     function onOutside(e: MouseEvent) {
-      if (emojiRef.current && !emojiRef.current.contains(e.target as Node)) {
-        setEmojiOpen(false);
-      }
+      if (emojiRef.current && !emojiRef.current.contains(e.target as Node)) setEmojiOpen(false);
     }
     if (emojiOpen) document.addEventListener('mousedown', onOutside);
     return () => document.removeEventListener('mousedown', onOutside);
   }, [emojiOpen]);
-
-  // Close new-chat popup on outside click + focus input when opened
-  useEffect(() => {
-    function onOutside(e: MouseEvent) {
-      if (newChatRef.current && !newChatRef.current.contains(e.target as Node)) {
-        setNewChatOpen(false);
-        setNewChatSearch('');
-      }
-    }
-    if (newChatOpen) {
-      document.addEventListener('mousedown', onOutside);
-      setTimeout(() => newChatInputRef.current?.focus(), 50);
-    }
-    return () => document.removeEventListener('mousedown', onOutside);
-  }, [newChatOpen]);
 
   function insertEmoji(emoji: string) {
     setInputValue((prev) => prev + emoji);
     setEmojiOpen(false);
   }
 
-  function openConversation(id: string) {
-    handleSelectConversation(id);
-    setNewChatOpen(false);
-    setNewChatSearch('');
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
   }
 
   // Filter conversations by search
   const filteredConversations = conversations.filter((c) => {
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
-    const lastMsg = c.messages[c.messages.length - 1]?.text ?? '';
-    return c.name.toLowerCase().includes(q) || lastMsg.toLowerCase().includes(q);
+    return c.otherName.toLowerCase().includes(q) || c.otherRole.toLowerCase().includes(q) || c.lastMessage.toLowerCase().includes(q);
   });
 
-  function handleSelectConversation(id: string) {
-    setSelectedId(id);
-    // Clear unread when opening
-    setConversations((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, unread: 0 } : c))
-    );
-    setInputValue('');
-  }
-
-  function handleSend() {
-    if (!inputValue.trim() || !selectedId) return;
-    const newMsg: Message = {
-      id: `msg-${Date.now()}`,
-      from: 'me',
-      text: inputValue.trim(),
-      timestamp: new Date(),
-    };
-    setConversations((prev) =>
-      prev.map((c) =>
-        c.id === selectedId ? { ...c, messages: [...c.messages, newMsg] } : c
-      )
-    );
-    setInputValue('');
-  }
-
-  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  }
-
-  function closeNewChat() {
-    setNewChatOpen(false);
-    setNewChatSearch('');
-    setGroupStep('idle');
-    setGroupSelected(new Set());
-    setGroupName('');
-  }
-
-  function handleCreateGroup() {
-    if (!groupName.trim() || groupSelected.size < 2) return;
-    const members = INITIAL_CONVERSATIONS
-      .filter(c => groupSelected.has(c.id))
-      .map(c => ({ id: c.id, name: c.name, color: c.avatarColor }));
-    const newGroup: Conversation = {
-      id: `group-${Date.now()}`,
-      name: groupName.trim(),
-      role: `${members.length} members`,
-      avatarColor: '#F4A261',
-      online: false,
-      unread: 0,
-      isGroup: true,
-      members,
-      messages: [],
-    };
-    setConversations(prev => [newGroup, ...prev]);
-    setSelectedId(newGroup.id);
-    closeNewChat();
-  }
-
-  // Group messages by date for rendering
-  function groupMessagesByDate(messages: Message[]): { label: string; msgs: Message[] }[] {
-    const groups: { label: string; msgs: Message[] }[] = [];
-    for (const msg of messages) {
+  // Group messages by date
+  function groupMessagesByDate(msgs: DisplayMessage[]): { label: string; msgs: DisplayMessage[] }[] {
+    const groups: { label: string; msgs: DisplayMessage[] }[] = [];
+    for (const msg of msgs) {
       const label = getDateLabel(msg.timestamp);
       const last = groups[groups.length - 1];
-      if (last && last.label === label) {
-        last.msgs.push(msg);
-      } else {
-        groups.push({ label, msgs: [msg] });
-      }
+      if (last && last.label === label) { last.msgs.push(msg); } else { groups.push({ label, msgs: [msg] }); }
     }
     return groups;
   }
 
-  // Find last "mine" message index across all messages
-  function getLastMineIndex(messages: Message[]): number {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].from === 'me') return i;
-    }
+  function getLastMineIndex(msgs: DisplayMessage[]): number {
+    for (let i = msgs.length - 1; i >= 0; i--) { if (msgs[i].from === 'me') return i; }
     return -1;
   }
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        height: '100vh',
-        overflow: 'hidden',
-        backgroundColor: 'var(--bg-offwhite)',
-      }}
-    >
+    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', backgroundColor: 'var(--bg-offwhite)' }}>
+
       {/* ── Left panel ──────────────────────────────────────────────────────── */}
-      <div
-        style={{
-          width: '320px',
-          flexShrink: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          height: '100%',
-          backgroundColor: 'var(--surface-white)',
-          borderRight: '1px solid var(--border-color)',
-        }}
-      >
+      <div style={{ width: '320px', flexShrink: 0, display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: 'var(--surface-white)', borderRight: '1px solid var(--border-color)' }}>
+
         {/* Panel header */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '20px 20px 16px',
-            flexShrink: 0,
-            position: 'relative',
-          }}
-        >
-          <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
-            Team Chat
-          </h2>
-
-          {/* Compose button + popup */}
-          <div ref={newChatRef} style={{ position: 'relative' }}>
-            <button
-              title="New message"
-              onClick={() => { setNewChatOpen((v) => !v); setNewChatSearch(''); setGroupStep('idle'); setGroupSelected(new Set()); setGroupName(''); }}
-              style={{
-                width: '36px', height: '36px', borderRadius: '8px',
-                border: '1px solid var(--border-color)',
-                backgroundColor: newChatOpen ? 'var(--surface-elevated)' : 'transparent',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                cursor: 'pointer', color: 'var(--text-secondary)', transition: 'background-color 0.15s',
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--surface-elevated)')}
-              onMouseLeave={(e) => { if (!newChatOpen) e.currentTarget.style.backgroundColor = 'transparent'; }}
-            >
-              <Pencil style={{ width: '16px', height: '16px' }} />
-            </button>
-
-            {newChatOpen && (
-              <div
-                style={{
-                  position: 'absolute', top: 'calc(100% + 8px)', right: 0,
-                  width: '290px', backgroundColor: 'var(--surface-white)',
-                  border: '1px solid var(--border-color)', borderRadius: '12px',
-                  boxShadow: '0 8px 24px rgba(0,0,0,0.12)', zIndex: 40, overflow: 'hidden',
-                }}
-              >
-                {/* ── Step: idle (default) ── */}
-                {groupStep === 'idle' && (
-                  <>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px 10px' }}>
-                      <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>New message</span>
-                      <button onClick={closeNewChat} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', padding: '2px' }}>
-                        <X style={{ width: '15px', height: '15px' }} />
-                      </button>
-                    </div>
-
-                    {/* New group CTA */}
-                    <div style={{ padding: '0 8px 6px' }}>
-                      <button
-                        onClick={() => { setGroupStep('members'); setNewChatSearch(''); }}
-                        style={{
-                          width: '100%', display: 'flex', alignItems: 'center', gap: '10px',
-                          padding: '9px 10px', borderRadius: '8px', border: 'none',
-                          backgroundColor: 'rgba(194,103,26,0.08)', cursor: 'pointer', textAlign: 'left',
-                        }}
-                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(194,103,26,0.14)')}
-                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'rgba(194,103,26,0.08)')}
-                      >
-                        <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: '#C2671A', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                          <Users style={{ width: '15px', height: '15px', color: '#fff' }} />
-                        </div>
-                        <div>
-                          <div style={{ fontSize: '13px', fontWeight: 600, color: '#C2671A' }}>New group</div>
-                          <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Create a group chat</div>
-                        </div>
-                      </button>
-                    </div>
-
-                    <div style={{ height: '1px', backgroundColor: 'var(--border-color)', margin: '4px 0' }} />
-
-                    <div style={{ padding: '6px 12px 8px', position: 'relative' }}>
-                      <Search style={{ position: 'absolute', left: '22px', top: '50%', transform: 'translateY(-50%)', width: '14px', height: '14px', color: 'var(--text-secondary)', pointerEvents: 'none' }} />
-                      <input
-                        ref={newChatInputRef}
-                        type="text"
-                        placeholder="Search colleagues..."
-                        value={newChatSearch}
-                        onChange={(e) => setNewChatSearch(e.target.value)}
-                        style={{ width: '100%', height: '34px', paddingLeft: '32px', paddingRight: '10px', fontSize: '13px', borderRadius: '8px', outline: 'none', border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-elevated)', color: 'var(--text-primary)', boxSizing: 'border-box' }}
-                      />
-                    </div>
-
-                    <div style={{ maxHeight: '240px', overflowY: 'auto', padding: '0 6px 8px' }}>
-                      {INITIAL_CONVERSATIONS
-                        .filter((c) => !newChatSearch.trim() || c.name.toLowerCase().includes(newChatSearch.toLowerCase()) || c.role.toLowerCase().includes(newChatSearch.toLowerCase()))
-                        .map((c) => (
-                          <button key={c.id} onClick={() => openConversation(c.id)}
-                            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px', borderRadius: '8px', border: 'none', backgroundColor: 'transparent', cursor: 'pointer', textAlign: 'left', transition: 'background-color 0.15s' }}
-                            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--surface-elevated)')}
-                            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-                          >
-                            <Avatar name={c.name} color={c.avatarColor} size={34} online={c.online} />
-                            <div style={{ minWidth: 0 }}>
-                              <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</div>
-                              <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{c.role}</div>
-                            </div>
-                            <span style={{ marginLeft: 'auto', flexShrink: 0, width: '8px', height: '8px', borderRadius: '50%', backgroundColor: c.online ? '#22c55e' : 'var(--border-color)' }} />
-                          </button>
-                        ))}
-                    </div>
-                  </>
-                )}
-
-                {/* ── Step: select members ── */}
-                {groupStep === 'members' && (
-                  <>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '14px 16px 10px' }}>
-                      <button onClick={() => setGroupStep('idle')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', padding: '2px', flexShrink: 0 }}>
-                        <ChevronLeft style={{ width: '16px', height: '16px' }} />
-                      </button>
-                      <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', flex: 1 }}>Add members</span>
-                      <button onClick={closeNewChat} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', padding: '2px' }}>
-                        <X style={{ width: '15px', height: '15px' }} />
-                      </button>
-                    </div>
-
-                    <div style={{ padding: '0 12px 8px', position: 'relative' }}>
-                      <Search style={{ position: 'absolute', left: '22px', top: '50%', transform: 'translateY(-50%)', width: '14px', height: '14px', color: 'var(--text-secondary)', pointerEvents: 'none' }} />
-                      <input
-                        autoFocus
-                        type="text"
-                        placeholder="Search colleagues..."
-                        value={newChatSearch}
-                        onChange={(e) => setNewChatSearch(e.target.value)}
-                        style={{ width: '100%', height: '34px', paddingLeft: '32px', paddingRight: '10px', fontSize: '13px', borderRadius: '8px', outline: 'none', border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-elevated)', color: 'var(--text-primary)', boxSizing: 'border-box' }}
-                      />
-                    </div>
-
-                    <div style={{ maxHeight: '220px', overflowY: 'auto', padding: '0 6px 4px' }}>
-                      {INITIAL_CONVERSATIONS
-                        .filter((c) => !newChatSearch.trim() || c.name.toLowerCase().includes(newChatSearch.toLowerCase()))
-                        .map((c) => {
-                          const selected = groupSelected.has(c.id);
-                          return (
-                            <button key={c.id}
-                              onClick={() => {
-                                setGroupSelected(prev => {
-                                  const next = new Set(prev);
-                                  next.has(c.id) ? next.delete(c.id) : next.add(c.id);
-                                  return next;
-                                });
-                              }}
-                              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px', borderRadius: '8px', border: 'none', backgroundColor: selected ? 'rgba(194,103,26,0.08)' : 'transparent', cursor: 'pointer', textAlign: 'left', transition: 'background-color 0.15s' }}
-                              onMouseEnter={(e) => { if (!selected) e.currentTarget.style.backgroundColor = 'var(--surface-elevated)'; }}
-                              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = selected ? 'rgba(194,103,26,0.08)' : 'transparent'; }}
-                            >
-                              <Avatar name={c.name} color={c.avatarColor} size={32} online={c.online} />
-                              <div style={{ minWidth: 0, flex: 1 }}>
-                                <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</div>
-                                <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{c.role}</div>
-                              </div>
-                              <div style={{ width: '20px', height: '20px', borderRadius: '50%', flexShrink: 0, border: `2px solid ${selected ? '#C2671A' : 'var(--border-color)'}`, backgroundColor: selected ? '#C2671A' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s' }}>
-                                {selected && <Check style={{ width: '11px', height: '11px', color: '#fff' }} />}
-                              </div>
-                            </button>
-                          );
-                        })}
-                    </div>
-
-                    <div style={{ padding: '8px 12px 12px', borderTop: '1px solid var(--border-color)' }}>
-                      <button
-                        disabled={groupSelected.size < 2}
-                        onClick={() => { setGroupStep('name'); setNewChatSearch(''); }}
-                        style={{ width: '100%', padding: '9px', borderRadius: '8px', border: 'none', cursor: groupSelected.size >= 2 ? 'pointer' : 'not-allowed', backgroundColor: groupSelected.size >= 2 ? '#C2671A' : 'var(--border-color)', color: '#fff', fontSize: '13px', fontWeight: 700, transition: 'opacity 0.15s' }}
-                      >
-                        {groupSelected.size < 2 ? 'Select at least 2 members' : `Next — ${groupSelected.size} selected`}
-                      </button>
-                    </div>
-                  </>
-                )}
-
-                {/* ── Step: name the group ── */}
-                {groupStep === 'name' && (
-                  <>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '14px 16px 10px' }}>
-                      <button onClick={() => setGroupStep('members')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', padding: '2px', flexShrink: 0 }}>
-                        <ChevronLeft style={{ width: '16px', height: '16px' }} />
-                      </button>
-                      <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', flex: 1 }}>Name your group</span>
-                      <button onClick={closeNewChat} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', padding: '2px' }}>
-                        <X style={{ width: '15px', height: '15px' }} />
-                      </button>
-                    </div>
-
-                    {/* Selected members preview */}
-                    <div style={{ padding: '0 12px 10px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                      {INITIAL_CONVERSATIONS.filter(c => groupSelected.has(c.id)).map(c => (
-                        <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px 3px 4px', borderRadius: '999px', backgroundColor: 'var(--surface-elevated)', border: '1px solid var(--border-color)' }}>
-                          <Avatar name={c.name} color={c.avatarColor} size={20} />
-                          <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-primary)' }}>{c.name.split(' ')[0]}</span>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div style={{ padding: '0 12px 12px' }}>
-                      <input
-                        autoFocus
-                        type="text"
-                        placeholder="Group name..."
-                        value={groupName}
-                        onChange={(e) => setGroupName(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') handleCreateGroup(); }}
-                        style={{ width: '100%', height: '38px', padding: '0 12px', fontSize: '14px', borderRadius: '8px', outline: 'none', border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-elevated)', color: 'var(--text-primary)', boxSizing: 'border-box', marginBottom: '10px' }}
-                      />
-                      <button
-                        disabled={!groupName.trim()}
-                        onClick={handleCreateGroup}
-                        style={{ width: '100%', padding: '9px', borderRadius: '8px', border: 'none', cursor: groupName.trim() ? 'pointer' : 'not-allowed', backgroundColor: groupName.trim() ? '#C2671A' : 'var(--border-color)', color: '#fff', fontSize: '13px', fontWeight: 700, transition: 'opacity 0.15s' }}
-                      >
-                        Create Group
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 20px 16px', flexShrink: 0 }}>
+          <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>Team Chat</h2>
         </div>
 
         {/* Search */}
         <div style={{ padding: '0 16px 12px', flexShrink: 0 }}>
           <div style={{ position: 'relative' }}>
-            <Search
-              style={{
-                position: 'absolute',
-                left: '10px',
-                top: '50%',
-                transform: 'translateY(-50%)',
-                width: '15px',
-                height: '15px',
-                color: 'var(--text-secondary)',
-                pointerEvents: 'none',
-              }}
-            />
+            <Search style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', width: '15px', height: '15px', color: 'var(--text-secondary)', pointerEvents: 'none' }} />
             <Input
               type="text"
               placeholder="Search conversations..."
@@ -720,109 +453,55 @@ export default function SuperAdminChatPage() {
 
         {/* Conversation list */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
-          {filteredConversations.map((conv) => {
+          {loadingConvs ? (
+            <div style={{ padding: '32px', textAlign: 'center' }}>
+              <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Loading conversations...</p>
+            </div>
+          ) : filteredConversations.length === 0 ? (
+            <div style={{ padding: '32px', textAlign: 'center' }}>
+              <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>No conversations yet</p>
+            </div>
+          ) : filteredConversations.map((conv) => {
             const isActive = conv.id === selectedId;
-            const preview = getLastMessagePreview(conv);
+            const previewText = conv.lastMessageIsMe ? `You: ${conv.lastMessage}` : conv.lastMessage;
 
             return (
               <button
                 key={conv.id}
                 onClick={() => handleSelectConversation(conv.id)}
                 style={{
-                  width: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
+                  width: '100%', display: 'flex', alignItems: 'center', gap: '12px',
                   padding: '12px 16px',
                   backgroundColor: isActive ? 'var(--surface-elevated)' : 'transparent',
-                  border: 'none',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  transition: 'background-color 0.15s',
+                  border: 'none', cursor: 'pointer', textAlign: 'left', transition: 'background-color 0.15s',
                 }}
-                onMouseEnter={(e) => {
-                  if (!isActive)
-                    (e.currentTarget as HTMLButtonElement).style.backgroundColor =
-                      'var(--surface-elevated)';
-                }}
-                onMouseLeave={(e) => {
-                  if (!isActive)
-                    (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent';
-                }}
+                onMouseEnter={(e) => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--surface-elevated)'; }}
+                onMouseLeave={(e) => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}
               >
-                {conv.isGroup ? (
-                  <div style={{ width: 40, height: 40, borderRadius: '50%', backgroundColor: conv.avatarColor, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    <Users style={{ width: 18, height: 18, color: '#fff' }} />
-                  </div>
-                ) : (
-                  <Avatar name={conv.name} color={conv.avatarColor} size={40} online={conv.online} />
-                )}
+                <ChatAvatar name={conv.otherName} color={getAvatarColor(conv.otherProfileId)} size={40} photoUrl={conv.otherAvatarUrl} />
 
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
-                    <span
-                      style={{
-                        fontSize: '14px',
-                        fontWeight: 600,
-                        color: 'var(--text-primary)',
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        maxWidth: '160px',
-                      }}
-                    >
-                      {conv.name}
+                    <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '160px' }}>
+                      {conv.otherName}
                     </span>
                     <span style={{ fontSize: '11px', color: 'var(--text-secondary)', flexShrink: 0, marginLeft: '8px' }}>
-                      {preview.time}
+                      {getTimeLabel(conv.lastMessageTime)}
                     </span>
                   </div>
 
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span
-                      style={{
-                        fontSize: '12px',
-                        color: 'var(--text-secondary)',
-                        marginBottom: '1px',
-                        display: 'block',
-                      }}
-                    >
-                      {conv.role}
+                    <span style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '1px', display: 'block' }}>
+                      {conv.otherRole}
                     </span>
                   </div>
 
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span
-                      style={{
-                        fontSize: '13px',
-                        color: 'var(--text-secondary)',
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        flex: 1,
-                        minWidth: 0,
-                      }}
-                    >
-                      {preview.text}
+                    <span style={{ fontSize: '13px', color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0 }}>
+                      {previewText}
                     </span>
                     {conv.unread > 0 && (
-                      <span
-                        style={{
-                          flexShrink: 0,
-                          marginLeft: '8px',
-                          backgroundColor: '#d4183d',
-                          color: '#fff',
-                          fontSize: '11px',
-                          fontWeight: 700,
-                          borderRadius: '999px',
-                          minWidth: '20px',
-                          height: '20px',
-                          padding: '0 6px',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                        }}
-                      >
+                      <span style={{ flexShrink: 0, marginLeft: '8px', backgroundColor: '#d4183d', color: '#fff', fontSize: '11px', fontWeight: 700, borderRadius: '999px', minWidth: '20px', height: '20px', padding: '0 6px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
                         {conv.unread > 99 ? '99+' : conv.unread}
                       </span>
                     )}
@@ -835,161 +514,78 @@ export default function SuperAdminChatPage() {
       </div>
 
       {/* ── Right panel ─────────────────────────────────────────────────────── */}
-      <div
-        style={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          height: '100%',
-          overflow: 'hidden',
-          backgroundColor: 'var(--surface-white)',
-        }}
-      >
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', backgroundColor: 'var(--surface-white)' }}>
         {selectedConv ? (
           <>
             {/* Chat header */}
-            <div
-              style={{
-                height: '64px',
-                flexShrink: 0,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '0 24px',
-                borderBottom: '1px solid var(--border-color)',
-                backgroundColor: 'var(--surface-white)',
-              }}
-            >
+            <div style={{ height: '64px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--surface-white)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                {selectedConv.isGroup ? (
-                  <div style={{ width: 40, height: 40, borderRadius: '50%', backgroundColor: selectedConv.avatarColor, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    <Users style={{ width: 18, height: 18, color: '#fff' }} />
-                  </div>
-                ) : (
-                  <Avatar name={selectedConv.name} color={selectedConv.avatarColor} size={40} online={selectedConv.online} />
-                )}
+                <ChatAvatar name={selectedConv.otherName} color={getAvatarColor(selectedConv.otherProfileId)} size={40} photoUrl={selectedConv.otherAvatarUrl} />
                 <div>
                   <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.3 }}>
-                    {selectedConv.name}
+                    {selectedConv.otherName}
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                      {selectedConv.isGroup
-                        ? selectedConv.members?.map(m => m.name.split(' ')[0]).join(', ')
-                        : selectedConv.role}
-                    </span>
-                    {!selectedConv.isGroup && (
-                      <>
-                        <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>·</span>
-                        <span style={{ fontSize: '12px', fontWeight: 500, color: selectedConv.online ? '#22c55e' : 'var(--text-secondary)' }}>
-                          {selectedConv.online ? 'Online' : 'Offline'}
-                        </span>
-                      </>
-                    )}
-                  </div>
+                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                    {selectedConv.otherRole}
+                  </span>
                 </div>
               </div>
-
               <div />
             </div>
 
             {/* Messages area */}
-            <div
-              style={{
-                flex: 1,
-                overflowY: 'auto',
-                padding: '24px',
-                display: 'flex',
-                flexDirection: 'column',
-              }}
-            >
-              {(() => {
-                const groups = groupMessagesByDate(selectedConv.messages);
-                const allMsgs = selectedConv.messages;
-                const lastMineIndex = getLastMineIndex(allMsgs);
+            <div style={{ flex: 1, overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column' }}>
+              {loadingMsgs ? (
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Loading messages...</p>
+                </div>
+              ) : messages.length === 0 ? (
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '8px' }}>
+                  <MessageSquare style={{ width: 40, height: 40, color: 'var(--border-color)' }} />
+                  <p style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>No messages yet. Start the conversation!</p>
+                </div>
+              ) : (() => {
+                const groups = groupMessagesByDate(messages);
+                const lastMineIndex = getLastMineIndex(messages);
 
                 return groups.map((group) => (
                   <div key={group.label}>
                     <DateSeparator label={group.label} />
                     {group.msgs.map((msg) => {
-                      const globalIndex = allMsgs.findIndex((m) => m.id === msg.id);
+                      const globalIndex = messages.findIndex((m) => m.id === msg.id);
                       const isLastMine = globalIndex === lastMineIndex;
                       const isMe = msg.from === 'me';
 
                       return (
-                        <div
-                          key={msg.id}
-                          style={{
-                            display: 'flex',
-                            flexDirection: isMe ? 'row-reverse' : 'row',
-                            alignItems: 'flex-end',
-                            gap: '8px',
-                            marginBottom: '8px',
-                          }}
-                        >
+                        <div key={msg.id} style={{ display: 'flex', flexDirection: isMe ? 'row-reverse' : 'row', alignItems: 'flex-end', gap: '8px', marginBottom: '8px' }}>
                           {/* Their avatar */}
                           {!isMe && (
-                            <div style={{ flexShrink: 0, marginBottom: isLastMine ? '20px' : '0' }}>
-                              <Avatar
-                                name={selectedConv.name}
-                                color={selectedConv.avatarColor}
-                                size={28}
-                              />
+                            <div style={{ flexShrink: 0 }}>
+                              <ChatAvatar name={selectedConv.otherName} color={getAvatarColor(selectedConv.otherProfileId)} size={28} photoUrl={selectedConv.otherAvatarUrl} />
                             </div>
                           )}
 
-                          <div
-                            style={{
-                              display: 'flex',
-                              flexDirection: 'column',
-                              alignItems: isMe ? 'flex-end' : 'flex-start',
-                              maxWidth: '60%',
-                            }}
-                          >
-                            <div
-                              style={{
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start', maxWidth: '60%' }}>
+                            {/* Image if present */}
+                            {msg.imageUrl && (
+                              <img src={msg.imageUrl} alt="" style={{ maxWidth: '280px', maxHeight: '200px', borderRadius: '12px', marginBottom: msg.text ? '4px' : 0, objectFit: 'cover', cursor: 'pointer' }} />
+                            )}
+                            {msg.text && (
+                              <div style={{
                                 padding: '10px 14px',
-                                borderRadius: isMe
-                                  ? '16px 16px 4px 16px'
-                                  : '16px 16px 16px 4px',
+                                borderRadius: isMe ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
                                 backgroundColor: isMe ? '#C2671A' : 'var(--surface-elevated)',
                                 color: isMe ? '#fff' : 'var(--text-primary)',
-                                fontSize: '14px',
-                                lineHeight: 1.5,
-                                wordBreak: 'break-word',
-                              }}
-                            >
-                              {msg.text}
-                            </div>
-
-                            <div
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '4px',
-                                marginTop: '3px',
-                              }}
-                            >
-                              <span
-                                style={{
-                                  fontSize: '11px',
-                                  color: 'var(--text-secondary)',
-                                }}
-                              >
-                                {formatTime(msg.timestamp)}
-                              </span>
+                                fontSize: '14px', lineHeight: 1.5, wordBreak: 'break-word',
+                              }}>
+                                {msg.text}
+                              </div>
+                            )}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '3px' }}>
+                              <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{formatTime(msg.timestamp)}</span>
                               {isMe && isLastMine && (
-                                <span
-                                  style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '2px',
-                                    fontSize: '11px',
-                                    color: 'var(--text-secondary)',
-                                  }}
-                                >
-                                  <CheckCheck style={{ width: '12px', height: '12px' }} />
-                                  Read
+                                <span style={{ display: 'flex', alignItems: 'center', gap: '2px', fontSize: '11px', color: 'var(--text-secondary)' }}>
+                                  <CheckCheck style={{ width: '12px', height: '12px' }} /> Read
                                 </span>
                               )}
                             </div>
@@ -1004,39 +600,12 @@ export default function SuperAdminChatPage() {
             </div>
 
             {/* Input area */}
-            <div
-              style={{
-                flexShrink: 0,
-                borderTop: '1px solid var(--border-color)',
-                padding: '16px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                backgroundColor: 'var(--surface-white)',
-              }}
-            >
+            <div style={{ flexShrink: 0, borderTop: '1px solid var(--border-color)', padding: '16px', display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: 'var(--surface-white)' }}>
               <button
                 title="Attach file"
-                style={{
-                  width: '36px',
-                  height: '36px',
-                  flexShrink: 0,
-                  borderRadius: '8px',
-                  border: '1px solid var(--border-color)',
-                  backgroundColor: 'transparent',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                  color: 'var(--text-secondary)',
-                  transition: 'background-color 0.15s',
-                }}
-                onMouseEnter={(e) =>
-                  (e.currentTarget.style.backgroundColor = 'var(--surface-elevated)')
-                }
-                onMouseLeave={(e) =>
-                  (e.currentTarget.style.backgroundColor = 'transparent')
-                }
+                style={{ width: '36px', height: '36px', flexShrink: 0, borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-secondary)', transition: 'background-color 0.15s' }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--surface-elevated)')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
               >
                 <Paperclip style={{ width: '16px', height: '16px' }} />
               </button>
@@ -1055,13 +624,7 @@ export default function SuperAdminChatPage() {
                 <button
                   title="Emoji"
                   onClick={() => setEmojiOpen((v) => !v)}
-                  style={{
-                    width: '36px', height: '36px', borderRadius: '8px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: emojiOpen ? 'var(--surface-elevated)' : 'transparent',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    cursor: 'pointer', color: 'var(--text-secondary)', transition: 'background-color 0.15s',
-                  }}
+                  style={{ width: '36px', height: '36px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: emojiOpen ? 'var(--surface-elevated)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-secondary)', transition: 'background-color 0.15s' }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--surface-elevated)')}
                   onMouseLeave={(e) => { if (!emojiOpen) e.currentTarget.style.backgroundColor = 'transparent'; }}
                 >
@@ -1069,45 +632,17 @@ export default function SuperAdminChatPage() {
                 </button>
 
                 {emojiOpen && (
-                  <div
-                    style={{
-                      position: 'absolute', bottom: 'calc(100% + 8px)', right: 0,
-                      width: '420px', backgroundColor: 'var(--surface-white)',
-                      border: '1px solid var(--border-color)', borderRadius: '12px',
-                      boxShadow: '0 8px 24px rgba(0,0,0,0.14)', zIndex: 40, overflow: 'hidden',
-                    }}
-                  >
-                    {/* Category tabs — all fit without scrolling */}
+                  <div style={{ position: 'absolute', bottom: 'calc(100% + 8px)', right: 0, width: '420px', backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)', borderRadius: '12px', boxShadow: '0 8px 24px rgba(0,0,0,0.14)', zIndex: 40, overflow: 'hidden' }}>
                     <div style={{ display: 'flex', borderBottom: '1px solid var(--border-color)', padding: '8px 8px 0', gap: '2px' }}>
                       {EMOJI_GROUPS.map((g, i) => (
-                        <button
-                          key={g.label}
-                          onClick={() => setEmojiTab(i)}
-                          style={{
-                            flex: 1, padding: '6px 4px', borderRadius: '6px 6px 0 0', border: 'none',
-                            cursor: 'pointer', fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap',
-                            backgroundColor: emojiTab === i ? 'var(--surface-elevated)' : 'transparent',
-                            color: emojiTab === i ? 'var(--text-primary)' : 'var(--text-secondary)',
-                            borderBottom: emojiTab === i ? '2px solid #C2671A' : '2px solid transparent',
-                            transition: 'all 0.15s',
-                          }}
-                        >
+                        <button key={g.label} onClick={() => setEmojiTab(i)} style={{ flex: 1, padding: '6px 4px', borderRadius: '6px 6px 0 0', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap', backgroundColor: emojiTab === i ? 'var(--surface-elevated)' : 'transparent', color: emojiTab === i ? 'var(--text-primary)' : 'var(--text-secondary)', borderBottom: emojiTab === i ? '2px solid #C2671A' : '2px solid transparent', transition: 'all 0.15s' }}>
                           {g.label}
                         </button>
                       ))}
                     </div>
-
-                    {/* Emoji grid */}
-                    <div style={{ padding: '12px', display: 'grid', gridTemplateColumns: 'repeat(10, 1fr)', gap: '4px' }}>
-                      {EMOJI_GROUPS[emojiTab].emojis.map((emoji) => (
-                        <button
-                          key={emoji}
-                          onClick={() => insertEmoji(emoji)}
-                          style={{
-                            background: 'none', border: 'none', cursor: 'pointer',
-                            fontSize: '24px', padding: '6px', borderRadius: '8px',
-                            lineHeight: 1, transition: 'background-color 0.1s',
-                          }}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(10, 1fr)', gap: '2px', padding: '12px 8px', maxHeight: '200px', overflowY: 'auto' }}>
+                      {EMOJI_GROUPS[emojiTab].emojis.map((emoji, i) => (
+                        <button key={`${emoji}-${i}`} onClick={() => insertEmoji(emoji)} style={{ width: '36px', height: '36px', borderRadius: '8px', border: 'none', backgroundColor: 'transparent', cursor: 'pointer', fontSize: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background-color 0.15s' }}
                           onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--surface-elevated)')}
                           onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
                         >
@@ -1120,69 +655,24 @@ export default function SuperAdminChatPage() {
               </div>
 
               <button
-                title="Send"
                 onClick={handleSend}
                 disabled={!inputValue.trim()}
-                style={{
-                  width: '36px',
-                  height: '36px',
-                  flexShrink: 0,
-                  borderRadius: '999px',
-                  border: 'none',
-                  backgroundColor: inputValue.trim() ? '#C2671A' : 'var(--border-color)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: inputValue.trim() ? 'pointer' : 'not-allowed',
-                  color: '#fff',
-                  transition: 'background-color 0.15s',
-                }}
+                style={{ width: '36px', height: '36px', flexShrink: 0, borderRadius: '8px', border: 'none', backgroundColor: inputValue.trim() ? '#C2671A' : 'var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: inputValue.trim() ? 'pointer' : 'not-allowed', transition: 'background-color 0.15s' }}
               >
-                <Send style={{ width: '16px', height: '16px' }} />
+                <Send style={{ width: '16px', height: '16px', color: '#fff' }} />
               </button>
             </div>
           </>
         ) : (
           /* Empty state */
-          <div
-            style={{
-              flex: 1,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '16px',
-              padding: '40px',
-            }}
-          >
-            <div
-              style={{
-                width: '80px',
-                height: '80px',
-                borderRadius: '50%',
-                backgroundColor: 'rgba(194,103,26,0.1)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <MessageSquare style={{ width: '40px', height: '40px', color: '#C2671A' }} />
-            </div>
-            <div style={{ textAlign: 'center' }}>
-              <h3
-                style={{
-                  fontSize: '18px',
-                  fontWeight: 700,
-                  color: 'var(--text-primary)',
-                  margin: '0 0 8px',
-                }}
-              >
-                Select a conversation
-              </h3>
-              <p style={{ fontSize: '14px', color: 'var(--text-secondary)', margin: 0 }}>
-                Choose a staff member to start messaging
-              </p>
-            </div>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
+            <MessageSquare style={{ width: '48px', height: '48px', color: '#C2671A', opacity: 0.6 }} />
+            <h3 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
+              Select a conversation
+            </h3>
+            <p style={{ fontSize: '14px', color: 'var(--text-secondary)', margin: 0 }}>
+              Choose a staff member to start messaging
+            </p>
           </div>
         )}
       </div>

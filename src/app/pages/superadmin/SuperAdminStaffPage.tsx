@@ -1,9 +1,9 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Search, Plus, X, Edit2, Mail, Phone, MapPin, Calendar,
   Briefcase, Award, Shield, ChevronDown, ChevronRight,
   MoreHorizontal, Download, UserCheck, UserX, MessageSquare,
-  Star, Clock, Building2, Users, UserPlus, AlertCircle,
+  Star, Clock, Building2, Users, UserPlus, AlertCircle, Loader2,
 } from 'lucide-react';
 import { Input } from '../../components/ui/input';
 import { Button } from '../../components/ui/button';
@@ -11,6 +11,8 @@ import { Textarea } from '../../components/ui/textarea';
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '../../components/ui/select';
+import { supabase } from '../../../lib/supabase';
+import { getOrgContext } from '../../hooks/useOrgContext';
 
 // ─── Theme ────────────────────────────────────────────────────
 const ACCENT   = '#F4A261';
@@ -37,6 +39,7 @@ interface StaffMember {
   status: StaffStatus;
   initials: string;
   avatarColor: string;
+  photoUrl?: string;
   startDate: string;
   licenseNo?: string;
   schedule: string;
@@ -72,10 +75,36 @@ const STATUS_CONFIG: Record<StaffStatus, { color: string; bg: string; dot: strin
 const DEPT_TABS = ['All', 'Veterinarians', 'Vet Techs', 'Front Desk', 'Management', 'Lab & Support'] as const;
 type DeptTab = typeof DEPT_TABS[number];
 
-const CLINICS = ['All Clinics', 'Downtown Hugory Vet', 'Westside Animal Care', 'Northpark Pet Hospital'];
+// CLINICS filter is now dynamically populated — see clinicNames state
 
-// ─── Mock Staff Data ──────────────────────────────────────────
-const INITIAL_STAFF: StaffMember[] = []
+// ─── DB → UI role mapping ────────────────────────────────────
+const DB_ROLE_TO_UI: Record<string, Role> = {
+  veterinarian: 'Veterinarian',
+  senior_veterinarian: 'Senior Veterinarian',
+  specialist: 'Specialist',
+  vet_technician: 'Vet Technician',
+  lead_vet_tech: 'Lead Vet Tech',
+  receptionist: 'Receptionist',
+  front_desk_manager: 'Front Desk Manager',
+  clinic_manager: 'Clinic Manager',
+  groomer: 'Groomer',
+  lab_technician: 'Lab Technician',
+};
+const UI_ROLE_TO_DB: Record<Role, string> = Object.fromEntries(
+  Object.entries(DB_ROLE_TO_UI).map(([k, v]) => [v, k])
+) as Record<Role, string>;
+
+const AVATAR_COLORS = ['#2D6A4F', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261', '#06B6D4', '#6366F1', '#DC2626', '#0EA5E9', '#14B8A6'];
+
+function roleToDept(role: Role): Department {
+  if (['Veterinarian', 'Senior Veterinarian', 'Specialist'].includes(role)) return 'Clinical';
+  if (['Vet Technician', 'Lead Vet Tech'].includes(role)) return 'Clinical';
+  if (['Receptionist', 'Front Desk Manager'].includes(role)) return 'Front Desk';
+  if (role === 'Clinic Manager') return 'Management';
+  if (role === 'Lab Technician') return 'Lab';
+  if (role === 'Groomer') return 'Support';
+  return 'Clinical';
+}
 
 // ─── Helpers ──────────────────────────────────────────────────
 function fmtDate(iso: string) {
@@ -132,7 +161,19 @@ function StatusBadge({ status }: { status: StaffStatus }) {
   );
 }
 
-function AvatarCircle({ initials, color, size = 36 }: { initials: string; color: string; size?: number }) {
+function AvatarCircle({ initials, color, size = 36, photoUrl }: { initials: string; color: string; size?: number; photoUrl?: string }) {
+  if (photoUrl) {
+    return (
+      <img
+        src={photoUrl}
+        alt={initials}
+        style={{
+          width: size, height: size, borderRadius: '50%', flexShrink: 0,
+          objectFit: 'cover',
+        }}
+      />
+    );
+  }
   return (
     <div style={{
       width: size, height: size, borderRadius: '50%', flexShrink: 0,
@@ -218,7 +259,7 @@ function StaffDetailDrawer({
 
           {/* Avatar + Name */}
           <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', marginBottom: 24 }}>
-            <AvatarCircle initials={staff.initials} color={staff.avatarColor} size={72} />
+            <AvatarCircle initials={staff.initials} color={staff.avatarColor} size={72} photoUrl={staff.photoUrl} />
             <div style={{ flex: 1 }}>
               <h2 style={{ fontSize: 22, fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 4px' }}>
                 {staff.firstName} {staff.lastName}
@@ -369,9 +410,9 @@ function StaffDetailDrawer({
 }
 
 // ─── Add / Edit Drawer ────────────────────────────────────────
-const ROLES: Role[] = ['Senior Vet', 'Vet', 'Vet Tech', 'Lead Tech', 'Receptionist', 'Front Desk Manager', 'Clinic Manager', 'Groomer', 'Lab Tech', 'Specialist']
+const ROLES: Role[] = ['Senior Veterinarian', 'Veterinarian', 'Vet Technician', 'Lead Vet Tech', 'Receptionist', 'Front Desk Manager', 'Clinic Manager', 'Groomer', 'Lab Technician', 'Specialist']
 const DEPTS: Department[] = ['Clinical', 'Front Desk', 'Management', 'Support', 'Lab'];
-const CLINIC_NAMES = ['Downtown Hugory Vet', 'Westside Animal Care', 'Northpark Pet Hospital'];
+// CLINIC_NAMES is now dynamically populated from Supabase — see clinicNames state
 const STATUS_LIST: StaffStatus[] = ['Active', 'Probation', 'On Leave', 'Inactive'];
 
 type FormState = {
@@ -382,16 +423,17 @@ type FormState = {
 
 const EMPTY_FORM: FormState = {
   firstName: '', lastName: '', role: 'Veterinarian', department: 'Clinical',
-  clinic: 'Downtown Hugory Vet', email: '', phone: '', status: 'Active',
+  clinic: '', email: '', phone: '', status: 'Active',
   startDate: '', licenseNo: '', schedule: 'Mon–Fri, 9–6', bio: '', emergencyContact: '', notes: '',
 };
 
 function StaffFormDrawer({
-  initial, onClose, onSave,
+  initial, onClose, onSave, availableClinics,
 }: {
   initial?: StaffMember | null;
   onClose: () => void;
   onSave: (f: FormState, isEdit: boolean) => void;
+  availableClinics: string[];
 }) {
   const [form, setForm] = useState<FormState>(initial ? {
     firstName: initial.firstName, lastName: initial.lastName, role: initial.role,
@@ -399,7 +441,7 @@ function StaffFormDrawer({
     phone: initial.phone, status: initial.status, startDate: initial.startDate,
     licenseNo: initial.licenseNo ?? '', schedule: initial.schedule, bio: initial.bio,
     emergencyContact: initial.emergencyContact, notes: initial.notes ?? '',
-  } : EMPTY_FORM);
+  } : { ...EMPTY_FORM, clinic: availableClinics[0] || '' });
 
   const set = (k: keyof FormState, v: string) => setForm(p => ({ ...p, [k]: v }));
 
@@ -465,7 +507,7 @@ function StaffFormDrawer({
               <p style={labelStyle}>Clinic</p>
               <Select value={form.clinic} onValueChange={v => set('clinic', v)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>{CLINIC_NAMES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                <SelectContent>{availableClinics.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
               </Select>
             </div>
             <div>
@@ -569,7 +611,10 @@ const labelStyle: React.CSSProperties = {
 
 // ─── Main Page ────────────────────────────────────────────────
 export default function SuperAdminStaffPage() {
-  const [staff, setStaff]               = useState<StaffMember[]>(INITIAL_STAFF);
+  const [staff, setStaff]               = useState<StaffMember[]>([]);
+  const [loading, setLoading]           = useState(true);
+  const [clinicNames, setClinicNames]   = useState<string[]>([]);
+  const [clinicMap, setClinicMap]       = useState<Record<string, string>>({}); // clinic_id → name
   const [search, setSearch]             = useState('');
   const [tab, setTab]                   = useState<DeptTab>('All');
   const [clinicFilter, setClinicFilter] = useState('All Clinics');
@@ -579,6 +624,67 @@ export default function SuperAdminStaffPage() {
   const [addOpen, setAddOpen]           = useState(false);
   const [openMenuId, setOpenMenuId]     = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // ── Fetch clinics ──────────────────────────────────────────
+  useEffect(() => {
+    supabase.from('clinics').select('id, name').then(({ data }) => {
+      if (data) {
+        const map: Record<string, string> = {};
+        data.forEach((c: any) => { map[c.id] = c.name; });
+        setClinicMap(map);
+        setClinicNames(data.map((c: any) => c.name));
+      }
+    });
+  }, []);
+
+  // ── Fetch staff from Supabase ──────────────────────────────
+  const fetchStaff = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('staff')
+      .select('*, profiles:profiles(avatar_url)')
+      .order('first_name');
+
+    if (error || !data) { setLoading(false); return; }
+
+    const mapped: StaffMember[] = data.map((row: any, idx: number) => {
+      const uiRole = DB_ROLE_TO_UI[row.role] || 'Veterinarian';
+      const firstName = row.first_name || '';
+      const lastName = row.last_name || '';
+      const profileAvatarUrl = row.profiles?.avatar_url || null;
+      const photoUrl = row.photo_url || profileAvatarUrl || undefined;
+      return {
+        id: row.id,
+        firstName,
+        lastName,
+        role: uiRole,
+        department: row.department || roleToDept(uiRole),
+        clinic: clinicMap[row.clinic_id] || 'Unknown Clinic',
+        email: row.email || '',
+        phone: row.phone || '',
+        status: (['Active', 'On Leave', 'Inactive', 'Probation'].includes(row.status) ? row.status : 'Active') as StaffStatus,
+        initials: (firstName[0] || '') + (lastName[0] || ''),
+        avatarColor: AVATAR_COLORS[idx % AVATAR_COLORS.length],
+        photoUrl,
+        startDate: row.created_at ? row.created_at.split('T')[0] : '2026-01-01',
+        licenseNo: row.license_no || undefined,
+        schedule: row.schedule || 'Mon–Fri, 9–6',
+        bio: row.bio || '',
+        emergencyContact: '',
+        specializations: undefined,
+        appointments: undefined,
+        rating: undefined,
+      };
+    });
+    setStaff(mapped);
+    setLoading(false);
+  }, [clinicMap]);
+
+  useEffect(() => {
+    if (Object.keys(clinicMap).length > 0) fetchStaff();
+    // Also load if clinicMap is empty (no clinics yet) after a delay
+    const t = setTimeout(() => { if (Object.keys(clinicMap).length === 0) fetchStaff(); }, 500);
+    return () => clearTimeout(t);
+  }, [clinicMap, fetchStaff]);
 
   // Close row menu on outside click
   useEffect(() => {
@@ -609,46 +715,72 @@ export default function SuperAdminStaffPage() {
   const newThisMonth  = staff.filter(s => s.startDate >= '2026-03-01').length;
 
   // ── Handlers ───────────────────────────────────────────────
-  const handleToggleStatus = (id: string) => {
-    setStaff(prev => prev.map(s => {
-      if (s.id !== id) return s;
-      const next: StaffStatus = (s.status === 'Active' || s.status === 'Probation') ? 'Inactive' : 'Active';
-      return { ...s, status: next };
-    }));
+  const handleToggleStatus = async (id: string) => {
+    const current = staff.find(s => s.id === id);
+    if (!current) return;
+    const next: StaffStatus = (current.status === 'Active' || current.status === 'Probation') ? 'Inactive' : 'Active';
+    await supabase.from('staff').update({ status: next }).eq('id', id);
+    setStaff(prev => prev.map(s => s.id !== id ? s : { ...s, status: next }));
     setSelectedStaff(prev => {
       if (!prev || prev.id !== id) return prev;
-      const next: StaffStatus = (prev.status === 'Active' || prev.status === 'Probation') ? 'Inactive' : 'Active';
       return { ...prev, status: next };
     });
   };
 
-  const handleSave = (form: FormState, isEdit: boolean) => {
+  const handleSave = async (form: FormState, isEdit: boolean) => {
+    // Reverse-lookup clinic_id from clinic name
+    const clinicId = Object.entries(clinicMap).find(([, name]) => name === form.clinic)?.[0] || null;
+    const dbRole = UI_ROLE_TO_DB[form.role] || 'veterinarian';
+
+    const dbPayload: Record<string, any> = {
+      first_name: form.firstName,
+      last_name: form.lastName,
+      email: form.email,
+      phone: form.phone || null,
+      role: dbRole,
+      department: form.department,
+      status: form.status,
+      clinic_id: clinicId,
+      schedule: form.schedule || null,
+      license_no: form.licenseNo || null,
+      bio: form.bio || null,
+    };
+
     if (isEdit && editStaff) {
-      setStaff(prev => prev.map(s => s.id !== editStaff.id ? s : {
-        ...s, ...form,
-        licenseNo: form.licenseNo || undefined,
-        notes: form.notes || undefined,
-      }));
-      setSelectedStaff(prev => prev?.id === editStaff.id ? { ...prev, ...form } : prev);
+      await supabase.from('staff').update(dbPayload).eq('id', editStaff.id);
+      // Also update profiles table for name/email/phone
+      await supabase.from('profiles').update({
+        first_name: form.firstName,
+        last_name: form.lastName,
+        email: form.email,
+        phone: form.phone || null,
+        role: dbRole,
+      }).eq('id', editStaff.id);
     } else {
-      const newMember: StaffMember = {
-        id: `ST${String(Date.now()).slice(-4)}`,
-        ...form,
-        initials: (form.firstName[0] ?? '') + (form.lastName[0] ?? ''),
-        avatarColor: ACCENT,
-        licenseNo: form.licenseNo || undefined,
-        notes: form.notes || undefined,
-        appointments: 0,
-        rating: undefined,
-        specializations: undefined,
-      };
-      setStaff(prev => [newMember, ...prev]);
+      const orgCtx = await getOrgContext();
+      dbPayload.organization_id = orgCtx.organizationId;
+      const { data: inserted } = await supabase.from('staff').insert(dbPayload).select('id').single();
+      if (inserted) {
+        // Also create a profiles row
+        await supabase.from('profiles').insert({
+          id: inserted.id,
+          first_name: form.firstName,
+          last_name: form.lastName,
+          email: form.email,
+          phone: form.phone || null,
+          role: dbRole,
+          organization_id: orgCtx.organizationId,
+        });
+      }
     }
+
     setEditStaff(undefined);
     setAddOpen(false);
+    fetchStaff(); // Refresh from DB
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
+    await supabase.from('staff').delete().eq('id', id);
     setStaff(prev => prev.filter(s => s.id !== id));
     if (selectedStaff?.id === id) setSelectedStaff(null);
     setOpenMenuId(null);
@@ -657,7 +789,7 @@ export default function SuperAdminStaffPage() {
   // ── Stat cards ─────────────────────────────────────────────
   const STATS = [
     { label: 'Total Staff',     value: staff.length, icon: Users,     color: ACCENT,     bgColor: ACCENT_BG,   sub: 'across all clinics' },
-    { label: 'Active',          value: totalActive,  icon: UserCheck,  color: '#16A34A',  bgColor: '#22C55E15', sub: `${Math.round(totalActive / staff.length * 100)}% of total` },
+    { label: 'Active',          value: totalActive,  icon: UserCheck,  color: '#16A34A',  bgColor: '#22C55E15', sub: staff.length > 0 ? `${Math.round(totalActive / staff.length * 100)}% of total` : '0% of total' },
     { label: 'On Leave',        value: totalOnLeave, icon: Clock,      color: '#D97706',  bgColor: '#F59E0B15', sub: 'currently away' },
     { label: 'New This Month',  value: newThisMonth, icon: UserPlus,   color: '#6366F1',  bgColor: '#818CF815', sub: 'onboarded Mar 2026' },
   ];
@@ -727,7 +859,10 @@ export default function SuperAdminStaffPage() {
 
             <Select value={clinicFilter} onValueChange={setClinicFilter}>
               <SelectTrigger style={{ width: 200, height: 38 }}><SelectValue /></SelectTrigger>
-              <SelectContent>{CLINICS.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+              <SelectContent>
+                <SelectItem value="All Clinics">All Clinics</SelectItem>
+                {clinicNames.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+              </SelectContent>
             </Select>
 
             <Select value={statusFilter} onValueChange={v => setStatusFilter(v as StaffStatus | 'All')}>
@@ -785,7 +920,17 @@ export default function SuperAdminStaffPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.length === 0 && (
+                {loading && (
+                  <tr>
+                    <td colSpan={8} style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: 14 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                        <Loader2 style={{ width: 18, height: 18, animation: 'spin 1s linear infinite' }} />
+                        Loading staff…
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                {!loading && filtered.length === 0 && (
                   <tr>
                     <td colSpan={8} style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: 14 }}>
                       No staff members match your filters.
@@ -806,7 +951,7 @@ export default function SuperAdminStaffPage() {
                     {/* Staff Member */}
                     <td style={{ padding: '14px 16px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <AvatarCircle initials={s.initials} color={s.avatarColor} size={38} />
+                        <AvatarCircle initials={s.initials} color={s.avatarColor} size={38} photoUrl={s.photoUrl} />
                         <div>
                           <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 1px' }}>
                             {s.firstName} {s.lastName}
@@ -945,7 +1090,7 @@ export default function SuperAdminStaffPage() {
 
       {/* ── Add Drawer ── */}
       {addOpen && (
-        <StaffFormDrawer onClose={() => setAddOpen(false)} onSave={handleSave} />
+        <StaffFormDrawer onClose={() => setAddOpen(false)} onSave={handleSave} availableClinics={clinicNames} />
       )}
 
       {/* ── Edit Drawer ── */}
@@ -954,8 +1099,14 @@ export default function SuperAdminStaffPage() {
           initial={editStaff}
           onClose={() => setEditStaff(undefined)}
           onSave={handleSave}
+          availableClinics={clinicNames}
         />
       )}
+
+      <style>{`
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes slideInRight { from { transform: translateX(100%); } to { transform: translateX(0); } }
+      `}</style>
     </div>
   );
 }

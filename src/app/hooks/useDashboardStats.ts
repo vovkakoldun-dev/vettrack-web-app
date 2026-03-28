@@ -32,7 +32,8 @@ export function useDashboardStats(): DashboardStats {
         .from('appointments')
         .select('id', { count: 'exact', head: true })
         .gte('scheduled_at', `${today}T00:00:00`)
-        .lte('scheduled_at', `${today}T23:59:59`),
+        .lte('scheduled_at', `${today}T23:59:59`)
+        .not('status', 'eq', 'Cancelled'),
       supabase
         .from('vaccinations')
         .select('id', { count: 'exact', head: true })

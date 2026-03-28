@@ -20,6 +20,7 @@ import VaccinesPage from './pages/VaccinesPage';
 import PetsPage from './pages/PetsPage';
 import ChatPage from './pages/ChatPage';
 import LoginPage from './pages/LoginPage';
+import ToastNotification from './components/ToastNotification';
 import SupabaseTestPage from './pages/SupabaseTestPage';
 import VisitPage from './pages/VisitPage';
 import CheckoutPage from './pages/CheckoutPage';
@@ -452,6 +453,7 @@ export default function App() {
   return (
     <AuthProvider>
       <AppRoutes />
+      <ToastNotification />
     </AuthProvider>
   );
 }

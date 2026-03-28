@@ -5,6 +5,7 @@ import {
   ArrowLeft, Sun, Moon, Globe, Phone, Mail, Calendar,
 } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
+import { getOrgContext } from '../../hooks/useOrgContext';
 import { useTheme } from '../../hooks/useTheme';
 
 interface Clinic {
@@ -48,6 +49,7 @@ export default function SystemAdminPage() {
 
   async function handleAddClinic() {
     if (!newName.trim()) return;
+    const orgCtx = await getOrgContext();
     const { data, error } = await supabase.from('clinics').insert({
       name: newName.trim(),
       address: newAddress.trim() || null,
@@ -55,7 +57,7 @@ export default function SystemAdminPage() {
       email: newEmail.trim() || null,
       is_dev: false,
       status: 'active',
-      organization_id: '00000000-0000-0000-0000-000000000001',
+      organization_id: orgCtx.organizationId,
     }).select().single();
     if (data && !error) {
       setClinics(prev => [...prev, data as Clinic]);

@@ -21,6 +21,7 @@ import {
 } from '../../components/ui/select';
 import { Calendar } from '../../components/ui/calendar';
 import { supabase } from '../../../lib/supabase';
+import { getOrgContext } from '../../hooks/useOrgContext';
 import { useClients } from '../../hooks/useClients';
 import { usePets } from '../../hooks/usePets';
 
@@ -134,8 +135,6 @@ const SCHEDULE_SLOTS = Array.from({ length: 48 }, (_, i) => {
 
 const FILTER_TABS = ['All', 'Upcoming', 'Completed', 'Cancelled'] as const;
 type FilterTab = typeof FILTER_TABS[number];
-
-const DEFAULT_ORG_ID = '00000000-0000-0000-0000-000000000001';
 
 // ─── Component ───────────────────────────────────────────────
 
@@ -2080,15 +2079,15 @@ export default function AdminBookingsPage() {
                   setPaidApptIds((prev) => new Set(prev).add(paymentAppt.id));
                   // Create medical record + invoice + payment
                   if (paymentAppt.petId && paymentAppt.clientId) {
+                    const orgCtx = await getOrgContext();
                     const now = new Date();
                     const recNum = `VT-${now.getFullYear()}-${String(now.getTime()).slice(-6)}`;
-                    const clinicId = '00000000-0000-0000-0000-000000000002';
                     await supabase.from('medical_records').insert({
                       record_number: recNum,
                       appointment_id: paymentAppt.id,
                       pet_id: paymentAppt.petId,
                       client_id: paymentAppt.clientId,
-                      clinic_id: clinicId,
+                      clinic_id: orgCtx.clinicId,
                       vet_id: paymentAppt.vetId || null,
                       visit_date: paymentAppt.date,
                       visit_time: paymentAppt.timeStart,
@@ -2106,9 +2105,9 @@ export default function AdminBookingsPage() {
                     const { data: invData } = await supabase.from('invoices').insert({
                       invoice_number: invNum,
                       client_id: paymentAppt.clientId,
-                      clinic_id: clinicId,
+                      clinic_id: orgCtx.clinicId,
                       appointment_id: paymentAppt.id,
-                      organization_id: DEFAULT_ORG_ID,
+                      organization_id: orgCtx.organizationId,
                       subtotal,
                       tax_amount: taxAmount,
                       total,
@@ -2801,6 +2800,7 @@ export default function AdminBookingsPage() {
                   const scheduled_at = `${newApptDate}T${newApptTime}:00${tzOffset}`;
                   const durationMin = parseInt(newApptDuration) || 30;
 
+                  const orgCtx2 = await getOrgContext();
                   let finalClientId = newApptClientId;
                   let finalPetId = newApptPetId;
 
@@ -2810,7 +2810,7 @@ export default function AdminBookingsPage() {
                     const { data: newClient, error: cErr } = await supabase
                       .from('clients')
                       .insert([{
-                        organization_id: DEFAULT_ORG_ID,
+                        organization_id: orgCtx2.organizationId,
                         first_name: nameParts[0] ?? '',
                         last_name: nameParts.slice(1).join(' ') || '',
                         email: npOwnerEmail || undefined,

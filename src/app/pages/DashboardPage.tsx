@@ -562,9 +562,9 @@ export default function DashboardPage() {
     status: (['Healthy', 'Follow-up', 'Critical'].includes((c as any).health_status) ? (c as any).health_status : 'Healthy') as 'Healthy' | 'Follow-up' | 'Critical',
   }));
 
-  // Today's upcoming appointments
+  // Today's appointments (exclude cancelled)
   const upcomingAppointments = todayAppointments
-    .filter(a => a.status !== 'Cancelled' && a.status !== 'Completed')
+    .filter(a => a.status !== 'Cancelled')
     .slice(0, 4);
 
   const isSearching = searchQuery.trim().length > 0;

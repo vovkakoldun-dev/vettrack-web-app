@@ -209,10 +209,9 @@ const ADMIN_ROLES  = ['front_desk_manager', 'receptionist', 'clinic_manager', 's
 
 | Table | Purpose | Key Columns |
 |-------|---------|-------------|
-| `chat_messages` | Legacy DM system | `id`, `conversation` (string key), `sender_name`, `content`, `created_at` |
-| `conversations` | Multi-user chats | `id`, `organization_id`, `type` (direct/group), `name` |
-| `conversation_participants` | Chat members | `conversation_id`, `staff_id` |
-| `messages` | Modern messages | `id`, `conversation_id`, `sender_id`, `content`, `created_at` |
+| `conversations` | Chat conversations | `id`, `organization_id`, `type` (direct/group), `title`, `created_by`, `created_at` |
+| `conversation_participants` | Chat members | `id`, `conversation_id`, `profile_id`, `last_read_at`, `is_admin`, `joined_at` |
+| `messages` | Chat messages | `id`, `conversation_id`, `sender_id` (FK profiles.id), `content`, `image_url`, `created_at` |
 
 ### Operations Tables
 
@@ -276,11 +275,11 @@ const ADMIN_ROLES  = ['front_desk_manager', 'receptionist', 'clinic_manager', 's
 
 ### Rules
 
-1. **Never store images in the database.** Only the public/signed URL is saved (`avatar_url` in `profiles`, `photo_url` in `pets`, `image_url` in `chat_messages`).
+1. **Never store images in the database.** Only the public/signed URL is saved (`avatar_url` in `profiles`, `photo_url` in `pets`, `image_url` in `messages`).
 2. **Never store images as base64** or in localStorage.
 3. Profile avatars use `upsert: true` — the old file is replaced automatically, no manual delete needed.
 4. Pet photos use `upsert: true` — path: `{clientId}/{timestamp}.{ext}`.
-5. Chat images use path: `msg-{timestamp}.png`. URL is stored in `chat_messages.image_url`.
+5. Chat images use path: `msg-{timestamp}.png`. URL is stored in `messages.image_url`.
 6. Append `?t={timestamp}` to URLs for cache-busting after upload.
 7. Avatar upload/remove is centralised in `useProfile.ts` via `uploadAvatar()` and `removeAvatar()` functions.
 
@@ -288,30 +287,35 @@ const ADMIN_ROLES  = ['front_desk_manager', 'receptionist', 'clinic_manager', 's
 
 ## 8. Chat System
 
-### Current Implementation (Legacy)
+### Relational Structure
 
-Uses the `chat_messages` table with a string `conversation` field.
+Uses three tables: `conversations`, `conversation_participants`, and `messages`.
 
-| Conversation Key | Participants |
-|-----------------|-------------|
-| `admin-doctor` | Front Desk Admin ↔ Doctor |
+| Table | Purpose |
+|-------|---------|
+| `conversations` | Each conversation has a type (`direct`/`group`) and belongs to an organization |
+| `conversation_participants` | Links profiles to conversations, stores per-user `last_read_at` |
+| `messages` | Each message has `sender_id` (FK to `profiles.id`), `conversation_id`, `content`, optional `image_url` |
+
+### Default Conversation (dev)
+
+| Conversation ID | Type | Participants |
+|----------------|------|-------------|
+| `11111111-1111-1111-1111-111111111111` | direct | Admin ↔ Doctor |
 
 ### How It Works
 
-1. Messages stored with `conversation = 'admin-doctor'`, `sender_name` as display name, optional `image_url` for attachments.
-2. **Image attachments**: Uploaded to `chat-images` bucket as `msg-{timestamp}.png`. Signed URL stored in `chat_messages.image_url`.
-3. **Unread tracking**: `staff.chat_read_at` timestamp. Messages after this timestamp are unread.
-4. **Badge logic**: Sidebar shows `1` if any unread messages exist (conversation count, not message count).
-5. **Read receipt**: On opening chat, update `staff.chat_read_at` to `now()` and dispatch custom event (`adminChatRead` / `doctorChatRead`).
-6. Polling interval: 3 seconds for unread check.
+1. Messages stored with `sender_id = user.id` (from auth). Sender identity determined by UUID comparison, not string names.
+2. **Sender display name**: Join `profiles` table on `sender_id` to get `first_name`, `last_name`.
+3. **Image attachments**: Uploaded to `chat-images` bucket as `msg-{timestamp}.png`. URL stored in `messages.image_url`.
+4. **Unread tracking**: `conversation_participants.last_read_at` per user per conversation. Messages after this timestamp are unread.
+5. **Badge logic**: Sidebar shows `1` if any unread messages exist (binary, not count).
+6. **Read receipt**: On opening chat, update `conversation_participants.last_read_at` to `now()` and dispatch custom event (`adminChatRead` / `doctorChatRead`).
+7. Polling interval: 3 seconds for unread check.
 
 ### Race Condition Prevention
 
-Load `chat_read_at` from Supabase **before** starting the unread polling interval. Otherwise all messages appear unread against the default `1970` timestamp.
-
-### Future System
-
-Tables `conversations`, `conversation_participants`, and `messages` exist for a multi-user chat system but are not yet wired up.
+Load `last_read_at` from `conversation_participants` **before** starting the unread polling interval. Otherwise all messages appear unread against the default `1970` timestamp.
 
 ---
 
@@ -373,6 +377,27 @@ Custom DOM events keep sidebar badges in sync without polling:
 | `adminPhotoChanged` | AdminSettingsPage | AdminSidebar |
 | `adminProfileChanged` | AdminSettingsPage | AdminSidebar |
 | `staffPhotoChanged` | SettingsPage | Sidebar |
+| `showToast` | Sidebar, AdminSidebar (polling) | ToastNotification |
+
+### Toast Notifications
+
+A global `ToastNotification` component (mounted in `App.tsx`) shows bottom-right popups for new messages and notifications.
+
+| Feature | Detail |
+|---------|--------|
+| Component | `src/app/components/ToastNotification.tsx` |
+| Trigger | `showToast({ type, title, message, link })` custom event |
+| Types | `chat` (blue icon) / `notification` (green icon) |
+| Auto-dismiss | 5 seconds |
+| Max visible | 3 toasts stacked |
+| Navigation | Clicking a toast navigates to `link` and dismisses it |
+| Suppression | Not shown when user is already on the target page |
+
+**Usage from any component:**
+```ts
+import { showToast } from './components/ToastNotification';
+showToast({ type: 'chat', title: 'Admin', message: 'New message', link: '/chat' });
+```
 
 ---
 
@@ -645,6 +670,7 @@ src/
       AdminSidebar.tsx         # Admin portal sidebar
       OwnerSidebar.tsx         # Owner portal sidebar
       SuperAdminSidebar.tsx    # SuperAdmin portal sidebar
+      ToastNotification.tsx     # Global toast popup system
       AddClientDialog.tsx      # Client creation modal
       AppointmentCard.tsx      # Appointment card component
       ClientRow.tsx            # Client list row
@@ -703,9 +729,9 @@ src/
 6. **Images in Storage**: Upload to Supabase bucket, save URL in DB column. Never base64.
 7. **Centralize logic**: Shared pages (NotificationsPage, ClientDetailPage, RecordsPage) are reused across portals. Don't duplicate.
 8. **Custom events for instant sync**: When a page changes data that affects a sidebar badge, dispatch a custom DOM event.
-9. **Race condition prevention**: Always load metadata (e.g. `chat_read_at`) before starting polling intervals.
+9. **Race condition prevention**: Always load metadata (e.g. `last_read_at` from `conversation_participants`) before starting polling intervals.
 10. **Async data access**: All Supabase reads/writes use `async/await`. No synchronous data access patterns.
 
 ---
 
-*Last updated: 2026-03-23*
+*Last updated: 2026-03-24*

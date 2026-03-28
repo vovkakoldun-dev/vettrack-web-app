@@ -19,6 +19,7 @@ export interface Profile {
   phone: string;
   avatarUrl: string;
   role: string;
+  organizationId: string;
 }
 
 const EMPTY_PROFILE: Profile = {
@@ -32,6 +33,7 @@ const EMPTY_PROFILE: Profile = {
   phone: '',
   avatarUrl: '',
   role: '',
+  organizationId: '',
 };
 
 function buildProfile(data: any, portal: PortalType): Profile {
@@ -62,6 +64,7 @@ function buildProfile(data: any, portal: PortalType): Profile {
     phone: data.phone || '',
     avatarUrl: data.avatar_url || '',
     role: data.role || '',
+    organizationId: data.organization_id || '',
   };
 }
 
@@ -93,7 +96,7 @@ export function useProfile(portal: PortalType) {
     if (!user) { setLoading(false); return; }
     const { data } = await supabase
       .from('profiles')
-      .select('id, first_name, last_name, email, phone, avatar_url, role')
+      .select('id, first_name, last_name, email, phone, avatar_url, role, organization_id')
       .eq('id', user.id)
       .single();
 

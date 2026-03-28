@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { uploadAvatar, removeAvatar } from '../hooks/useProfile';
+import { getOrgContext } from '../hooks/useOrgContext';
 import {
   Users, Calendar as CalendarIcon, ClipboardCheck, Clock,
   ChevronRight, ChevronLeft, Plus, Play,
@@ -558,6 +559,7 @@ export default function MyPortalPage() {
   const [vetProfile, setVetProfile] = useState(VET_PROFILE);
   const [vetId, setVetId] = useState<string | null>(null);
   const [profileImage, setProfileImage] = useState('');
+  const [recentActivity, setRecentActivity] = useState<{ description: string; time: string; icon: typeof Stethoscope; color: string }[]>([]);
 
   // ── Photo upload ──
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -731,6 +733,77 @@ export default function MyPortalPage() {
           });
           setRealAppointments(mapped);
         }
+
+        // Fetch recent activity from appointments + vaccinations
+        const activities: { description: string; time: string; icon: typeof Stethoscope; color: string; ts: number }[] = [];
+
+        // Recent appointments (last 7 days, any status)
+        const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+        const { data: recentAppts } = await supabase
+          .from('appointments')
+          .select('scheduled_at, status, reason, pets(name)')
+          .eq('vet_id', staffData.id)
+          .gte('scheduled_at', sevenDaysAgo)
+          .order('scheduled_at', { ascending: false })
+          .limit(10);
+        for (const a of (recentAppts || [])) {
+          const petName = (a.pets as any)?.name || 'patient';
+          const reason = a.reason || 'Visit';
+          const status = a.status || '';
+          let desc = '';
+          let icon = Stethoscope;
+          let color = 'var(--brand-green-text)';
+          if (status === 'Completed') {
+            desc = `Completed ${reason.toLowerCase()} for ${petName}`;
+          } else if (status === 'Cancelled') {
+            desc = `Cancelled appointment for ${petName}`;
+            color = '#94A3B8';
+          } else if (status === 'In Progress') {
+            desc = `In-progress visit with ${petName}`;
+            color = '#3B82F6';
+            icon = ClipboardCheck;
+          } else {
+            desc = `Scheduled ${reason.toLowerCase()} for ${petName}`;
+            color = '#3B82F6';
+            icon = CalendarIcon;
+          }
+          activities.push({ description: desc, time: a.scheduled_at, icon, color, ts: new Date(a.scheduled_at).getTime() });
+        }
+
+        // Recent vaccinations
+        const { data: recentVax } = await supabase
+          .from('vaccinations')
+          .select('administered_date, vaccine_name, pets(name)')
+          .gte('administered_date', new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10))
+          .order('administered_date', { ascending: false })
+          .limit(5);
+        for (const v of (recentVax || [])) {
+          const petName = (v.pets as any)?.name || 'patient';
+          activities.push({
+            description: `Administered ${v.vaccine_name} to ${petName}`,
+            time: v.administered_date,
+            icon: Syringe,
+            color: '#3B82F6',
+            ts: new Date(v.administered_date).getTime(),
+          });
+        }
+
+        // Sort by timestamp descending, take top 5, format time
+        activities.sort((a, b) => b.ts - a.ts);
+        const now = Date.now();
+        const formatted = activities.slice(0, 5).map((a) => {
+          const diff = now - a.ts;
+          const hours = Math.floor(diff / 3600000);
+          const days = Math.floor(diff / 86400000);
+          let timeStr: string;
+          if (hours < 1) timeStr = 'Just now';
+          else if (hours < 24) timeStr = `${hours} hour${hours > 1 ? 's' : ''} ago`;
+          else if (days === 1) timeStr = 'Yesterday';
+          else if (days < 7) timeStr = `${days} days ago`;
+          else timeStr = new Date(a.ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+          return { description: a.description, time: timeStr, icon: a.icon, color: a.color };
+        });
+        setRecentActivity(formatted);
 
         // Fetch patients assigned to this vet
         await refetchPatients(staffData.id);
@@ -1032,6 +1105,7 @@ export default function MyPortalPage() {
       alert('End time must be after start time.');
       return;
     }
+    const orgCtx = await getOrgContext();
     const isRequest = blockType === 'PTO' || blockType === 'Sick Day';
     const start = new Date(blockDateFrom + 'T12:00:00');
     const end = new Date(blockDateTo + 'T12:00:00');
@@ -1051,8 +1125,8 @@ export default function MyPortalPage() {
         status: isRequest ? 'Pending' : 'Confirmed',
       });
       dbRows.push({
-        organization_id: '00000000-0000-0000-0000-000000000001',
-        clinic_id: '00000000-0000-0000-0000-000000000002',
+        organization_id: orgCtx.organizationId,
+        clinic_id: orgCtx.clinicId,
         staff_id: vetId,
         type: blockType,
         date: dateStr,
@@ -1528,7 +1602,10 @@ export default function MyPortalPage() {
           <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-5" style={{ borderRadius: '12px' }}>
             <h3 className="text-[var(--text-primary)] mb-4" style={{ fontSize: '16px', fontWeight: 600 }}>Recent Activity</h3>
             <div className="space-y-4">
-              {RECENT_ACTIVITY.map((activity, idx) => {
+              {recentActivity.length === 0 && (
+                <p className="text-[var(--text-secondary)] text-center py-4" style={{ fontSize: '13px' }}>No recent activity</p>
+              )}
+              {recentActivity.map((activity, idx) => {
                 const Icon = activity.icon;
                 return (
                   <div key={idx} className="flex items-start gap-3">

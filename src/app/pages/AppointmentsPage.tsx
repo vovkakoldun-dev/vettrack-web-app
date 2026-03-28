@@ -14,8 +14,7 @@ import type { AppointmentRow } from '../hooks/useAppointments';
 import { useClients } from '../hooks/useClients';
 import { usePets } from '../hooks/usePets';
 import { supabase } from '../../lib/supabase';
-
-const DEFAULT_ORG_ID = '00000000-0000-0000-0000-000000000001';
+import { getOrgContext } from '../hooks/useOrgContext';
 
 // ─── Adapter: Supabase row → legacy display shape ─────────────
 
@@ -1637,6 +1636,7 @@ export default function AppointmentsPage() {
                   const scheduled_at = `${newApptDate}T${newApptTime}:00${tzOffset}`;
                   const durationMin = parseInt(newApptDuration) || 30;
 
+                  const orgCtx = await getOrgContext();
                   let finalClientId = newApptClientId;
                   let finalPetId = newApptPetId;
 
@@ -1647,7 +1647,7 @@ export default function AppointmentsPage() {
                     const { data: newClient, error: cErr } = await supabase
                       .from('clients')
                       .insert([{
-                        organization_id: DEFAULT_ORG_ID,
+                        organization_id: orgCtx.organizationId,
                         first_name: nameParts[0] ?? '',
                         last_name: nameParts.slice(1).join(' ') || '',
                         email: npOwnerEmail || undefined,
