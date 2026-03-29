@@ -86,23 +86,36 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
       const weekAgo = new Date(Date.now() - 7 * 86400000);
       const weekAgoStr = `${weekAgo.getFullYear()}-${(weekAgo.getMonth() + 1).toString().padStart(2, '0')}-${weekAgo.getDate().toString().padStart(2, '0')}`;
 
+      const uid = user?.id;
       const [apptTodayRes, clientRes, vacRes, completedRes, cancelledRes] = await Promise.all([
-        supabase.from('appointments').select('id, scheduled_at')
-          .eq('organization_id', organizationId)
-          .gte('scheduled_at', `${today}T00:00:00`).lte('scheduled_at', `${today}T23:59:59`)
-          .in('status', ['Scheduled', 'Confirmed']),
+        (() => {
+          let q = supabase.from('appointments').select('id, scheduled_at')
+            .eq('organization_id', organizationId)
+            .gte('scheduled_at', `${today}T00:00:00`).lte('scheduled_at', `${today}T23:59:59`)
+            .in('status', ['Scheduled', 'Confirmed']);
+          if (uid) q = q.eq('vet_id', uid);
+          return q;
+        })(),
         supabase.from('clients').select('id, created_at')
           .eq('organization_id', organizationId)
           .gte('created_at', `${weekAgoStr}T00:00:00`),
         supabase.from('vaccinations').select('id, next_due_date')
           .eq('organization_id', organizationId)
           .lte('next_due_date', today),
-        supabase.from('appointments').select('id')
-          .eq('organization_id', organizationId)
-          .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Completed'),
-        supabase.from('appointments').select('id')
-          .eq('organization_id', organizationId)
-          .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Cancelled'),
+        (() => {
+          let q = supabase.from('appointments').select('id')
+            .eq('organization_id', organizationId)
+            .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Completed');
+          if (uid) q = q.eq('vet_id', uid);
+          return q;
+        })(),
+        (() => {
+          let q = supabase.from('appointments').select('id')
+            .eq('organization_id', organizationId)
+            .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Cancelled');
+          if (uid) q = q.eq('vet_id', uid);
+          return q;
+        })(),
       ]);
 
       // Collect all notification IDs (must match NotificationsPage)
@@ -114,14 +127,17 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
       (vacRes.data || []).forEach((v) => allIds.push(`vax-${v.id}`));
       (clientRes.data || []).forEach((c) => allIds.push(`client-${c.id}`));
 
-      // Count notification events from Supabase
+      // Count notification events from Supabase (filter by vet for doctor portal)
       const sevenDaysAgoISO = new Date(Date.now() - 7 * 86400000).toISOString();
       const { data: notifEvts } = await supabase
         .from('notification_events')
-        .select('id')
+        .select('id, data')
         .eq('organization_id', organizationId)
         .gte('timestamp', sevenDaysAgoISO);
       for (const evt of (notifEvts || [])) {
+        const d = (evt as any).data;
+        // Skip events targeting a different vet
+        if (uid && d?.vetId && d.vetId !== uid) continue;
         allIds.push(evt.id);
       }
 

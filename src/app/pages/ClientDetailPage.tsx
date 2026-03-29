@@ -39,14 +39,7 @@ import {
 
 // ─── Mock Data ───────────────────────────────────────────────
 
-const DISEASES_DB = [
-  'Canine Parvovirus', 'Kennel Cough', 'Lyme Disease', 'Rabies',
-  'Distemper', 'Heartworm', 'Hip Dysplasia', 'Arthritis',
-  'Diabetes Mellitus', 'Hypothyroidism', 'Cushing\'s Disease',
-  'Feline Leukemia', 'Feline Immunodeficiency Virus', 'Pancreatitis',
-  'Urinary Tract Infection', 'Ear Infection', 'Dermatitis',
-  'Gastroenteritis', 'Dental Disease', 'Obesity',
-];
+// Conditions loaded from vet_conditions_reference (VeNom codes) at runtime
 
 const mockClient = {
   id: 1,
@@ -518,6 +511,7 @@ export default function ClientDetailPage() {
   const [conditionOpen, setConditionOpen] = useState(false);
   const [conditionSearch, setConditionSearch] = useState('');
   const [conditions, setConditions] = useState(client.pets[0].conditions);
+  const [diseasesDb, setDiseasesDb] = useState<string[]>([]);
   const [expandedConditionId, setExpandedConditionId] = useState<any>(null);
   const [allergies, setAllergies] = useState(client.pets[0].allergies);
   const [allergyInput, setAllergyInput] = useState('');
@@ -623,6 +617,20 @@ export default function ClientDetailPage() {
     setInsCoverageType(client.insurance.coverageType); setInsExpiry(client.insurance.expiryDate);
     setSelectedPetIdx(initialIdx);
   }, [dbLoaded, client]);
+
+  // Load VeNom conditions reference from database
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from('vet_conditions_reference')
+        .select('name')
+        .eq('type', 'diagnosis')
+        .eq('is_active', true)
+        .order('name', { ascending: true });
+      if (data) setDiseasesDb(data.map((r: any) => r.name));
+    })();
+  }, []);
+
   const petStatus = statusColors[patientStatus] || statusColors.Healthy;
   const petStatusOpt = STATUS_OPTIONS.find((o) => o.value === patientStatus)!;
 
@@ -734,10 +742,17 @@ export default function ClientDetailPage() {
     setTreatments(treatments.filter(t => t.id !== treatmentId));
   };
 
-  const filteredDiseases = DISEASES_DB.filter(
-    (d) => d.toLowerCase().includes(conditionSearch.toLowerCase())
-      && !conditions.some((c) => c.name === d)
-  );
+  const filteredDiseases = (() => {
+    const search = conditionSearch.toLowerCase();
+    const results: string[] = [];
+    for (const d of diseasesDb) {
+      if (results.length >= 50) break; // Limit for performance
+      if (d.toLowerCase().includes(search) && !conditions.some((c) => c.name === d)) {
+        results.push(d);
+      }
+    }
+    return results;
+  })();
 
   if (!dbLoaded) {
     return (

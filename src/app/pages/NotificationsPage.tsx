@@ -7,6 +7,7 @@ import {
 import { Button } from '../components/ui/button';
 import { supabase } from '../../lib/supabase';
 import { getOrgContext } from '../hooks/useOrgContext';
+import { useAuth } from '../context/AuthContext';
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -86,7 +87,7 @@ const FILTER_TABS: { label: string; value: FilterTab }[] = [
 
 // ─── Data Fetching ───────────────────────────────────────────
 
-async function fetchNotificationsFromSupabase(isAdmin: boolean): Promise<Notification[]> {
+async function fetchNotificationsFromSupabase(isAdmin: boolean, userId?: string): Promise<Notification[]> {
   const { organizationId } = await getOrgContext();
   const now = new Date();
   const today = localDateString(now);
@@ -114,21 +115,33 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean): Promise<Notific
     { data: noShowAppointments },
     ...rest
   ] = await Promise.all([
-    supabase.from('appointments')
-      .select('id, scheduled_at, duration_minutes, status, reason, pets(id, name, species, breed), clients(id, first_name, last_name), staff(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
-      .eq('organization_id', organizationId)
-      .gte('scheduled_at', `${today}T00:00:00`).lte('scheduled_at', `${today}T23:59:59`)
-      .in('status', ['Scheduled', 'Confirmed']).order('scheduled_at', { ascending: true }),
-    supabase.from('appointments')
-      .select('id, scheduled_at, status, reason, pets(id, name, species, breed), clients(id, first_name, last_name)')
-      .eq('organization_id', organizationId)
-      .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`).lt('scheduled_at', `${today}T00:00:00`)
-      .eq('status', 'Completed').order('scheduled_at', { ascending: false }).limit(10),
-    supabase.from('appointments')
-      .select('id, scheduled_at, reason, pets(id, name), clients(id, first_name, last_name)')
-      .eq('organization_id', organizationId)
-      .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`).eq('status', 'Cancelled')
-      .order('scheduled_at', { ascending: false }).limit(5),
+    (() => {
+      let q = supabase.from('appointments')
+        .select('id, scheduled_at, duration_minutes, status, reason, pets(id, name, species, breed), clients(id, first_name, last_name), staff(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
+        .eq('organization_id', organizationId)
+        .gte('scheduled_at', `${today}T00:00:00`).lte('scheduled_at', `${today}T23:59:59`)
+        .in('status', ['Scheduled', 'Confirmed']).order('scheduled_at', { ascending: true });
+      if (!isAdmin && userId) q = q.eq('vet_id', userId);
+      return q;
+    })(),
+    (() => {
+      let q = supabase.from('appointments')
+        .select('id, scheduled_at, status, reason, pets(id, name, species, breed), clients(id, first_name, last_name)')
+        .eq('organization_id', organizationId)
+        .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`).lt('scheduled_at', `${today}T00:00:00`)
+        .eq('status', 'Completed').order('scheduled_at', { ascending: false }).limit(10);
+      if (!isAdmin && userId) q = q.eq('vet_id', userId);
+      return q;
+    })(),
+    (() => {
+      let q = supabase.from('appointments')
+        .select('id, scheduled_at, reason, pets(id, name), clients(id, first_name, last_name)')
+        .eq('organization_id', organizationId)
+        .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`).eq('status', 'Cancelled')
+        .order('scheduled_at', { ascending: false }).limit(5);
+      if (!isAdmin && userId) q = q.eq('vet_id', userId);
+      return q;
+    })(),
     supabase.from('vaccinations')
       .select('id, vaccine_name, next_due_date, administered_date, pets(id, name, species, breed)')
       .eq('organization_id', organizationId)
@@ -139,18 +152,31 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean): Promise<Notific
       .eq('organization_id', organizationId)
       .gte('created_at', `${sevenDaysAgoStr}T00:00:00`)
       .order('created_at', { ascending: false }).limit(5),
-    supabase.from('appointments')
-      .select('id, scheduled_at, reason, pets(id, name), clients(id, first_name, last_name)')
-      .eq('organization_id', organizationId)
-      .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`).eq('status', 'No Show')
-      .order('scheduled_at', { ascending: false }).limit(5),
-    ...(!isAdmin ? [
+    (() => {
+      let q = supabase.from('appointments')
+        .select('id, scheduled_at, reason, pets(id, name), clients(id, first_name, last_name)')
+        .eq('organization_id', organizationId)
+        .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`).eq('status', 'No Show')
+        .order('scheduled_at', { ascending: false }).limit(5);
+      if (!isAdmin && userId) q = q.eq('vet_id', userId);
+      return q;
+    })(),
+    ...(!isAdmin && userId ? [
       supabase.from('notification_events').select('*')
         .eq('organization_id', organizationId)
         .gte('timestamp', new Date(now.getTime() - 7 * 86400000).toISOString()),
     ] : []),
   ]);
-  const notifEvents = !isAdmin ? (rest[0] as any)?.data : null;
+  const rawNotifEvents = !isAdmin && userId ? (rest[0] as any)?.data : null;
+  // Filter notification events to only show ones targeting the current vet
+  const notifEvents = rawNotifEvents
+    ? (rawNotifEvents as any[]).filter((evt: any) => {
+        const d = evt.data as any;
+        // Only show appt_assign / vet_assign / vet_unassign if vetId matches current user
+        if (d?.vetId && d.vetId !== userId) return false;
+        return true;
+      })
+    : null;
 
   // ── 1. Today's upcoming appointments ──────────────────────
   if (todayAppointments) {
@@ -397,6 +423,7 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean): Promise<Notific
 
 export default function NotificationsPage() {
   const { pathname } = useLocation();
+  const { user } = useAuth();
   const isAdmin = pathname.startsWith('/admin');
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
@@ -407,7 +434,7 @@ export default function NotificationsPage() {
     setLoading(true);
     (async () => {
       try {
-        const data = await fetchNotificationsFromSupabase(isAdmin);
+        const data = await fetchNotificationsFromSupabase(isAdmin, user?.id);
         if (cancelled) return;
 
         // Apply persisted read/dismissed state (do NOT auto-mark as read)
