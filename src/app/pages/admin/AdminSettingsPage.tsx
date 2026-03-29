@@ -685,6 +685,21 @@ export default function AdminSettingsPage() {
       const profileData = { firstName, lastName, email, phone, location };
       window.dispatchEvent(new CustomEvent('adminProfileChanged', { detail: profileData }));
     }
+    if (section === 'security') {
+      if (!currentPw || !newPw || newPw !== confirmPw || newPw.length < 12) return;
+      setSaving(true);
+      setPwError(null);
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser?.email) { setSaving(false); setPwError('Unable to verify user.'); return; }
+      const { error: signInErr } = await supabase.auth.signInWithPassword({ email: authUser.email, password: currentPw });
+      if (signInErr) { setSaving(false); setPwError('Current password is incorrect.'); return; }
+      const { error: updateErr } = await supabase.auth.updateUser({ password: newPw });
+      setSaving(false);
+      if (updateErr) { setPwError(updateErr.message); return; }
+      setCurrentPw('');
+      setNewPw('');
+      setConfirmPw('');
+    }
     setSavedSection(section);
     setTimeout(() => setSavedSection(null), 3000);
   };
@@ -783,6 +798,8 @@ export default function AdminSettingsPage() {
   const [currentPw, setCurrentPw] = useState('');
   const [newPw, setNewPw] = useState('');
   const [confirmPw, setConfirmPw] = useState('');
+  const [pwError, setPwError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const [twoFaEnabled, setTwoFaEnabled] = useState(true);
   const [sessionTimeout, setSessionTimeout] = useState('8h');
 
@@ -1269,13 +1286,14 @@ export default function AdminSettingsPage() {
                   )}
                 </FieldRow>
 
-                <div className="pt-4 flex justify-end">
+                <div className="pt-4 flex justify-end flex-col items-end">
+                  {pwError && <p className="text-[#d4183d] mt-2 mb-2" style={{ fontSize: '13px' }}>{pwError}</p>}
                   <Button
-                    disabled={!currentPw || !newPw || newPw !== confirmPw || newPw.length < 12}
+                    disabled={!currentPw || !newPw || newPw !== confirmPw || newPw.length < 12 || saving}
                     onClick={() => handleSave('security')}
                   >
                     <Key className="w-4 h-4" />
-                    Update password
+                    {saving ? 'Updating…' : 'Update password'}
                   </Button>
                 </div>
               </SectionCard>

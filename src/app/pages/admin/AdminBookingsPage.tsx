@@ -184,7 +184,7 @@ export default function AdminBookingsPage() {
         ownerName: a.clients ? `${a.clients.first_name} ${a.clients.last_name}` : '—',
         species: a.pets?.species ?? '—',
         service: a.services?.name ?? a.reason ?? '—',
-        vet: a.staff ? `Dr. ${a.staff.first_name} ${a.staff.last_name}` : '—',
+        vet: a.staff?.profiles ? `Dr. ${a.staff.profiles.first_name} ${a.staff.profiles.last_name}` : '—',
         vetId: a.staff?.id ?? '',
         petId: a.pets?.id ?? '',
         clientId: a.clients?.id ?? '',
@@ -256,13 +256,21 @@ export default function AdminBookingsPage() {
   const [selectedVetFilter, setSelectedVetFilter] = useState('all');
   const [staffList, setStaffList] = useState<{ id: string; name: string; initials: string }[]>([]);
   useEffect(() => {
-    supabase.from('staff').select('id, first_name, last_name, role').in('role', ['veterinarian', 'senior_veterinarian', 'specialist']).eq('status', 'Active').order('first_name').then(({ data }) => {
-      if (data) setStaffList(data.map((s: any) => ({
-        id: s.id,
-        name: `Dr. ${s.first_name} ${s.last_name}`,
-        initials: `${(s.first_name?.[0] ?? '').toUpperCase()}${(s.last_name?.[0] ?? '').toUpperCase()}`,
-      })));
-    });
+    (async () => {
+      try {
+        const { organizationId } = await getOrgContext();
+        const { data } = await supabase.from('staff').select('id, role, profiles:profiles!staff_profile_id_fkey(first_name, last_name)').eq('organization_id', organizationId).in('role', ['veterinarian', 'senior_veterinarian', 'specialist']).eq('status', 'Active').order('first_name');
+        if (data) setStaffList(data.map((s: any) => {
+          const fn = s.profiles?.first_name || '';
+          const ln = s.profiles?.last_name || '';
+          return {
+            id: s.id,
+            name: `Dr. ${fn} ${ln}`.trim(),
+            initials: `${(fn[0] ?? '').toUpperCase()}${(ln[0] ?? '').toUpperCase()}`,
+          };
+        }));
+      } catch {}
+    })();
   }, []);
 
   // ── New Appointment form state ──────────────────────────────
@@ -2096,6 +2104,7 @@ export default function AdminBookingsPage() {
                       record_type: 'Visit',
                       status: 'Final',
                       duration_minutes: paymentAppt.durationMinutes || 30,
+                      organization_id: orgCtx.organizationId,
                     });
                     // Create invoice
                     const subtotal = 65;
@@ -2125,6 +2134,7 @@ export default function AdminBookingsPage() {
                         amount: total,
                         method: methodMap[paymentMethod] || 'Credit Card',
                         paid_at: now.toISOString(),
+                        organization_id: orgCtx.organizationId,
                       });
                     }
                   }
@@ -2845,7 +2855,7 @@ export default function AdminBookingsPage() {
                   if (!finalClientId || !finalPetId) { alert('Please select a patient (owner and pet).'); setSavingAppt(false); return; }
 
                   if (visitType === 'returning' && newApptVetId && finalPetId) {
-                    await supabase.from('pets').update({ assigned_vet_id: newApptVetId }).eq('id', finalPetId);
+                    await supabase.from('pets').update({ assigned_vet_id: newApptVetId }).eq('id', finalPetId).eq('organization_id', orgCtx2.organizationId);
                     window.dispatchEvent(new CustomEvent('petDataChanged'));
                   }
 
@@ -2880,6 +2890,7 @@ export default function AdminBookingsPage() {
                           date: newApptDate,
                           time: newApptTime,
                         },
+                        organization_id: orgCtx2.organizationId,
                       });
                       window.dispatchEvent(new Event('notifCountChanged'));
                     } catch {}

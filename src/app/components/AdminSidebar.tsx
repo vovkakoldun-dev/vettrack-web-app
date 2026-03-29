@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useProfile } from '../hooks/useProfile';
+import { getOrgContext } from '../hooks/useOrgContext';
 import { showToast } from './ToastNotification';
 import {
   Home, Calendar, CreditCard, MessageSquare, MessageCircle, Users, FileText, UserCircle,
@@ -69,9 +70,11 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
 
     async function checkChatUnread() {
       if (!mounted) return;
+      const { organizationId: chatOrgId } = await getOrgContext();
       const { data: parts } = await supabase
         .from('conversation_participants')
         .select('conversation_id, last_read_at')
+        .eq('organization_id', chatOrgId)
         .eq('profile_id', user!.id);
       if (!parts || parts.length === 0) { if (mounted) setChatUnread(0); return; }
 
@@ -81,6 +84,7 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
         const { count } = await supabase
           .from('messages')
           .select('id', { count: 'exact', head: true })
+          .eq('organization_id', chatOrgId)
           .eq('conversation_id', part.conversation_id)
           .neq('sender_id', user!.id)
           .gt('created_at', readAt);
@@ -94,6 +98,7 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
           const { data: latest } = await supabase
             .from('messages')
             .select('sender_id, content, profiles:profiles!messages_sender_id_fkey(first_name, last_name)')
+            .eq('organization_id', chatOrgId)
             .eq('conversation_id', part.conversation_id)
             .neq('sender_id', user!.id)
             .gt('created_at', readAt)

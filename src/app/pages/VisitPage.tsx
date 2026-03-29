@@ -17,6 +17,7 @@ import {
 import { MOCK_APPOINTMENTS, LAB_TESTS } from '../data/mockAppointments';
 import type { Appointment as MockAppt } from '../data/mockAppointments';
 import { supabase } from '../../lib/supabase';
+import { getOrgContext } from '../hooks/useOrgContext';
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -142,7 +143,7 @@ export default function VisitPage() {
       setLoadingAppt(true);
       const { data } = await supabase
         .from('appointments')
-        .select('id, scheduled_at, duration_minutes, status, reason, notes, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name), staff!appointments_vet_id_fkey(id, first_name, last_name)')
+        .select('id, scheduled_at, duration_minutes, status, reason, notes, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name), staff!appointments_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
         .eq('id', id)
         .single();
       if (data) {
@@ -169,7 +170,7 @@ export default function VisitPage() {
           ownerName: data.clients ? `${data.clients.first_name} ${data.clients.last_name}` : '—',
           species: data.pets?.species ?? '—',
           service: data.reason ?? '—',
-          vet: data.staff ? `Dr. ${data.staff.first_name} ${data.staff.last_name}` : '—',
+          vet: (data as any).staff?.profiles ? `Dr. ${(data as any).staff.profiles.first_name} ${(data as any).staff.profiles.last_name}` : '—',
           status: (data.status as any) ?? 'In Progress',
           notes: data.notes ?? '',
         });
@@ -1020,6 +1021,7 @@ export default function VisitPage() {
               if (frontDeskTasks.length > 0 && appt) {
                 try {
                   const today = new Date().toISOString().split('T')[0];
+                  const { organizationId } = await getOrgContext();
                   const taskRows = frontDeskTasks.map(t => ({
                     type: t.type,
                     priority: t.priority,
@@ -1032,6 +1034,7 @@ export default function VisitPage() {
                     visit_date: today,
                     doctor_notes: t.notes,
                     tags: [],
+                    organization_id: organizationId,
                   }));
                   if (taskRows.length > 0) {
                     await supabase.from('tasks').insert(taskRows);

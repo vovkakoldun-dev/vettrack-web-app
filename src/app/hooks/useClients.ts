@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { getOrgContext } from './useOrgContext'
 
@@ -9,7 +9,7 @@ export interface ClientPet {
   breed: string | null
   photo_url: string | null
   assigned_vet_id: string | null
-  assigned_vet: { id: string; first_name: string; last_name: string } | null
+  assigned_vet: { id: string; profiles: { first_name: string; last_name: string } | null } | null
 }
 
 export interface ClientRow {
@@ -49,14 +49,20 @@ export function useClients() {
   const fetchClients = useCallback(async () => {
     setLoading(true)
     setError(null)
-    const { data, error: err } = await supabase
-      .from('clients')
-      .select('id, first_name, last_name, email, phone, address, city, state, zip, notes, portal_status, health_status, created_at, pets(id, name, species, breed, photo_url, assigned_vet_id, assigned_vet:staff!pets_assigned_vet_id_fkey(id, first_name, last_name))')
-      .order('created_at', { ascending: false })
-    if (err) {
-      setError(err.message)
-    } else {
-      setClients((data as ClientRow[]) ?? [])
+    try {
+      const { organizationId } = await getOrgContext()
+      const { data, error: err } = await supabase
+        .from('clients')
+        .select('id, first_name, last_name, email, phone, address, city, state, zip, notes, portal_status, health_status, created_at, pets(id, name, species, breed, photo_url, assigned_vet_id, assigned_vet:staff!pets_assigned_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name)))')
+        .eq('organization_id', organizationId)
+        .order('created_at', { ascending: false })
+      if (err) {
+        setError(err.message)
+      } else {
+        setClients((data as ClientRow[]) ?? [])
+      }
+    } catch (e: any) {
+      setError(e.message)
     }
     setLoading(false)
   }, [])
@@ -81,7 +87,7 @@ export function useClients() {
     const { data, error: err } = await supabase
       .from('clients')
       .insert([{ organization_id: organizationId, ...values }])
-      .select('id, first_name, last_name, email, phone, address, city, state, zip, notes, portal_status, health_status, created_at, pets(id, name, species, breed, photo_url, assigned_vet_id, assigned_vet:staff!pets_assigned_vet_id_fkey(id, first_name, last_name))')
+      .select('id, first_name, last_name, email, phone, address, city, state, zip, notes, portal_status, health_status, created_at, pets(id, name, species, breed, photo_url, assigned_vet_id, assigned_vet:staff!pets_assigned_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name)))')
       .single()
     if (!err && data) {
       setClients(prev => [data as ClientRow, ...prev])
@@ -91,10 +97,12 @@ export function useClients() {
   }, [])
 
   const updateClient = useCallback(async (id: string, values: Partial<AddClientValues>) => {
+    const { organizationId } = await getOrgContext()
     const { data, error: err } = await supabase
       .from('clients')
       .update(values)
       .eq('id', id)
+      .eq('organization_id', organizationId)
       .select()
       .single()
     if (!err && data) {
@@ -105,10 +113,11 @@ export function useClients() {
   }, [])
 
   const deleteClient = useCallback(async (id: string) => {
+    const { organizationId } = await getOrgContext()
     // Delete associated pets first (cascade)
-    await supabase.from('pets').delete().eq('client_id', id)
+    await supabase.from('pets').delete().eq('client_id', id).eq('organization_id', organizationId)
     // Then delete the client
-    const { error: err } = await supabase.from('clients').delete().eq('id', id)
+    const { error: err } = await supabase.from('clients').delete().eq('id', id).eq('organization_id', organizationId)
     if (!err) {
       setClients(prev => prev.filter(c => c.id !== id))
       window.dispatchEvent(new CustomEvent('clientDataChanged'))

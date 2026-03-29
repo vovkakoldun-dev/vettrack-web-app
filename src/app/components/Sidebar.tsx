@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useProfile } from '../hooks/useProfile';
+import { getOrgContext } from '../hooks/useOrgContext';
 import { showToast } from './ToastNotification';
 import {
   Home, Users, Calendar, FileText, Settings, PawPrint,
@@ -79,6 +80,7 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
   // Compute notification count from Supabase
   const computeNotifCount = async () => {
     try {
+      const { organizationId } = await getOrgContext();
       const n = new Date();
       const today = `${n.getFullYear()}-${(n.getMonth() + 1).toString().padStart(2, '0')}-${n.getDate().toString().padStart(2, '0')}`;
       const weekAgo = new Date(Date.now() - 7 * 86400000);
@@ -86,15 +88,20 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
 
       const [apptTodayRes, clientRes, vacRes, completedRes, cancelledRes] = await Promise.all([
         supabase.from('appointments').select('id, scheduled_at')
+          .eq('organization_id', organizationId)
           .gte('scheduled_at', `${today}T00:00:00`).lte('scheduled_at', `${today}T23:59:59`)
           .in('status', ['Scheduled', 'Confirmed']),
         supabase.from('clients').select('id, created_at')
+          .eq('organization_id', organizationId)
           .gte('created_at', `${weekAgoStr}T00:00:00`),
         supabase.from('vaccinations').select('id, next_due_date')
+          .eq('organization_id', organizationId)
           .lte('next_due_date', today),
         supabase.from('appointments').select('id')
+          .eq('organization_id', organizationId)
           .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Completed'),
         supabase.from('appointments').select('id')
+          .eq('organization_id', organizationId)
           .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Cancelled'),
       ]);
 
@@ -112,6 +119,7 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
       const { data: notifEvts } = await supabase
         .from('notification_events')
         .select('id')
+        .eq('organization_id', organizationId)
         .gte('timestamp', sevenDaysAgoISO);
       for (const evt of (notifEvts || [])) {
         allIds.push(evt.id);
@@ -119,7 +127,8 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
 
       const { data: stateRows } = await supabase
         .from('notification_state')
-        .select('notification_id, status');
+        .select('notification_id, status')
+        .eq('organization_id', organizationId);
       const readSet = new Set<string>();
       const dismissedSet = new Set<string>();
       for (const row of (stateRows || [])) {
@@ -143,8 +152,10 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
     } catch {}
   };
 
-  // Compute on mount
-  useEffect(() => { computeNotifCount(); }, []);
+  // Compute on mount (skip if already on notifications page — it broadcasts its own count)
+  useEffect(() => {
+    if (pathname !== '/notifications') computeNotifCount();
+  }, []);
 
   // Listen for count changes — either with explicit count or re-compute
   useEffect(() => {
@@ -173,10 +184,12 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
 
     async function checkChatUnread() {
       if (!mounted) return;
+      const { organizationId: chatOrgId } = await getOrgContext();
       // Get all conversations where user is a participant
       const { data: parts } = await supabase
         .from('conversation_participants')
         .select('conversation_id, last_read_at')
+        .eq('organization_id', chatOrgId)
         .eq('profile_id', user!.id);
       if (!parts || parts.length === 0) { if (mounted) setChatUnread(0); return; }
 
@@ -186,6 +199,7 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
         const { count } = await supabase
           .from('messages')
           .select('id', { count: 'exact', head: true })
+          .eq('organization_id', chatOrgId)
           .eq('conversation_id', part.conversation_id)
           .neq('sender_id', user!.id)
           .gt('created_at', readAt);
@@ -201,6 +215,7 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
           const { data: latest } = await supabase
             .from('messages')
             .select('sender_id, content, profiles:profiles!messages_sender_id_fkey(first_name, last_name)')
+            .eq('organization_id', chatOrgId)
             .eq('conversation_id', part.conversation_id)
             .neq('sender_id', user!.id)
             .gt('created_at', readAt)

@@ -16,6 +16,7 @@ import type { Appointment as MockAppt } from '../data/mockAppointments';
 import { useActiveVisit } from '../context/ActiveVisitContext';
 import { useAppointmentStatus } from '../context/AppointmentStatusContext';
 import { supabase } from '../../lib/supabase';
+import { getOrgContext } from '../hooks/useOrgContext';
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -135,7 +136,7 @@ export default function CheckoutPage() {
       setLoadingAppt(true);
       const { data } = await supabase
         .from('appointments')
-        .select('id, scheduled_at, duration_minutes, status, reason, notes, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name), staff!appointments_vet_id_fkey(id, first_name, last_name)')
+        .select('id, scheduled_at, duration_minutes, status, reason, notes, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name), staff!appointments_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
         .eq('id', id)
         .single();
       if (data) {
@@ -162,7 +163,7 @@ export default function CheckoutPage() {
           ownerName: data.clients ? `${data.clients.first_name} ${data.clients.last_name}` : '—',
           species: data.pets?.species ?? '—',
           service: data.reason ?? '—',
-          vet: data.staff ? `Dr. ${data.staff.first_name} ${data.staff.last_name}` : '—',
+          vet: (data as any).staff?.profiles ? `Dr. ${(data as any).staff.profiles.first_name} ${(data as any).staff.profiles.last_name}` : '—',
           status: (data.status as any) ?? 'In Progress',
           notes: data.notes ?? '',
         });
@@ -759,14 +760,15 @@ export default function CheckoutPage() {
             onClick={async () => {
               clearVisit();
               setApptStatus(parseInt(id!) || 0, 'Ready for Billing');
+              const { organizationId } = await getOrgContext();
               // Update Supabase status for real appointments
               if (id && id.includes('-')) {
-                await supabase.from('appointments').update({ status: 'Completed' }).eq('id', id);
+                await supabase.from('appointments').update({ status: 'Completed' }).eq('id', id).eq('organization_id', organizationId);
               }
 
               // Persist pet health status to client profile
               if (apptIds.clientId) {
-                await supabase.from('clients').update({ health_status: petHealthStatus }).eq('id', apptIds.clientId);
+                await supabase.from('clients').update({ health_status: petHealthStatus }).eq('id', apptIds.clientId).eq('organization_id', organizationId);
               }
 
               // Create a "Ready for Billing" front-desk task
@@ -788,6 +790,7 @@ export default function CheckoutPage() {
                     visit_date: today,
                     doctor_notes: `Visit completed. Invoice total: $${grandTotal.toFixed(2)} (Services: $${totalServices.toFixed(2)}, Medications: $${totalMeds.toFixed(2)}). Please process payment at the front desk. Health status: ${petHealthStatus}.`,
                     tags: ['Billing', 'Visit Complete'],
+                    organization_id: organizationId,
                   });
                   window.dispatchEvent(new Event('notifCountChanged'));
                 } catch {}

@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import { Users, Loader2, Camera } from 'lucide-react';
 import type { AddClientValues } from '../hooks/useClients';
 import { supabase } from '../../lib/supabase';
+import { getOrgContext } from '../hooks/useOrgContext';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from './ui/dialog';
@@ -153,13 +154,17 @@ export function AddClientDialog({ open, onOpenChange, onSave }: AddClientDialogP
   const [vets, setVets] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => {
     (async () => {
-      const { data } = await supabase
-        .from('staff')
-        .select('id, first_name, last_name, role')
-        .in('role', ['veterinarian', 'senior_veterinarian', 'specialist'])
-        .eq('status', 'Active')
-        .order('first_name');
-      if (data) setVets(data.map((s: any) => ({ id: s.id, name: `Dr. ${s.first_name} ${s.last_name}` })));
+      try {
+        const { organizationId } = await getOrgContext();
+        const { data } = await supabase
+          .from('staff')
+          .select('id, first_name, last_name, role')
+          .eq('organization_id', organizationId)
+          .in('role', ['veterinarian', 'senior_veterinarian', 'specialist'])
+          .eq('status', 'Active')
+          .order('first_name');
+        if (data) setVets(data.map((s: any) => ({ id: s.id, name: `Dr. ${s.first_name} ${s.last_name}` })));
+      } catch {}
     })();
   }, []);
 
@@ -201,6 +206,7 @@ export function AddClientDialog({ open, onOpenChange, onSave }: AddClientDialogP
       // If pet info was filled, create the pet linked to the new client
       if (form.petName.trim() && form.species && clientId) {
         const weightNum = form.weight ? parseFloat(form.weight) : undefined;
+        const { organizationId } = await getOrgContext();
           // Upload photo if selected
           let photoUrl: string | null = null;
           if (photoFile) {
@@ -223,14 +229,16 @@ export function AddClientDialog({ open, onOpenChange, onSave }: AddClientDialogP
             photo_url: photoUrl,
             is_active: true,
             assigned_vet_id: form.assignedVetId || null,
+            organization_id: organizationId,
           }]);
           if (petErr) {
             console.error('[AddClientDialog] pet insert error:', petErr);
           } else if (form.assignedVetId) {
             // Store assignment event for doctor notification
             try {
+              const { organizationId: notifOrgId } = await getOrgContext();
               const vet = vets.find(v => v.id === form.assignedVetId);
-              const petRes = await supabase.from('pets').select('id').eq('client_id', clientId).eq('name', form.petName.trim()).limit(1).single();
+              const petRes = await supabase.from('pets').select('id').eq('client_id', clientId).eq('name', form.petName.trim()).eq('organization_id', organizationId).limit(1).single();
               const petId = petRes.data?.id || `new-${Date.now()}`;
               await supabase.from('notification_events').upsert({
                 id: `assign-${petId}-${Date.now()}`,
@@ -246,6 +254,7 @@ export function AddClientDialog({ open, onOpenChange, onSave }: AddClientDialogP
                   vetId: form.assignedVetId,
                   vetName: vet?.name || '',
                 },
+                organization_id: notifOrgId,
               });
             } catch {}
           }

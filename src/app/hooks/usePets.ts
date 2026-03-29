@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
+import { getOrgContext } from './useOrgContext'
 
 export interface PetRow {
   id: string
@@ -37,15 +38,21 @@ export function usePets() {
   const fetchPets = useCallback(async () => {
     setLoading(true)
     setError(null)
-    const { data, error: err } = await supabase
-      .from('pets')
-      .select('id, name, species, breed, date_of_birth, sex, weight_kg, photo_url, microchip_no, is_active, created_at, client_id, clients(id, first_name, last_name, phone)')
-      .eq('is_active', true)
-      .order('created_at', { ascending: false })
-    if (err) {
-      setError(err.message)
-    } else {
-      setPets((data as PetRow[]) ?? [])
+    try {
+      const { organizationId } = await getOrgContext()
+      const { data, error: err } = await supabase
+        .from('pets')
+        .select('id, name, species, breed, date_of_birth, sex, weight_kg, photo_url, microchip_no, is_active, created_at, client_id, clients(id, first_name, last_name, phone)')
+        .eq('organization_id', organizationId)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+      if (err) {
+        setError(err.message)
+      } else {
+        setPets((data as PetRow[]) ?? [])
+      }
+    } catch (e: any) {
+      setError(e.message)
     }
     setLoading(false)
   }, [])
@@ -66,9 +73,10 @@ export function usePets() {
   }, [fetchPets])
 
   const addPet = useCallback(async (values: AddPetValues) => {
+    const { organizationId } = await getOrgContext()
     const { data, error: err } = await supabase
       .from('pets')
-      .insert([{ is_active: true, ...values }])
+      .insert([{ organization_id: organizationId, is_active: true, ...values }])
       .select('id, name, species, breed, date_of_birth, sex, weight_kg, photo_url, microchip_no, is_active, created_at, client_id, clients(id, first_name, last_name, phone)')
       .single()
     if (!err) {
@@ -79,7 +87,8 @@ export function usePets() {
   }, [fetchPets])
 
   const updatePet = useCallback(async (id: string, values: Partial<AddPetValues>) => {
-    const { error: err } = await supabase.from('pets').update(values).eq('id', id)
+    const { organizationId } = await getOrgContext()
+    const { error: err } = await supabase.from('pets').update(values).eq('id', id).eq('organization_id', organizationId)
     if (!err) {
       await fetchPets()
       window.dispatchEvent(new CustomEvent('petDataChanged'))
@@ -88,7 +97,8 @@ export function usePets() {
   }, [fetchPets])
 
   const deactivatePet = useCallback(async (id: string) => {
-    const { error: err } = await supabase.from('pets').update({ is_active: false }).eq('id', id)
+    const { organizationId } = await getOrgContext()
+    const { error: err } = await supabase.from('pets').update({ is_active: false }).eq('id', id).eq('organization_id', organizationId)
     if (!err) {
       setPets(prev => prev.filter(p => p.id !== id))
       window.dispatchEvent(new CustomEvent('petDataChanged'))

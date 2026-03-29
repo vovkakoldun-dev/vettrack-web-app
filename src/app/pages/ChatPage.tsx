@@ -6,8 +6,15 @@ import {
   Paperclip,
   Smile,
   Check,
+  Trash2,
+  ChevronUp,
+  ChevronDown,
+  X,
+  Plus,
+  Users,
 } from 'lucide-react';
 import { Input } from '../components/ui/input';
+import { getOrgContext } from '../hooks/useOrgContext';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 
@@ -34,6 +41,8 @@ type DisplayMessage = {
 
 type ConversationItem = {
   id: string;
+  isGroup: boolean;
+  groupTitle: string;
   otherProfileId: string;
   otherName: string;
   otherRole: string;
@@ -42,6 +51,14 @@ type ConversationItem = {
   lastMessageTime: Date | null;
   lastMessageIsMe: boolean;
   unread: number;
+};
+
+type StaffResult = {
+  id: string;
+  first_name: string;
+  last_name: string;
+  role: string;
+  avatar_url: string | null;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -146,6 +163,22 @@ export default function ChatPage() {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
 
+  // Delete conversation
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+
+  // In-conversation search
+  const [msgSearchOpen, setMsgSearchOpen] = useState(false);
+  const [msgSearchQuery, setMsgSearchQuery] = useState('');
+  const [msgSearchIndex, setMsgSearchIndex] = useState(0);
+
+  // Staff search + new conversation
+  const [staffResults, setStaffResults] = useState<StaffResult[]>([]);
+  const [searchFocused, setSearchFocused] = useState(false);
+  const [newGroupOpen, setNewGroupOpen] = useState(false);
+  const [groupName, setGroupName] = useState('');
+  const [groupSelectedIds, setGroupSelectedIds] = useState<string[]>([]);
+  const [allStaff, setAllStaff] = useState<StaffResult[]>([]);
+
   // Emoji picker
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [emojiTab, setEmojiTab] = useState(0);
@@ -156,72 +189,205 @@ export default function ChatPage() {
 
   const selectedConv = conversations.find((c) => c.id === selectedId) ?? null;
 
+  // Filtered message indices for in-conversation search
+  const msgSearchMatches = msgSearchQuery.trim()
+    ? messages.reduce<number[]>((acc, m, i) => {
+        if (m.text.toLowerCase().includes(msgSearchQuery.toLowerCase())) acc.push(i);
+        return acc;
+      }, [])
+    : [];
+
+  // ── Staff search ──────────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!searchQuery.trim() || !user) { setStaffResults([]); return; }
+    const timer = setTimeout(async () => {
+      const { organizationId } = await getOrgContext();
+      const q = searchQuery.trim().toLowerCase();
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, first_name, last_name, role, avatar_url')
+        .eq('organization_id', organizationId)
+        .neq('id', user.id)
+        .or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%`)
+        .limit(8);
+      // Filter out people who already have a conversation
+      const existingIds = new Set(conversations.map(c => c.otherProfileId));
+      setStaffResults((data || []).filter(s => !existingIds.has(s.id)));
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [searchQuery, user, conversations]);
+
+  // ── Start new direct conversation ─────────────────────────────────────────────
+
+  async function handleStartConversation(staff: StaffResult) {
+    if (!user) return;
+    const { organizationId } = await getOrgContext();
+    // Create conversation
+    const { data: conv } = await supabase
+      .from('conversations')
+      .insert({ organization_id: organizationId, type: 'direct', created_by: user.id })
+      .select('id')
+      .single();
+    if (!conv) return;
+    // Add participants
+    await supabase.from('conversation_participants').insert([
+      { organization_id: organizationId, conversation_id: conv.id, profile_id: user.id },
+      { organization_id: organizationId, conversation_id: conv.id, profile_id: staff.id },
+    ]);
+    setSearchQuery('');
+    setStaffResults([]);
+    await fetchConversations();
+    setSelectedId(conv.id);
+    setMessages([]);
+  }
+
+  // ── Create group conversation ──────────────────────────────────────────────────
+
+  async function handleCreateGroup() {
+    if (!user || groupSelectedIds.length < 2) return;
+    const { organizationId } = await getOrgContext();
+    const { data: conv } = await supabase
+      .from('conversations')
+      .insert({
+        organization_id: organizationId,
+        type: 'group',
+        title: groupName.trim() || null,
+        created_by: user.id,
+      })
+      .select('id')
+      .single();
+    if (!conv) return;
+    const participants = [user.id, ...groupSelectedIds].map(pid => ({
+      organization_id: organizationId,
+      conversation_id: conv.id,
+      profile_id: pid,
+    }));
+    await supabase.from('conversation_participants').insert(participants);
+    setNewGroupOpen(false);
+    setGroupName('');
+    setGroupSelectedIds([]);
+    setAllStaff([]);
+    await fetchConversations();
+    setSelectedId(conv.id);
+    setMessages([]);
+  }
+
+  async function openNewGroupDialog() {
+    if (!user) return;
+    const { organizationId } = await getOrgContext();
+    const { data } = await supabase
+      .from('profiles')
+      .select('id, first_name, last_name, role, avatar_url')
+      .eq('organization_id', organizationId)
+      .neq('id', user.id)
+      .order('first_name');
+    setAllStaff(data || []);
+    setGroupSelectedIds([]);
+    setGroupName('');
+    setNewGroupOpen(true);
+  }
+
   // ── Load conversations ──────────────────────────────────────────────────────
 
   const fetchConversations = useCallback(async () => {
     if (!user) return;
+    try {
+    const { organizationId } = await getOrgContext();
     const { data: parts } = await supabase
       .from('conversation_participants')
       .select('conversation_id')
+      .eq('organization_id', organizationId)
       .eq('profile_id', user.id);
     if (!parts || parts.length === 0) { setLoadingConvs(false); return; }
 
     const convIds = parts.map(p => p.conversation_id);
+
+    // Batch all queries in parallel instead of sequential per-conversation loop
+    const [convMetaRes, allPartsRes, myPartsRes, lastMsgsRes, unreadRes] = await Promise.all([
+      // 1. All conversation metadata
+      supabase.from('conversations').select('id, type, title').eq('organization_id', organizationId).in('id', convIds),
+      // 2. All other participants with profiles
+      supabase.from('conversation_participants')
+        .select('conversation_id, profile_id, last_read_at, profiles:profiles!conversation_participants_profile_id_fkey(id, first_name, last_name, role, avatar_url)')
+        .eq('organization_id', organizationId).in('conversation_id', convIds).neq('profile_id', user.id),
+      // 3. My participation (for last_read_at)
+      supabase.from('conversation_participants')
+        .select('conversation_id, last_read_at')
+        .eq('organization_id', organizationId).in('conversation_id', convIds).eq('profile_id', user.id),
+      // 4. Last message per conversation — fetch recent messages and pick latest per conv client-side
+      supabase.from('messages')
+        .select('conversation_id, content, sender_id, created_at')
+        .eq('organization_id', organizationId).in('conversation_id', convIds)
+        .order('created_at', { ascending: false }).limit(convIds.length * 2),
+      // 5. All unread messages (not from me) — count client-side per conversation
+      supabase.from('messages')
+        .select('conversation_id, created_at')
+        .eq('organization_id', organizationId).in('conversation_id', convIds).neq('sender_id', user.id),
+    ]);
+
+    // Index results by conversation_id
+    const metaMap = new Map((convMetaRes.data || []).map(c => [c.id, c]));
+    const otherPartsMap = new Map<string, any[]>();
+    for (const p of (allPartsRes.data || [])) {
+      const list = otherPartsMap.get(p.conversation_id) || [];
+      list.push(p);
+      otherPartsMap.set(p.conversation_id, list);
+    }
+    const myPartMap = new Map((myPartsRes.data || []).map(p => [p.conversation_id, p]));
+
+    // Last message per conversation
+    const lastMsgMap = new Map<string, any>();
+    for (const m of (lastMsgsRes.data || [])) {
+      if (!lastMsgMap.has(m.conversation_id)) lastMsgMap.set(m.conversation_id, m);
+    }
+
+    // Unread messages grouped by conversation
+    const unreadMsgsMap = new Map<string, any[]>();
+    for (const m of (unreadRes.data || [])) {
+      const list = unreadMsgsMap.get(m.conversation_id) || [];
+      list.push(m);
+      unreadMsgsMap.set(m.conversation_id, list);
+    }
+
     const items: ConversationItem[] = [];
-
     for (const convId of convIds) {
-      const { data: otherParts } = await supabase
-        .from('conversation_participants')
-        .select('profile_id, last_read_at, profiles:profiles!conversation_participants_profile_id_fkey(id, first_name, last_name, role, avatar_url)')
-        .eq('conversation_id', convId)
-        .neq('profile_id', user.id);
-      const other = otherParts?.[0];
-      if (!other) continue;
-      const otherProfile = other.profiles as any;
+      const convMeta = metaMap.get(convId);
+      const isGroup = convMeta?.type === 'group';
+      const otherParts = otherPartsMap.get(convId);
+      if (!otherParts || otherParts.length === 0) continue;
 
-      const { data: myPart } = await supabase
-        .from('conversation_participants')
-        .select('last_read_at')
-        .eq('conversation_id', convId)
-        .eq('profile_id', user.id)
-        .single();
+      const firstProfile = (otherParts[0].profiles as any);
+      const allNames = otherParts.map((p: any) => {
+        const prof = p.profiles as any;
+        return prof ? `${prof.first_name} ${prof.last_name}`.trim() : 'Unknown';
+      });
+      const groupTitle = convMeta?.title || allNames.join(', ');
 
-      const { data: lastMsgs } = await supabase
-        .from('messages')
-        .select('content, sender_id, created_at')
-        .eq('conversation_id', convId)
-        .order('created_at', { ascending: false })
-        .limit(1);
-      const lastMsg = lastMsgs?.[0];
+      const myPart = myPartMap.get(convId);
+      const lastMsg = lastMsgMap.get(convId);
 
+      // Count unread
+      const unreadMsgs = unreadMsgsMap.get(convId) || [];
       let unread = 0;
       if (myPart?.last_read_at) {
-        const { count } = await supabase
-          .from('messages')
-          .select('id', { count: 'exact', head: true })
-          .eq('conversation_id', convId)
-          .neq('sender_id', user.id)
-          .gt('created_at', myPart.last_read_at);
-        unread = count || 0;
+        unread = unreadMsgs.filter(m => m.created_at > myPart.last_read_at).length;
       } else {
-        const { count } = await supabase
-          .from('messages')
-          .select('id', { count: 'exact', head: true })
-          .eq('conversation_id', convId)
-          .neq('sender_id', user.id);
-        unread = count || 0;
+        unread = unreadMsgs.length;
       }
 
-      const otherName = otherProfile
-        ? `${otherProfile.first_name} ${otherProfile.last_name}`.trim()
-        : 'Unknown';
+      const otherName = isGroup
+        ? groupTitle
+        : (firstProfile ? `${firstProfile.first_name} ${firstProfile.last_name}`.trim() : 'Unknown');
 
       items.push({
         id: convId,
-        otherProfileId: otherProfile?.id || '',
+        isGroup,
+        groupTitle,
+        otherProfileId: firstProfile?.id || '',
         otherName,
-        otherRole: ROLE_LABELS[otherProfile?.role] || otherProfile?.role || '',
-        otherAvatarUrl: otherProfile?.avatar_url || '',
+        otherRole: isGroup ? `${otherParts.length + 1} members` : (ROLE_LABELS[firstProfile?.role] || firstProfile?.role || ''),
+        otherAvatarUrl: isGroup ? '' : (firstProfile?.avatar_url || ''),
         lastMessage: lastMsg?.content || '',
         lastMessageTime: lastMsg ? new Date(lastMsg.created_at) : null,
         lastMessageIsMe: lastMsg?.sender_id === user.id,
@@ -236,6 +402,9 @@ export default function ChatPage() {
     });
 
     setConversations(items);
+    } catch (e) {
+      console.error('fetchConversations error:', e);
+    }
     setLoadingConvs(false);
   }, [user]);
 
@@ -246,9 +415,11 @@ export default function ChatPage() {
   const fetchMessages = useCallback(async (convId: string) => {
     if (!user) return;
     setLoadingMsgs(true);
+    const { organizationId } = await getOrgContext();
     const { data } = await supabase
       .from('messages')
       .select('id, content, sender_id, image_url, created_at')
+      .eq('organization_id', organizationId)
       .eq('conversation_id', convId)
       .order('created_at', { ascending: true });
 
@@ -264,20 +435,29 @@ export default function ChatPage() {
     setLoadingMsgs(false);
   }, [user]);
 
+  function closeMsgSearch() {
+    setMsgSearchOpen(false);
+    setMsgSearchQuery('');
+    setMsgSearchIndex(0);
+  }
+
   // ── Select conversation ─────────────────────────────────────────────────────
 
   async function handleSelectConversation(convId: string) {
     setSelectedId(convId);
     setInputValue('');
+    closeMsgSearch();
     clearImagePreview();
     await fetchMessages(convId);
 
     if (user) {
       const now = new Date().toISOString();
       lastReadAtRef.current = now;
+      const { organizationId } = await getOrgContext();
       await supabase
         .from('conversation_participants')
         .update({ last_read_at: now })
+        .eq('organization_id', organizationId)
         .eq('conversation_id', convId)
         .eq('profile_id', user.id);
 
@@ -288,6 +468,24 @@ export default function ChatPage() {
       // Notify Sidebar to clear badge
       window.dispatchEvent(new CustomEvent('doctorChatRead', { detail: { last_read_at: now } }));
     }
+  }
+
+  // ── Delete conversation ──────────────────────────────────────────────────────
+
+  async function handleDeleteConversation(convId: string) {
+    if (!user) return;
+    const { organizationId } = await getOrgContext();
+    // Delete messages first, then participants, then conversation
+    await supabase.from('messages').delete().eq('organization_id', organizationId).eq('conversation_id', convId);
+    await supabase.from('conversation_participants').delete().eq('organization_id', organizationId).eq('conversation_id', convId);
+    await supabase.from('conversations').delete().eq('organization_id', organizationId).eq('id', convId);
+    // Update local state
+    setConversations(prev => prev.filter(c => c.id !== convId));
+    if (selectedId === convId) {
+      setSelectedId(null);
+      setMessages([]);
+    }
+    setDeleteConfirmId(null);
   }
 
   // ── Image handling ─────────────────────────────────────────────────────────
@@ -351,9 +549,11 @@ export default function ChatPage() {
     }
 
     // Insert into Supabase
+    const { organizationId } = await getOrgContext();
     const { data } = await supabase
       .from('messages')
       .insert({
+        organization_id: organizationId,
         conversation_id: selectedId,
         sender_id: user.id,
         content: content || (imageUrl ? '📷 Image' : ''),
@@ -372,6 +572,7 @@ export default function ChatPage() {
     await supabase
       .from('conversation_participants')
       .update({ last_read_at: nowStr })
+      .eq('organization_id', organizationId)
       .eq('conversation_id', selectedId)
       .eq('profile_id', user.id);
   }
@@ -394,12 +595,15 @@ export default function ChatPage() {
           }]);
           const now = new Date().toISOString();
           lastReadAtRef.current = now;
-          supabase
-            .from('conversation_participants')
-            .update({ last_read_at: now })
-            .eq('conversation_id', selectedId)
-            .eq('profile_id', user.id)
-            .then();
+          getOrgContext().then(({ organizationId: oid }) =>
+            supabase
+              .from('conversation_participants')
+              .update({ last_read_at: now })
+              .eq('organization_id', oid)
+              .eq('conversation_id', selectedId)
+              .eq('profile_id', user.id)
+              .then()
+          );
         }
         fetchConversations();
       })
@@ -415,6 +619,15 @@ export default function ChatPage() {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages.length]);
+
+  // Scroll to search match
+  useEffect(() => {
+    if (msgSearchMatches.length > 0 && msgSearchOpen) {
+      const matchIdx = msgSearchMatches[msgSearchIndex];
+      const el = document.querySelector(`[data-msg-index="${matchIdx}"]`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [msgSearchIndex, msgSearchMatches.length, msgSearchOpen]);
 
   // Close emoji picker on outside click
   useEffect(() => {
@@ -468,20 +681,53 @@ export default function ChatPage() {
         {/* Panel header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 20px 16px', flexShrink: 0 }}>
           <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>Messages</h2>
+          <button
+            title="New group chat"
+            onClick={openNewGroupDialog}
+            style={{ width: '32px', height: '32px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-secondary)', transition: 'background-color 0.15s' }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--surface-elevated)')}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+          >
+            <Plus style={{ width: '16px', height: '16px' }} />
+          </button>
         </div>
 
         {/* Search */}
-        <div style={{ padding: '0 16px 12px', flexShrink: 0 }}>
+        <div style={{ padding: '0 16px 12px', flexShrink: 0, position: 'relative' }}>
           <div style={{ position: 'relative' }}>
             <Search style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', width: '15px', height: '15px', color: 'var(--text-secondary)', pointerEvents: 'none' }} />
             <Input
               type="text"
-              placeholder="Search conversations..."
+              placeholder="Search people & conversations..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => setTimeout(() => setSearchFocused(false), 200)}
               style={{ paddingLeft: '32px', fontSize: '13px', height: '36px' }}
             />
           </div>
+
+          {/* Staff search results dropdown */}
+          {searchFocused && staffResults.length > 0 && (
+            <div style={{ position: 'absolute', left: '16px', right: '16px', top: '100%', backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)', borderRadius: '8px', boxShadow: '0 8px 24px rgba(0,0,0,0.14)', zIndex: 20, maxHeight: '240px', overflowY: 'auto' }}>
+              <div style={{ padding: '8px 12px 4px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Start a conversation</div>
+              {staffResults.map(s => (
+                <button
+                  key={s.id}
+                  onClick={() => handleStartConversation(s)}
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 12px', border: 'none', backgroundColor: 'transparent', cursor: 'pointer', textAlign: 'left', transition: 'background-color 0.15s' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--surface-elevated)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                >
+                  <ChatAvatar name={`${s.first_name} ${s.last_name}`} color={getAvatarColor(s.id)} size={32} photoUrl={s.avatar_url || undefined} />
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{s.first_name} {s.last_name}</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{ROLE_LABELS[s.role] || s.role}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Conversation list */}
@@ -501,48 +747,72 @@ export default function ChatPage() {
               : 'Start a conversation...';
 
             return (
-              <button
+              <div
                 key={conv.id}
-                onClick={() => handleSelectConversation(conv.id)}
-                style={{
-                  width: '100%', display: 'flex', alignItems: 'center', gap: '12px',
-                  padding: '12px 16px',
-                  backgroundColor: isActive ? 'var(--surface-elevated)' : 'transparent',
-                  border: 'none', cursor: 'pointer', textAlign: 'left', transition: 'background-color 0.15s',
-                }}
-                onMouseEnter={(e) => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--surface-elevated)'; }}
-                onMouseLeave={(e) => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}
+                style={{ position: 'relative' }}
+                onMouseEnter={(e) => { const del = e.currentTarget.querySelector('[data-delete-btn]') as HTMLElement; if (del) del.style.opacity = '1'; }}
+                onMouseLeave={(e) => { const del = e.currentTarget.querySelector('[data-delete-btn]') as HTMLElement; if (del) del.style.opacity = '0'; }}
               >
-                <ChatAvatar name={conv.otherName} color={getAvatarColor(conv.otherProfileId)} size={40} photoUrl={conv.otherAvatarUrl} />
+                <button
+                  onClick={() => handleSelectConversation(conv.id)}
+                  style={{
+                    width: '100%', display: 'flex', alignItems: 'center', gap: '12px',
+                    padding: '12px 16px',
+                    backgroundColor: isActive ? 'var(--surface-elevated)' : 'transparent',
+                    border: 'none', cursor: 'pointer', textAlign: 'left', transition: 'background-color 0.15s',
+                  }}
+                  onMouseEnter={(e) => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--surface-elevated)'; }}
+                  onMouseLeave={(e) => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}
+                >
+                  {conv.isGroup ? (
+                    <div style={{ width: 40, height: 40, borderRadius: '50%', backgroundColor: '#2D6A4F', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <Users style={{ width: 20, height: 20, color: '#fff' }} />
+                    </div>
+                  ) : (
+                    <ChatAvatar name={conv.otherName} color={getAvatarColor(conv.otherProfileId)} size={40} photoUrl={conv.otherAvatarUrl} />
+                  )}
 
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
-                    <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '160px' }}>
-                      {conv.otherName}
-                    </span>
-                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)', flexShrink: 0, marginLeft: '8px' }}>
-                      {getTimeLabel(conv.lastMessageTime)}
-                    </span>
-                  </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '1px', display: 'block' }}>
-                      {conv.otherRole}
-                    </span>
-                  </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: '13px', color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0 }}>
-                      {previewText}
-                    </span>
-                    {conv.unread > 0 && (
-                      <span style={{ flexShrink: 0, marginLeft: '8px', backgroundColor: '#d4183d', color: '#fff', fontSize: '11px', fontWeight: 700, borderRadius: '999px', minWidth: '20px', height: '20px', padding: '0 6px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                        {conv.unread > 99 ? '99+' : conv.unread}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
+                      <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '160px' }}>
+                        {conv.otherName}
                       </span>
-                    )}
+                      <span style={{ fontSize: '11px', color: 'var(--text-secondary)', flexShrink: 0, marginLeft: '8px' }}>
+                        {getTimeLabel(conv.lastMessageTime)}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '1px', display: 'block' }}>
+                        {conv.otherRole}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: '13px', color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0 }}>
+                        {previewText}
+                      </span>
+                      {conv.unread > 0 && (
+                        <span style={{ flexShrink: 0, marginLeft: '8px', backgroundColor: '#d4183d', color: '#fff', fontSize: '11px', fontWeight: 700, borderRadius: '999px', minWidth: '20px', height: '20px', padding: '0 6px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                          {conv.unread > 99 ? '99+' : conv.unread}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </div>
-              </button>
+                </button>
+
+                {/* Delete button — visible on hover */}
+                <button
+                  data-delete-btn
+                  title="Delete conversation"
+                  onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(conv.id); }}
+                  style={{ position: 'absolute', top: '8px', right: '8px', width: '28px', height: '28px', borderRadius: '6px', border: 'none', backgroundColor: 'var(--surface-white)', boxShadow: '0 1px 4px rgba(0,0,0,0.10)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', opacity: 0, transition: 'opacity 0.15s, color 0.15s', zIndex: 5 }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#d4183d'; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-secondary)'; }}
+                >
+                  <Trash2 style={{ width: '14px', height: '14px' }} />
+                </button>
+              </div>
             );
           })}
         </div>
@@ -555,7 +825,13 @@ export default function ChatPage() {
             {/* Chat header */}
             <div style={{ height: '64px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--surface-white)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <ChatAvatar name={selectedConv.otherName} color={getAvatarColor(selectedConv.otherProfileId)} size={40} photoUrl={selectedConv.otherAvatarUrl} />
+                {selectedConv.isGroup ? (
+                  <div style={{ width: 40, height: 40, borderRadius: '50%', backgroundColor: '#2D6A4F', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Users style={{ width: 20, height: 20, color: '#fff' }} />
+                  </div>
+                ) : (
+                  <ChatAvatar name={selectedConv.otherName} color={getAvatarColor(selectedConv.otherProfileId)} size={40} photoUrl={selectedConv.otherAvatarUrl} />
+                )}
                 <div>
                   <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.3 }}>
                     {selectedConv.otherName}
@@ -565,8 +841,49 @@ export default function ChatPage() {
                   </span>
                 </div>
               </div>
-              <div />
+              <button
+                title="Search in conversation"
+                onClick={() => setMsgSearchOpen(v => !v)}
+                style={{ width: '36px', height: '36px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: msgSearchOpen ? 'var(--surface-elevated)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-secondary)', transition: 'background-color 0.15s' }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--surface-elevated)')}
+                onMouseLeave={(e) => { if (!msgSearchOpen) e.currentTarget.style.backgroundColor = 'transparent'; }}
+              >
+                <Search style={{ width: '16px', height: '16px' }} />
+              </button>
             </div>
+
+            {/* In-conversation search bar */}
+            {msgSearchOpen && (
+              <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--surface-white)' }}>
+                <Search style={{ width: '14px', height: '14px', color: 'var(--text-secondary)', flexShrink: 0 }} />
+                <input
+                  autoFocus
+                  type="text"
+                  placeholder="Search messages..."
+                  value={msgSearchQuery}
+                  onChange={(e) => { setMsgSearchQuery(e.target.value); setMsgSearchIndex(0); }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && msgSearchMatches.length > 0) setMsgSearchIndex(i => (i + 1) % msgSearchMatches.length);
+                    if (e.key === 'Escape') closeMsgSearch();
+                  }}
+                  style={{ flex: 1, border: 'none', outline: 'none', fontSize: '13px', backgroundColor: 'transparent', color: 'var(--text-primary)' }}
+                />
+                {msgSearchQuery && (
+                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                    {msgSearchMatches.length === 0 ? 'No results' : `${msgSearchIndex + 1} of ${msgSearchMatches.length}`}
+                  </span>
+                )}
+                <button onClick={() => msgSearchMatches.length > 0 && setMsgSearchIndex(i => (i - 1 + msgSearchMatches.length) % msgSearchMatches.length)} disabled={msgSearchMatches.length === 0} style={{ width: '28px', height: '28px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-secondary)', opacity: msgSearchMatches.length === 0 ? 0.3 : 1 }}>
+                  <ChevronUp style={{ width: '14px', height: '14px' }} />
+                </button>
+                <button onClick={() => msgSearchMatches.length > 0 && setMsgSearchIndex(i => (i + 1) % msgSearchMatches.length)} disabled={msgSearchMatches.length === 0} style={{ width: '28px', height: '28px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-secondary)', opacity: msgSearchMatches.length === 0 ? 0.3 : 1 }}>
+                  <ChevronDown style={{ width: '14px', height: '14px' }} />
+                </button>
+                <button onClick={closeMsgSearch} style={{ width: '28px', height: '28px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-secondary)' }}>
+                  <X style={{ width: '14px', height: '14px' }} />
+                </button>
+              </div>
+            )}
 
             {/* Messages area */}
             <div style={{ flex: 1, overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column' }}>
@@ -592,7 +909,7 @@ export default function ChatPage() {
                       const isMe = msg.from === 'me';
 
                       return (
-                        <div key={msg.id} style={{ display: 'flex', flexDirection: isMe ? 'row-reverse' : 'row', alignItems: 'flex-end', gap: '8px', marginBottom: '8px' }}>
+                        <div key={msg.id} data-msg-index={globalIndex} style={{ display: 'flex', flexDirection: isMe ? 'row-reverse' : 'row', alignItems: 'flex-end', gap: '8px', marginBottom: '8px', borderRadius: '12px', outline: msgSearchOpen && msgSearchMatches[msgSearchIndex] === globalIndex ? '2px solid #3B82F6' : 'none', outlineOffset: '4px', transition: 'outline 0.2s' }}>
                           {!isMe && (
                             <div style={{ flexShrink: 0 }}>
                               <ChatAvatar name={selectedConv.otherName} color={getAvatarColor(selectedConv.otherProfileId)} size={28} photoUrl={selectedConv.otherAvatarUrl} />
@@ -734,6 +1051,78 @@ export default function ChatPage() {
           </div>
         )}
       </div>
+
+      {/* ── New group chat dialog ──────────────────────────────────────────── */}
+      {newGroupOpen && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.4)' }} onClick={() => setNewGroupOpen(false)}>
+          <div style={{ backgroundColor: 'var(--surface-white)', borderRadius: '12px', padding: '24px', width: '440px', maxWidth: '90vw', maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 16px 48px rgba(0,0,0,0.18)' }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ margin: '0 0 4px', fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>New Group Chat</h3>
+            <p style={{ margin: '0 0 16px', fontSize: '13px', color: 'var(--text-secondary)' }}>Select 2 or more people to start a group conversation.</p>
+
+            <input
+              type="text"
+              placeholder="Group name (optional)"
+              value={groupName}
+              onChange={(e) => setGroupName(e.target.value)}
+              style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', fontSize: '13px', marginBottom: '12px', outline: 'none', backgroundColor: 'transparent', color: 'var(--text-primary)', boxSizing: 'border-box' }}
+            />
+
+            <div style={{ flex: 1, overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: '8px', marginBottom: '16px', maxHeight: '300px' }}>
+              {allStaff.map(s => {
+                const selected = groupSelectedIds.includes(s.id);
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => setGroupSelectedIds(prev => selected ? prev.filter(x => x !== s.id) : [...prev, s.id])}
+                    style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', border: 'none', backgroundColor: selected ? 'var(--surface-elevated)' : 'transparent', cursor: 'pointer', textAlign: 'left', transition: 'background-color 0.15s', borderBottom: '1px solid var(--border-color)' }}
+                    onMouseEnter={(e) => { if (!selected) e.currentTarget.style.backgroundColor = 'var(--surface-elevated)'; }}
+                    onMouseLeave={(e) => { if (!selected) e.currentTarget.style.backgroundColor = 'transparent'; }}
+                  >
+                    <div style={{ width: '20px', height: '20px', borderRadius: '4px', border: selected ? 'none' : '2px solid var(--border-color)', backgroundColor: selected ? '#2D6A4F' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      {selected && <Check style={{ width: '12px', height: '12px', color: '#fff' }} />}
+                    </div>
+                    <ChatAvatar name={`${s.first_name} ${s.last_name}`} color={getAvatarColor(s.id)} size={32} photoUrl={s.avatar_url || undefined} />
+                    <div>
+                      <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{s.first_name} {s.last_name}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{ROLE_LABELS[s.role] || s.role}</div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{groupSelectedIds.length} selected</span>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button onClick={() => setNewGroupOpen(false)} style={{ padding: '8px 16px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-white)', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: 'var(--text-primary)' }}>Cancel</button>
+                <button onClick={handleCreateGroup} disabled={groupSelectedIds.length < 2} style={{ padding: '8px 16px', borderRadius: '8px', border: 'none', backgroundColor: groupSelectedIds.length < 2 ? 'var(--border-color)' : '#2D6A4F', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: groupSelectedIds.length < 2 ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Users style={{ width: '14px', height: '14px' }} /> Create Group
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete confirmation dialog ─────────────────────────────────────── */}
+      {deleteConfirmId && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.4)' }} onClick={() => setDeleteConfirmId(null)}>
+          <div style={{ backgroundColor: 'var(--surface-white)', borderRadius: '12px', padding: '24px', width: '400px', maxWidth: '90vw', boxShadow: '0 16px 48px rgba(0,0,0,0.18)' }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ margin: '0 0 8px', fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>Delete conversation?</h3>
+            <p style={{ margin: '0 0 20px', fontSize: '14px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              This will permanently delete all messages in this conversation for both participants. This action cannot be undone.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button onClick={() => setDeleteConfirmId(null)} style={{ padding: '8px 16px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-white)', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: 'var(--text-primary)' }}>
+                Cancel
+              </button>
+              <button onClick={() => handleDeleteConversation(deleteConfirmId)} style={{ padding: '8px 16px', borderRadius: '8px', border: 'none', backgroundColor: '#d4183d', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

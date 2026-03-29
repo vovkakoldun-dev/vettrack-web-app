@@ -93,7 +93,7 @@ export default function OwnerAppointmentsPage() {
         reason: a.reason ?? a.services?.name ?? '—',
         pet: a.pets?.name ?? '—',
         petImage: a.pets?.photo_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(a.pets?.name ?? 'Pet')}&background=74C69D&color=fff`,
-        vet: a.staff ? `Dr. ${a.staff.last_name}` : 'Dr. Chen',
+        vet: a.staff?.profiles ? `Dr. ${a.staff.profiles.last_name}` : '—',
         status,
         notes: a.notes ?? undefined,
       };

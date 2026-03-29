@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { updateProfile, uploadAvatar, removeAvatar } from '../hooks/useProfile';
+import { getOrgContext } from '../hooks/useOrgContext';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 
@@ -30,6 +31,7 @@ type SettingsSection =
   | 'notifications'
   | 'appearance'
   | 'security'
+  | 'session'
   | 'billing'
   | 'integrations';
 
@@ -682,17 +684,20 @@ export default function SettingsPage() {
 
   const [saving, setSaving] = useState(false);
 
+  const [pwError, setPwError] = useState<string | null>(null);
+
   const handleSave = async (section: SettingsSection) => {
     if (section === 'profile' && staffId) {
       setSaving(true);
       // Profile data → profiles table
       await updateProfile(staffId, { first_name: firstName, last_name: lastName, email, phone });
       // Staff-specific data → staff table
+      const { organizationId } = await getOrgContext();
       const { error } = await supabase.from('staff').update({
         job_title: jobTitle,
         specialization,
         license_no: licenseNo,
-      }).eq('id', staffId);
+      }).eq('id', staffId).eq('organization_id', organizationId);
       setSaving(false);
       if (error) {
         alert('Failed to save: ' + error.message);
@@ -701,6 +706,37 @@ export default function SettingsPage() {
       // Update sidebar + all useProfile('doctor') consumers instantly
       window.dispatchEvent(new CustomEvent('doctorProfileChanged', { detail: { firstName, lastName, email, phone } }));
     }
+
+    if (section === 'security') {
+      if (!currentPw || !newPw || newPw !== confirmPw || newPw.length < 12) return;
+      setSaving(true);
+      setPwError(null);
+      // Verify current password by re-authenticating
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user?.email) { setSaving(false); setPwError('Unable to verify user.'); return; }
+      const { error: signInErr } = await supabase.auth.signInWithPassword({ email: user.email, password: currentPw });
+      if (signInErr) { setSaving(false); setPwError('Current password is incorrect.'); return; }
+      // Update to new password
+      const { error: updateErr } = await supabase.auth.updateUser({ password: newPw });
+      setSaving(false);
+      if (updateErr) { setPwError(updateErr.message); return; }
+      // Clear fields on success
+      setCurrentPw('');
+      setNewPw('');
+      setConfirmPw('');
+    }
+
+    if (section === 'session') {
+      setSaving(true);
+      try {
+        const { organizationId } = await getOrgContext();
+        await supabase
+          .from('organization_settings')
+          .upsert({ organization_id: organizationId, key: 'session_timeout', value: sessionTimeout, updated_at: new Date().toISOString() }, { onConflict: 'organization_id,key' });
+      } catch {}
+      setSaving(false);
+    }
+
     setSavedSection(section);
     setTimeout(() => setSavedSection(null), 3000);
   };
@@ -814,6 +850,22 @@ export default function SettingsPage() {
   const [confirmPw, setConfirmPw] = useState('');
   const [twoFaEnabled, setTwoFaEnabled] = useState(true);
   const [sessionTimeout, setSessionTimeout] = useState('8h');
+
+  // Load session timeout from DB
+  useEffect(() => {
+    (async () => {
+      try {
+        const { organizationId } = await getOrgContext();
+        const { data } = await supabase
+          .from('organization_settings')
+          .select('value')
+          .eq('organization_id', organizationId)
+          .eq('key', 'session_timeout')
+          .single();
+        if (data) setSessionTimeout(data.value);
+      } catch {}
+    })();
+  }, []);
 
   const sessions = [
     { id: 1, device: 'MacBook Pro 14"',   browser: 'Chrome 122',  location: 'Austin, TX', lastActive: 'Now',           current: true  },
@@ -1496,13 +1548,16 @@ export default function SettingsPage() {
                   )}
                 </FieldRow>
 
+                {pwError && (
+                  <p className="text-[#d4183d] mt-2" style={{ fontSize: '13px' }}>{pwError}</p>
+                )}
                 <div className="pt-4 flex justify-end">
                   <Button
-                    disabled={!currentPw || !newPw || newPw !== confirmPw || newPw.length < 12}
+                    disabled={!currentPw || !newPw || newPw !== confirmPw || newPw.length < 12 || saving}
                     onClick={() => handleSave('security')}
                   >
                     <Key className="w-4 h-4" />
-                    Update password
+                    {saving ? 'Updating…' : 'Update password'}
                   </Button>
                 </div>
               </SectionCard>
@@ -1552,7 +1607,7 @@ export default function SettingsPage() {
                     </SelectContent>
                   </Select>
                 </FieldRow>
-                <SaveBar onSave={() => handleSave('security')} saved={savedSection === 'security'} />
+                <SaveBar onSave={() => handleSave('session')} saved={savedSection === 'session'} />
               </SectionCard>
 
               {/* Active sessions */}

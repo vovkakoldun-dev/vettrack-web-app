@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate, useSearchParams, useLocation } from 'react-router';
 import { supabase } from '../../lib/supabase';
+import { getOrgContext } from '../hooks/useOrgContext';
 import {
   ArrowLeft, Edit2, MoreHorizontal, Plus, Save, X, Printer, Archive, Trash2, FileDown, PawPrint,
   Mail, Phone, MapPin, Shield, AlertCircle, Check, PlusCircle,
@@ -249,9 +250,11 @@ export default function ClientDetailPage() {
 
   const fetchClientData = useCallback(async () => {
     if (!id) return;
+    const { organizationId } = await getOrgContext();
     const { data: c } = await supabase
       .from('clients')
-      .select('id, first_name, last_name, email, phone, address, city, state, zip, notes, portal_status, health_status, created_at, pets(id, name, species, breed, date_of_birth, sex, weight_kg, microchip_no, photo_url, assigned_vet_id, assigned_vet:staff!pets_assigned_vet_id_fkey(id, first_name, last_name))')
+      .select('id, first_name, last_name, email, phone, address, city, state, zip, notes, portal_status, health_status, created_at, pets(id, name, species, breed, date_of_birth, sex, weight_kg, microchip_no, photo_url, assigned_vet_id, assigned_vet:staff!pets_assigned_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name)))')
+      .eq('organization_id', organizationId)
       .eq('id', id)
       .single();
     if (c) {
@@ -260,7 +263,7 @@ export default function ClientDetailPage() {
         petIds.length > 0 ? supabase.from('pet_allergies').select('*').in('pet_id', petIds) : { data: [] },
         petIds.length > 0 ? supabase.from('pet_conditions').select('*').in('pet_id', petIds) : { data: [] },
         petIds.length > 0 ? supabase.from('pet_treatments').select('*').in('pet_id', petIds).order('date', { ascending: false }) : { data: [] },
-        petIds.length > 0 ? supabase.from('appointments').select('id, pet_id, scheduled_at, duration_minutes, status, reason, staff!appointments_vet_id_fkey(first_name, last_name)').in('pet_id', petIds).gte('scheduled_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString()).order('scheduled_at', { ascending: true }) : { data: [] },
+        petIds.length > 0 ? supabase.from('appointments').select('id, pet_id, scheduled_at, duration_minutes, status, reason, staff!appointments_vet_id_fkey(profiles:profiles!staff_profile_id_fkey(first_name, last_name))').eq('organization_id', organizationId).in('pet_id', petIds).gte('scheduled_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString()).order('scheduled_at', { ascending: true }) : { data: [] },
       ]);
       const petAllergies = (allergiesRes.data || []) as any[];
       const petConditions = (conditionsRes.data || []) as any[];
@@ -280,7 +283,7 @@ export default function ClientDetailPage() {
         microchip: p.microchip_no || '—',
         color: '—',
         image: p.photo_url || '',
-        assignedVet: p.assigned_vet ? `Dr. ${p.assigned_vet.first_name} ${p.assigned_vet.last_name}` : '—',
+        assignedVet: p.assigned_vet?.profiles ? `Dr. ${p.assigned_vet.profiles.first_name} ${p.assigned_vet.profiles.last_name}` : '—',
         status: ((['Healthy', 'Follow-up', 'Critical'].includes((c as any).health_status)) ? (c as any).health_status : 'Healthy') as 'Healthy' | 'Follow-up' | 'Critical',
         conditions: petConditions.filter((pc: any) => pc.pet_id === p.id).map((pc: any) => ({
           id: pc.id, name: pc.name, dateDiagnosed: new Date(pc.date_diagnosed).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }), status: pc.status as 'active' | 'resolved', notes: pc.notes || '',
@@ -390,8 +393,10 @@ export default function ClientDetailPage() {
           photoUrl = urlData.publicUrl + '?t=' + Date.now();
         }
       }
+      const { organizationId } = await getOrgContext();
       const { error: petErr } = await supabase.from('pets').insert([{
         client_id: id,
+        organization_id: organizationId,
         name: addPetForm.name.trim(),
         species: addPetForm.species,
         breed: addPetForm.breed || null,
@@ -408,9 +413,11 @@ export default function ClientDetailPage() {
       }
       {
         // Reload client data to pick up the new pet
+        const orgCtx = await getOrgContext();
         const { data: c } = await supabase
           .from('clients')
-          .select('id, first_name, last_name, email, phone, address, city, state, zip, notes, portal_status, health_status, created_at, pets(id, name, species, breed, date_of_birth, sex, weight_kg, microchip_no, photo_url, assigned_vet_id, assigned_vet:staff!pets_assigned_vet_id_fkey(id, first_name, last_name))')
+          .select('id, first_name, last_name, email, phone, address, city, state, zip, notes, portal_status, health_status, created_at, pets(id, name, species, breed, date_of_birth, sex, weight_kg, microchip_no, photo_url, assigned_vet_id, assigned_vet:staff!pets_assigned_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name)))')
+          .eq('organization_id', orgCtx.organizationId)
           .eq('id', id)
           .single();
         if (c) {
@@ -419,14 +426,14 @@ export default function ClientDetailPage() {
             petIds.length > 0 ? supabase.from('pet_allergies').select('*').in('pet_id', petIds) : { data: [] },
             petIds.length > 0 ? supabase.from('pet_conditions').select('*').in('pet_id', petIds) : { data: [] },
             petIds.length > 0 ? supabase.from('pet_treatments').select('*').in('pet_id', petIds).order('date', { ascending: false }) : { data: [] },
-            petIds.length > 0 ? supabase.from('appointments').select('id, pet_id, scheduled_at, duration_minutes, status, reason, staff!appointments_vet_id_fkey(first_name, last_name)').in('pet_id', petIds).gte('scheduled_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString()).order('scheduled_at', { ascending: true }) : { data: [] },
+            petIds.length > 0 ? supabase.from('appointments').select('id, pet_id, scheduled_at, duration_minutes, status, reason, staff!appointments_vet_id_fkey(profiles:profiles!staff_profile_id_fkey(first_name, last_name))').eq('organization_id', orgCtx.organizationId).in('pet_id', petIds).gte('scheduled_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString()).order('scheduled_at', { ascending: true }) : { data: [] },
           ]);
           const petAppts2 = (apRes.data || []) as any[];
           const pets = (c.pets as any[] || []).map((p: any, idx: number) => ({
             id: idx + 1, dbId: p.id as string, name: p.name || '—', species: p.species || '—', breed: p.breed || '—',
             dob: p.date_of_birth || '', age: p.date_of_birth ? `${Math.floor((Date.now() - new Date(p.date_of_birth).getTime()) / (365.25 * 24 * 60 * 60 * 1000))} years` : '—',
             sex: p.sex || '—', weight: p.weight_kg ? `${p.weight_kg} kg` : '—', microchip: p.microchip_no || '—',
-            color: '—', image: p.photo_url || '', assignedVet: p.assigned_vet ? `Dr. ${p.assigned_vet.first_name} ${p.assigned_vet.last_name}` : '—', status: ((['Healthy', 'Follow-up', 'Critical'].includes((c as any).health_status)) ? (c as any).health_status : 'Healthy') as 'Healthy' | 'Follow-up' | 'Critical',
+            color: '—', image: p.photo_url || '', assignedVet: p.assigned_vet?.profiles ? `Dr. ${p.assigned_vet.profiles.first_name} ${p.assigned_vet.profiles.last_name}` : '—', status: ((['Healthy', 'Follow-up', 'Critical'].includes((c as any).health_status)) ? (c as any).health_status : 'Healthy') as 'Healthy' | 'Follow-up' | 'Critical',
             conditions: ((coRes.data as any[]) || []).filter((co: any) => co.pet_id === p.id).map((co: any) => ({ id: co.id, name: co.name, status: co.status || 'active', date: co.date_diagnosed || co.created_at?.split('T')[0] || '', notes: co.notes || '' })),
             treatments: ((trRes.data as any[]) || []).filter((t: any) => t.pet_id === p.id).map((t: any) => ({ id: t.id, name: t.name, date: t.date || '', vet: t.vet || '—', notes: t.notes || '' })),
             allergies: ((alRes.data as any[]) || []).filter((a: any) => a.pet_id === p.id).map((a: any) => a.name as string),
@@ -468,6 +475,7 @@ export default function ClientDetailPage() {
     if (!id) return;
     setSaving(true);
     try {
+      const { organizationId } = await getOrgContext();
       const currentPet = client.pets[selectedPetIdx];
       const petDbId = currentPet?.dbId;
 
@@ -483,7 +491,7 @@ export default function ClientDetailPage() {
           date_of_birth: petDob || null,
           weight_kg: (weightNum && !isNaN(weightNum)) ? weightNum : null,
           microchip_no: petMicrochip !== '—' ? petMicrochip : null,
-        }).eq('id', petDbId);
+        }).eq('id', petDbId).eq('organization_id', organizationId);
       }
 
       // Save client/owner fields
@@ -496,7 +504,7 @@ export default function ClientDetailPage() {
         email: ownerEmail !== '—' ? ownerEmail : null,
         phone: ownerPhone !== '—' ? ownerPhone : null,
         address: ownerAddress !== '—' ? ownerAddress : null,
-      }).eq('id', id);
+      }).eq('id', id).eq('organization_id', organizationId);
 
       // Notify other pages of the data change
       window.dispatchEvent(new CustomEvent('clientDataChanged'));
@@ -579,7 +587,8 @@ export default function ClientDetailPage() {
           .order('created_at', { ascending: true });
         const realPetId = petsData?.[selectedPetIdx]?.id;
         if (realPetId) {
-          await supabase.from('pets').update({ photo_url: publicUrl }).eq('id', realPetId);
+          const { organizationId } = await getOrgContext();
+          await supabase.from('pets').update({ photo_url: publicUrl }).eq('id', realPetId).eq('organization_id', organizationId);
         }
       }
       setPetImage(publicUrl);
@@ -807,7 +816,8 @@ export default function ClientDetailPage() {
                         onClick={async () => {
                           setPatientStatus(option.value);
                           if (id) {
-                            await supabase.from('clients').update({ health_status: option.value }).eq('id', id);
+                            const { organizationId } = await getOrgContext();
+                            await supabase.from('clients').update({ health_status: option.value }).eq('id', id).eq('organization_id', organizationId);
                           }
                         }}
                         className="flex items-start gap-3 cursor-pointer focus:bg-[var(--surface-elevated)] focus:text-[var(--text-primary)] data-[highlighted]:bg-[var(--surface-elevated)] data-[highlighted]:text-[var(--text-primary)]"
@@ -886,7 +896,8 @@ export default function ClientDetailPage() {
                     return;
                   }
                   if (!window.confirm(`Delete pet "${petName}"? This cannot be undone.`)) return;
-                  await supabase.from('pets').delete().eq('id', currentPet.dbId);
+                  const { organizationId } = await getOrgContext();
+                  await supabase.from('pets').delete().eq('id', currentPet.dbId).eq('organization_id', organizationId);
                   // Reload
                   window.location.reload();
                 }}
@@ -898,8 +909,9 @@ export default function ClientDetailPage() {
                 onClick={async () => {
                   if (!id) return;
                   if (!window.confirm(`Delete the entire client profile for "${ownerName}" and all their pets? This cannot be undone.`)) return;
-                  await supabase.from('pets').delete().eq('client_id', id);
-                  await supabase.from('clients').delete().eq('id', id);
+                  const { organizationId: delOrgId } = await getOrgContext();
+                  await supabase.from('pets').delete().eq('client_id', id).eq('organization_id', delOrgId);
+                  await supabase.from('clients').delete().eq('id', id).eq('organization_id', delOrgId);
                   navigate(clientsPath);
                 }}
               >
@@ -1006,11 +1018,12 @@ export default function ClientDetailPage() {
                             const pet = client.pets[selectedPetIdx];
                             setPetAssignedVet(v.name);
                             if (petDbId) {
-                              await supabase.from('pets').update({ assigned_vet_id: v.id }).eq('id', petDbId);
+                              const { organizationId: notifOrgId } = await getOrgContext();
+                              await supabase.from('pets').update({ assigned_vet_id: v.id }).eq('id', petDbId).eq('organization_id', notifOrgId);
                               window.dispatchEvent(new CustomEvent('petDataChanged'));
                               try {
                                 // Remove old assign event for this pet, then insert new one
-                                await supabase.from('notification_events').delete().eq('type', 'vet_assign').ilike('id', `assign-${petDbId}-%`);
+                                await supabase.from('notification_events').delete().eq('type', 'vet_assign').ilike('id', `assign-${petDbId}-%`).eq('organization_id', notifOrgId);
                                 await supabase.from('notification_events').upsert({
                                   id: `assign-${petDbId}-${Date.now()}`,
                                   type: 'vet_assign',
@@ -1025,6 +1038,7 @@ export default function ClientDetailPage() {
                                     vetId: v.id,
                                     vetName: v.name,
                                   },
+                                  organization_id: notifOrgId,
                                 });
                               } catch {}
                               window.dispatchEvent(new CustomEvent('notifCountChanged'));
@@ -1044,7 +1058,8 @@ export default function ClientDetailPage() {
                               const prevVetName = petAssignedVet;
                               setPetAssignedVet('—');
                               if (petDbId) {
-                                await supabase.from('pets').update({ assigned_vet_id: null }).eq('id', petDbId);
+                                const { organizationId: notifOrgId } = await getOrgContext();
+                                await supabase.from('pets').update({ assigned_vet_id: null }).eq('id', petDbId).eq('organization_id', notifOrgId);
                                 window.dispatchEvent(new CustomEvent('petDataChanged'));
                                 // Store unassignment event for doctor notification
                                 try {
@@ -1059,9 +1074,10 @@ export default function ClientDetailPage() {
                                       clientId: id,
                                       vetName: prevVetName,
                                     },
+                                    organization_id: notifOrgId,
                                   });
                                   // Remove any assign event for this pet
-                                  await supabase.from('notification_events').delete().eq('type', 'vet_assign').ilike('id', `assign-${petDbId}-%`);
+                                  await supabase.from('notification_events').delete().eq('type', 'vet_assign').ilike('id', `assign-${petDbId}-%`).eq('organization_id', notifOrgId);
                                 } catch {}
                                 window.dispatchEvent(new CustomEvent('notifCountChanged'));
                               }

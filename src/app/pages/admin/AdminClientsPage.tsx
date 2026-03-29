@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import { Search, Plus, Mail, Phone, ChevronDown, CheckCircle2, AlertCircle, AlertTriangle, Trash2 } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
+import { getOrgContext } from '../../hooks/useOrgContext';
 import { AddClientDialog } from '../../components/AddClientDialog';
 import type { AddClientValues } from '../../hooks/useClients';
 import { Input } from '../../components/ui/input';
@@ -122,7 +123,8 @@ export default function AdminClientsPage() {
     if (entry) {
       const supaId = (entry as Client & { _supaId: string })._supaId;
       setStatusOverrides((prev) => ({ ...prev, [supaId]: newStatus }));
-      await supabase.from('clients').update({ health_status: newStatus }).eq('id', supaId);
+      const { organizationId } = await getOrgContext();
+      await supabase.from('clients').update({ health_status: newStatus }).eq('id', supaId).eq('organization_id', organizationId);
       window.dispatchEvent(new CustomEvent('clientDataChanged'));
     }
   };

@@ -161,6 +161,23 @@ export default function SuperAdminSettingsPage() {
   const save = (s: Section) => { setSavedSection(s); setTimeout(() => setSavedSection(null), 3000); };
   const saved = (s: Section) => savedSection === s;
 
+  const saveSecurity = async () => {
+    if (!currentPw || !newPw || newPw !== confirmPw || newPw.length < 12) return;
+    setSaving(true);
+    setPwError(null);
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (!authUser?.email) { setSaving(false); setPwError('Unable to verify user.'); return; }
+    const { error: signInErr } = await supabase.auth.signInWithPassword({ email: authUser.email, password: currentPw });
+    if (signInErr) { setSaving(false); setPwError('Current password is incorrect.'); return; }
+    const { error: updateErr } = await supabase.auth.updateUser({ password: newPw });
+    setSaving(false);
+    if (updateErr) { setPwError(updateErr.message); return; }
+    setCurrentPw('');
+    setNewPw('');
+    setConfirmPw('');
+    save('security');
+  };
+
   // Profile
   const [profileId, setProfileId] = useState('');
   const [firstName, setFirstName] = useState('');
@@ -249,6 +266,8 @@ export default function SuperAdminSettingsPage() {
   const [currentPw,     setCurrentPw]     = useState('');
   const [newPw,         setNewPw]         = useState('');
   const [confirmPw,     setConfirmPw]     = useState('');
+  const [pwError,       setPwError]       = useState<string | null>(null);
+  const [saving,        setSaving]        = useState(false);
   const [twoFaEnabled,  setTwoFaEnabled]  = useState(true);
   const [sessionTimeout,setSessionTimeout]= useState('8h');
   const [auditEnabled,  setAuditEnabled]  = useState(true);
@@ -777,7 +796,17 @@ export default function SuperAdminSettingsPage() {
                     <p style={{ fontSize: '12px', color: '#EF4444', marginTop: '4px' }}>Passwords do not match</p>
                   )}
                 </FieldRow>
-                <SaveBar onSave={() => save('security')} saved={saved('security')} />
+                <div className="pt-4 flex justify-end flex-col items-end">
+                  {pwError && <p className="text-[#d4183d] mt-2 mb-2" style={{ fontSize: '13px' }}>{pwError}</p>}
+                  <Button
+                    disabled={!currentPw || !newPw || newPw !== confirmPw || newPw.length < 12 || saving}
+                    onClick={saveSecurity}
+                    style={{ backgroundColor: ACCENT, borderColor: ACCENT }}
+                  >
+                    <Save className="w-4 h-4" />
+                    {saving ? 'Updating…' : 'Update password'}
+                  </Button>
+                </div>
               </SectionCard>
 
               <SectionCard>

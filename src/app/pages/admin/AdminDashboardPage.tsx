@@ -434,7 +434,7 @@ export default function AdminDashboardPage() {
         owner: a.clients ? `${a.clients.first_name} ${a.clients.last_name}` : '—',
         phone: a.clients?.phone ?? '—',
         service: a.services?.name ?? a.reason ?? '—',
-        vet: a.staff ? `Dr. ${a.staff.last_name}` : '—',
+        vet: a.staff?.profiles ? `Dr. ${a.staff.profiles.last_name}` : '—',
         status: (a.status as ApptStatus) || 'Pending',
       };
     }),

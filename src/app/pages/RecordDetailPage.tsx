@@ -442,7 +442,7 @@ export default function RecordDetailPage() {
       setLoading(true);
       const { data } = await supabase
         .from('medical_records')
-        .select('*, pets(id, name, species, breed, photo_url, date_of_birth, sex, weight_kg, color, microchip_no), clients(id, first_name, last_name, email, phone), staff!medical_records_vet_id_fkey(id, first_name, last_name)')
+        .select('*, pets(id, name, species, breed, photo_url, date_of_birth, sex, weight_kg, color, microchip_no), clients(id, first_name, last_name, email, phone), staff!medical_records_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
         .eq('id', id)
         .single();
       if (data) {
@@ -488,7 +488,7 @@ export default function RecordDetailPage() {
             date: visitDate.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
             time: data.visit_time ?? '—',
             reason: data.reason ?? '—',
-            vet: data.staff ? `Dr. ${data.staff.first_name} ${data.staff.last_name}` : '—',
+            vet: (data as any).staff?.profiles ? `Dr. ${(data as any).staff.profiles.first_name} ${(data as any).staff.profiles.last_name}` : '—',
             vetLicense: '—',
             clinic: 'HugoIT Veterinary Clinic',
             clinicAddress: '—',

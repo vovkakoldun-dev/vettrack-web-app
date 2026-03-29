@@ -4,6 +4,7 @@ import { Search, Plus, Mail, Phone, ChevronDown, CheckCircle2, AlertCircle, Aler
 import { AddClientDialog } from '../components/AddClientDialog';
 import { useClients } from '../hooks/useClients';
 import { supabase } from '../../lib/supabase';
+import { getOrgContext } from '../hooks/useOrgContext';
 import type { AddClientValues } from '../hooks/useClients';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
@@ -66,9 +67,13 @@ export default function ClientsPage() {
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest' | 'name-az' | 'name-za'>('newest');
 
   useEffect(() => {
-    supabase.from('staff').select('id, first_name, last_name').then(({ data }) => {
-      if (data) setVets(data.map((v: any) => ({ id: v.id, name: `Dr. ${v.first_name} ${v.last_name}` })));
-    });
+    (async () => {
+      try {
+        const { organizationId } = await getOrgContext();
+        const { data } = await supabase.from('staff').select('id, profiles:profiles!staff_profile_id_fkey(first_name, last_name)').eq('organization_id', organizationId);
+        if (data) setVets(data.map((v: any) => ({ id: v.id, name: `Dr. ${v.profiles?.first_name || ''} ${v.profiles?.last_name || ''}`.trim() })));
+      } catch {}
+    })();
   }, []);
 
   const handleAddClient = async (values: AddClientValues): Promise<string | void> => {
@@ -438,12 +443,13 @@ export default function ClientsPage() {
                                 key={v.id}
                                 onClick={async () => {
                                   if (client.petId) {
+                                    const { organizationId: notifOrgId } = await getOrgContext();
                                     setVetOverrides((prev) => ({ ...prev, [client.petId!]: v }));
-                                    await supabase.from('pets').update({ assigned_vet_id: v.id }).eq('id', client.petId);
+                                    await supabase.from('pets').update({ assigned_vet_id: v.id }).eq('id', client.petId).eq('organization_id', notifOrgId);
                                     window.dispatchEvent(new CustomEvent('petDataChanged'));
                                     // Store assignment event for doctor notification
                                     try {
-                                      await supabase.from('notification_events').delete().eq('type', 'vet_assign').ilike('id', `assign-${client.petId}-%`);
+                                      await supabase.from('notification_events').delete().eq('type', 'vet_assign').ilike('id', `assign-${client.petId}-%`).eq('organization_id', notifOrgId);
                                       await supabase.from('notification_events').upsert({
                                         id: `assign-${client.petId}-${Date.now()}`,
                                         type: 'vet_assign',
@@ -458,6 +464,7 @@ export default function ClientsPage() {
                                           vetId: v.id,
                                           vetName: v.name,
                                         },
+                                        organization_id: notifOrgId,
                                       });
                                     } catch {}
                                     window.dispatchEvent(new CustomEvent('notifCountChanged'));
@@ -476,8 +483,9 @@ export default function ClientsPage() {
                                   onClick={async () => {
                                     if (client.petId) {
                                       const prevVetName = currentVet?.name || '';
+                                      const { organizationId: notifOrgId } = await getOrgContext();
                                       setVetOverrides((prev) => ({ ...prev, [client.petId!]: null }));
-                                      await supabase.from('pets').update({ assigned_vet_id: null }).eq('id', client.petId);
+                                      await supabase.from('pets').update({ assigned_vet_id: null }).eq('id', client.petId).eq('organization_id', notifOrgId);
                                       window.dispatchEvent(new CustomEvent('petDataChanged'));
                                       try {
                                         await supabase.from('notification_events').upsert({
@@ -491,8 +499,9 @@ export default function ClientsPage() {
                                             clientId: client.id,
                                             vetName: prevVetName,
                                           },
+                                          organization_id: notifOrgId,
                                         });
-                                        await supabase.from('notification_events').delete().eq('type', 'vet_assign').ilike('id', `assign-${client.petId}-%`);
+                                        await supabase.from('notification_events').delete().eq('type', 'vet_assign').ilike('id', `assign-${client.petId}-%`).eq('organization_id', notifOrgId);
                                       } catch {}
                                       window.dispatchEvent(new CustomEvent('notifCountChanged'));
                                     }
@@ -592,7 +601,8 @@ export default function ClientsPage() {
                               await deleteClient(client.id);
                             } else {
                               // Multiple pets — only delete this pet
-                              await supabase.from('pets').delete().eq('id', client.petId);
+                              const { organizationId } = await getOrgContext();
+                              await supabase.from('pets').delete().eq('id', client.petId).eq('organization_id', organizationId);
                               refetch();
                             }
                             setDeletingId(null);

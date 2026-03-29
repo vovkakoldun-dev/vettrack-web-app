@@ -21,7 +21,8 @@ const ACCENT_BG = '#F4A26112';
 
 // ─── Types ────────────────────────────────────────────────────
 type Role = 'Senior Veterinarian' | 'Veterinarian' | 'Vet Technician' | 'Lead Vet Tech'
-  | 'Receptionist' | 'Front Desk Manager' | 'Clinic Manager' | 'Groomer' | 'Lab Technician' | 'Specialist';
+  | 'Receptionist' | 'Front Desk Manager' | 'Clinic Manager' | 'Groomer' | 'Lab Technician' | 'Specialist'
+  | 'Super Administrator' | 'Owner';
 
 type Department = 'Clinical' | 'Front Desk' | 'Management' | 'Support' | 'Lab';
 
@@ -63,6 +64,8 @@ const ROLE_CONFIG: Record<Role, { color: string; bg: string }> = {
   'Groomer':             { color: '#BE185D', bg: '#EC489915' },
   'Lab Technician':      { color: '#0E7490', bg: '#06B6D415' },
   'Specialist':          { color: '#374151', bg: '#6B728015' },
+  'Super Administrator': { color: '#F4A261', bg: '#F4A26115' },
+  'Owner':               { color: '#92400E', bg: '#F59E0B15' },
 };
 
 const STATUS_CONFIG: Record<StaffStatus, { color: string; bg: string; dot: string }> = {
@@ -89,6 +92,8 @@ const DB_ROLE_TO_UI: Record<string, Role> = {
   clinic_manager: 'Clinic Manager',
   groomer: 'Groomer',
   lab_technician: 'Lab Technician',
+  superadmin: 'Super Administrator',
+  owner: 'Owner',
 };
 const UI_ROLE_TO_DB: Record<Role, string> = Object.fromEntries(
   Object.entries(DB_ROLE_TO_UI).map(([k, v]) => [v, k])
@@ -100,7 +105,7 @@ function roleToDept(role: Role): Department {
   if (['Veterinarian', 'Senior Veterinarian', 'Specialist'].includes(role)) return 'Clinical';
   if (['Vet Technician', 'Lead Vet Tech'].includes(role)) return 'Clinical';
   if (['Receptionist', 'Front Desk Manager'].includes(role)) return 'Front Desk';
-  if (role === 'Clinic Manager') return 'Management';
+  if (['Clinic Manager', 'Super Administrator', 'Owner'].includes(role)) return 'Management';
   if (role === 'Lab Technician') return 'Lab';
   if (role === 'Groomer') return 'Support';
   return 'Clinical';
@@ -127,7 +132,7 @@ function tabMatch(s: StaffMember, tab: DeptTab): boolean {
   if (tab === 'Veterinarians') return s.role === 'Veterinarian' || s.role === 'Senior Veterinarian' || s.role === 'Specialist';
   if (tab === 'Vet Techs')     return s.role === 'Vet Technician' || s.role === 'Lead Vet Tech';
   if (tab === 'Front Desk')    return s.role === 'Receptionist' || s.role === 'Front Desk Manager';
-  if (tab === 'Management')    return s.role === 'Clinic Manager';
+  if (tab === 'Management')    return s.role === 'Clinic Manager' || s.role === 'Super Administrator' || s.role === 'Owner';
   if (tab === 'Lab & Support') return s.role === 'Lab Technician' || s.role === 'Groomer';
   return true;
 }
@@ -410,21 +415,25 @@ function StaffDetailDrawer({
 }
 
 // ─── Add / Edit Drawer ────────────────────────────────────────
-const ROLES: Role[] = ['Senior Veterinarian', 'Veterinarian', 'Vet Technician', 'Lead Vet Tech', 'Receptionist', 'Front Desk Manager', 'Clinic Manager', 'Groomer', 'Lab Technician', 'Specialist']
+const ROLES: Role[] = ['Senior Veterinarian', 'Veterinarian', 'Vet Technician', 'Lead Vet Tech', 'Receptionist', 'Front Desk Manager', 'Clinic Manager', 'Super Administrator', 'Owner', 'Groomer', 'Lab Technician', 'Specialist']
 const DEPTS: Department[] = ['Clinical', 'Front Desk', 'Management', 'Support', 'Lab'];
 // CLINIC_NAMES is now dynamically populated from Supabase — see clinicNames state
 const STATUS_LIST: StaffStatus[] = ['Active', 'Probation', 'On Leave', 'Inactive'];
+
+type Portal = 'doctor' | 'admin';
 
 type FormState = {
   firstName: string; lastName: string; role: Role; department: Department;
   clinic: string; email: string; phone: string; status: StaffStatus;
   startDate: string; licenseNo: string; schedule: string; bio: string; emergencyContact: string; notes: string;
+  portal: Portal; tempPassword: string;
 };
 
 const EMPTY_FORM: FormState = {
   firstName: '', lastName: '', role: 'Veterinarian', department: 'Clinical',
   clinic: '', email: '', phone: '', status: 'Active',
   startDate: '', licenseNo: '', schedule: 'Mon–Fri, 9–6', bio: '', emergencyContact: '', notes: '',
+  portal: 'doctor', tempPassword: '',
 };
 
 function StaffFormDrawer({
@@ -441,11 +450,12 @@ function StaffFormDrawer({
     phone: initial.phone, status: initial.status, startDate: initial.startDate,
     licenseNo: initial.licenseNo ?? '', schedule: initial.schedule, bio: initial.bio,
     emergencyContact: initial.emergencyContact, notes: initial.notes ?? '',
+    portal: 'doctor', tempPassword: '',
   } : { ...EMPTY_FORM, clinic: availableClinics[0] || '' });
 
   const set = (k: keyof FormState, v: string) => setForm(p => ({ ...p, [k]: v }));
 
-  const valid = form.firstName.trim() && form.lastName.trim() && form.email.trim();
+  const valid = form.firstName.trim() && form.lastName.trim() && form.email.trim() && (!!initial || form.tempPassword.length >= 6);
 
   return (
     <>
@@ -549,33 +559,44 @@ function StaffFormDrawer({
             <Input placeholder="DVM-CA-00000" value={form.licenseNo} onChange={e => set('licenseNo', e.target.value)} />
           </div>
 
-          {/* Bio */}
-          <div style={{ marginBottom: 16 }}>
-            <p style={labelStyle}>Bio / About</p>
-            <Textarea
-              placeholder="Brief professional summary…"
-              value={form.bio}
-              onChange={e => set('bio', e.target.value)}
-              style={{ minHeight: 80, resize: 'vertical' }}
-            />
-          </div>
-
           {/* Emergency Contact */}
           <div style={{ marginBottom: 16 }}>
             <p style={labelStyle}>Emergency Contact</p>
             <Input placeholder="Name — (555) 000-0000" value={form.emergencyContact} onChange={e => set('emergencyContact', e.target.value)} />
           </div>
 
-          {/* Notes */}
-          <div style={{ marginBottom: 8 }}>
-            <p style={labelStyle}>Internal Notes</p>
-            <Textarea
-              placeholder="Any internal notes…"
-              value={form.notes}
-              onChange={e => set('notes', e.target.value)}
-              style={{ minHeight: 60, resize: 'vertical' }}
-            />
-          </div>
+          {/* Portal + Temporary Password */}
+          {!initial && (
+            <>
+              <div style={{ marginTop: 8, marginBottom: 4, borderTop: '1px solid var(--border-color)', paddingTop: 16 }}>
+                <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 12px' }}>Portal Access</p>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+                <div>
+                  <p style={labelStyle}>Portal <span style={{ color: '#EF4444' }}>*</span></p>
+                  <Select value={form.portal} onValueChange={v => set('portal', v)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="doctor">Veterinary</SelectItem>
+                      <SelectItem value="admin">Admin</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <p style={labelStyle}>Temporary Password <span style={{ color: '#EF4444' }}>*</span></p>
+                  <Input
+                    type="password"
+                    placeholder="Min 6 characters"
+                    value={form.tempPassword}
+                    onChange={e => set('tempPassword', e.target.value)}
+                  />
+                </div>
+              </div>
+              <p style={{ fontSize: 11, color: 'var(--text-secondary)', margin: '-8px 0 8px', lineHeight: 1.4 }}>
+                The user will log in with their email and this temporary password. They can change it later in Settings.
+              </p>
+            </>
+          )}
         </div>
 
         {/* Footer */}
@@ -627,29 +648,36 @@ export default function SuperAdminStaffPage() {
 
   // ── Fetch clinics ──────────────────────────────────────────
   useEffect(() => {
-    supabase.from('clinics').select('id, name').then(({ data }) => {
-      if (data) {
-        const map: Record<string, string> = {};
-        data.forEach((c: any) => { map[c.id] = c.name; });
-        setClinicMap(map);
-        setClinicNames(data.map((c: any) => c.name));
-      }
-    });
+    (async () => {
+      try {
+        const { organizationId } = await getOrgContext();
+        const { data } = await supabase.from('clinics').select('id, name').eq('organization_id', organizationId);
+        if (data) {
+          const map: Record<string, string> = {};
+          data.forEach((c: any) => { map[c.id] = c.name; });
+          setClinicMap(map);
+          setClinicNames(data.map((c: any) => c.name));
+        }
+      } catch {}
+    })();
   }, []);
 
   // ── Fetch staff from Supabase ──────────────────────────────
   const fetchStaff = useCallback(async () => {
+    const { organizationId } = await getOrgContext();
     const { data, error } = await supabase
       .from('staff')
-      .select('*, profiles:profiles(avatar_url)')
+      .select('*, profiles:profiles!staff_profile_id_fkey(first_name, last_name, email, phone, avatar_url)')
+      .eq('organization_id', organizationId)
       .order('first_name');
 
     if (error || !data) { setLoading(false); return; }
 
     const mapped: StaffMember[] = data.map((row: any, idx: number) => {
       const uiRole = DB_ROLE_TO_UI[row.role] || 'Veterinarian';
-      const firstName = row.first_name || '';
-      const lastName = row.last_name || '';
+      // Identity from profiles (source of truth), fallback to staff columns
+      const firstName = row.profiles?.first_name || row.first_name || '';
+      const lastName = row.profiles?.last_name || row.last_name || '';
       const profileAvatarUrl = row.profiles?.avatar_url || null;
       const photoUrl = row.photo_url || profileAvatarUrl || undefined;
       return {
@@ -659,8 +687,8 @@ export default function SuperAdminStaffPage() {
         role: uiRole,
         department: row.department || roleToDept(uiRole),
         clinic: clinicMap[row.clinic_id] || 'Unknown Clinic',
-        email: row.email || '',
-        phone: row.phone || '',
+        email: row.profiles?.email || row.email || '',
+        phone: row.profiles?.phone || row.phone || '',
         status: (['Active', 'On Leave', 'Inactive', 'Probation'].includes(row.status) ? row.status : 'Active') as StaffStatus,
         initials: (firstName[0] || '') + (lastName[0] || ''),
         avatarColor: AVATAR_COLORS[idx % AVATAR_COLORS.length],
@@ -719,7 +747,8 @@ export default function SuperAdminStaffPage() {
     const current = staff.find(s => s.id === id);
     if (!current) return;
     const next: StaffStatus = (current.status === 'Active' || current.status === 'Probation') ? 'Inactive' : 'Active';
-    await supabase.from('staff').update({ status: next }).eq('id', id);
+    const { organizationId } = await getOrgContext();
+    await supabase.from('staff').update({ status: next }).eq('id', id).eq('organization_id', organizationId);
     setStaff(prev => prev.map(s => s.id !== id ? s : { ...s, status: next }));
     setSelectedStaff(prev => {
       if (!prev || prev.id !== id) return prev;
@@ -728,6 +757,7 @@ export default function SuperAdminStaffPage() {
   };
 
   const handleSave = async (form: FormState, isEdit: boolean) => {
+    try {
     // Reverse-lookup clinic_id from clinic name
     const clinicId = Object.entries(clinicMap).find(([, name]) => name === form.clinic)?.[0] || null;
     const dbRole = UI_ROLE_TO_DB[form.role] || 'veterinarian';
@@ -747,7 +777,8 @@ export default function SuperAdminStaffPage() {
     };
 
     if (isEdit && editStaff) {
-      await supabase.from('staff').update(dbPayload).eq('id', editStaff.id);
+      const { organizationId: orgId } = await getOrgContext();
+      await supabase.from('staff').update(dbPayload).eq('id', editStaff.id).eq('organization_id', orgId);
       // Also update profiles table for name/email/phone
       await supabase.from('profiles').update({
         first_name: form.firstName,
@@ -758,29 +789,59 @@ export default function SuperAdminStaffPage() {
       }).eq('id', editStaff.id);
     } else {
       const orgCtx = await getOrgContext();
-      dbPayload.organization_id = orgCtx.organizationId;
-      const { data: inserted } = await supabase.from('staff').insert(dbPayload).select('id').single();
-      if (inserted) {
-        // Also create a profiles row
-        await supabase.from('profiles').insert({
-          id: inserted.id,
-          first_name: form.firstName,
-          last_name: form.lastName,
-          email: form.email,
-          phone: form.phone || null,
-          role: dbRole,
-          organization_id: orgCtx.organizationId,
+
+      // Save current session before creating new user
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+
+      // Create Supabase Auth user with metadata — the DB trigger creates profile + staff rows automatically
+      const { data: authData, error: authErr } = await supabase.auth.signUp({
+        email: form.email,
+        password: form.tempPassword,
+        options: {
+          data: {
+            first_name: form.firstName,
+            last_name: form.lastName,
+            role: dbRole,
+            organization_id: orgCtx.organizationId,
+            clinic_id: clinicId || '00000000-0000-0000-0000-000000000002',
+            department: form.department,
+          },
+        },
+      });
+      if (authErr || !authData.user) {
+        alert('Failed to create user account: ' + (authErr?.message || 'Unknown error'));
+        return;
+      }
+      const userId = authData.user.id;
+
+      // Restore the superadmin session (signUp may have switched it)
+      if (currentSession) {
+        await supabase.auth.setSession({
+          access_token: currentSession.access_token,
+          refresh_token: currentSession.refresh_token,
         });
       }
+
+      // Update the staff record with additional fields the trigger didn't set
+      await supabase.from('staff').update({
+        phone: form.phone || null,
+        schedule: form.schedule || null,
+        license_no: form.licenseNo || null,
+      }).eq('id', userId).eq('organization_id', orgCtx.organizationId);
     }
 
     setEditStaff(undefined);
     setAddOpen(false);
     fetchStaff(); // Refresh from DB
+    } catch (e: any) {
+      console.error('handleSave error:', e);
+      alert('Error saving staff: ' + e.message);
+    }
   };
 
   const handleDelete = async (id: string) => {
-    await supabase.from('staff').delete().eq('id', id);
+    const { organizationId } = await getOrgContext();
+    await supabase.from('staff').delete().eq('id', id).eq('organization_id', organizationId);
     setStaff(prev => prev.filter(s => s.id !== id));
     if (selectedStaff?.id === id) setSelectedStaff(null);
     setOpenMenuId(null);

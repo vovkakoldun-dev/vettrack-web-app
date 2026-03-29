@@ -1,7 +1,15 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useRef, useCallback, ReactNode } from 'react';
 import { supabase } from '../../lib/supabase';
 import { clearProfileCache } from '../hooks/useProfile';
+import { clearOrgContextCache } from '../hooks/useOrgContext';
 import type { Session, User } from '@supabase/supabase-js';
+
+const TIMEOUT_MAP: Record<string, number> = {
+  '1h': 60 * 60 * 1000,
+  '4h': 4 * 60 * 60 * 1000,
+  '8h': 8 * 60 * 60 * 1000,
+  '24h': 24 * 60 * 60 * 1000,
+};
 
 // ─── Types ─────────────────────────────────────────────────────
 interface AuthContextValue {
@@ -48,6 +56,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
+  // ── Auto-logout on idle ──────────────────────────────────────
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timeoutMsRef = useRef<number | null>(null);
+
+  // Load timeout setting once when user logs in
+  useEffect(() => {
+    if (!user) { timeoutMsRef.current = null; return; }
+    supabase
+      .from('organization_settings')
+      .select('value')
+      .eq('key', 'session_timeout')
+      .single()
+      .then(({ data }) => {
+        const val = data?.value || '8h';
+        timeoutMsRef.current = TIMEOUT_MAP[val] ?? null;
+      });
+  }, [user]);
+
+  const resetIdleTimer = useCallback(() => {
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    const ms = timeoutMsRef.current;
+    if (!ms) return; // 'never' or not loaded yet
+    idleTimerRef.current = setTimeout(() => {
+      clearProfileCache();
+      clearOrgContextCache();
+      supabase.auth.signOut();
+    }, ms);
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const events = ['mousedown', 'keydown', 'scroll', 'touchstart'];
+    const handler = () => resetIdleTimer();
+    resetIdleTimer();
+    events.forEach(e => window.addEventListener(e, handler, { passive: true }));
+    return () => {
+      events.forEach(e => window.removeEventListener(e, handler));
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    };
+  }, [user, resetIdleTimer]);
+
   // ── Sign up with email/password ───────────────────────────────
   async function signUp(email: string, password: string) {
     const { error } = await supabase.auth.signUp({ email, password });
@@ -65,6 +114,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ── Sign out ──────────────────────────────────────────────────
   async function signOut() {
     clearProfileCache();
+    clearOrgContextCache();
     await supabase.auth.signOut();
   }
 

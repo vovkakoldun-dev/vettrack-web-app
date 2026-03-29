@@ -8,6 +8,7 @@ import {
 import { Input } from '../../components/ui/input';
 import { StatCard } from '../../components/StatCard';
 import { supabase } from '../../../lib/supabase';
+import { getOrgContext } from '../../hooks/useOrgContext';
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -369,11 +370,15 @@ export default function AdminTasksPage() {
   // Load tasks from Supabase with joins
   useEffect(() => {
     (async () => {
-      const { data } = await supabase
-        .from('tasks')
-        .select(TASKS_SELECT)
-        .order('due_date', { ascending: true });
-      if (data) setTasks(data.map(mapRow));
+      try {
+        const { organizationId } = await getOrgContext();
+        const { data } = await supabase
+          .from('tasks')
+          .select(TASKS_SELECT)
+          .eq('organization_id', organizationId)
+          .order('due_date', { ascending: true });
+        if (data) setTasks(data.map(mapRow));
+      } catch {}
     })();
   }, []);
 
@@ -386,15 +391,17 @@ export default function AdminTasksPage() {
         : t
     ));
     // Persist to Supabase
+    const { organizationId } = await getOrgContext();
     await supabase.from('tasks').update({
       status,
       completed_at: completedAt,
-    }).eq('id', id);
+    }).eq('id', id).eq('organization_id', organizationId);
   };
 
   const handleDelete = async (id: string) => {
     setTasks(prev => prev.filter(t => t.id !== id));
-    await supabase.from('tasks').delete().eq('id', id);
+    const { organizationId } = await getOrgContext();
+    await supabase.from('tasks').delete().eq('id', id).eq('organization_id', organizationId);
   };
 
   // Stats

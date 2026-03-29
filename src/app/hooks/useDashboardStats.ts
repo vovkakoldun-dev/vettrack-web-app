@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
+import { getOrgContext } from './useOrgContext'
 
 export interface DashboardStats {
   totalClients: number
@@ -19,39 +20,48 @@ export function useDashboardStats(): DashboardStats {
   })
 
   const load = useCallback(async () => {
-    const n = new Date()
-    const today = `${n.getFullYear()}-${(n.getMonth() + 1).toString().padStart(2, '0')}-${n.getDate().toString().padStart(2, '0')}`
-    const w = new Date(Date.now() + 7 * 86400000)
-    const weekEnd = `${w.getFullYear()}-${(w.getMonth() + 1).toString().padStart(2, '0')}-${w.getDate().toString().padStart(2, '0')}`
+    try {
+      const { organizationId } = await getOrgContext()
+      const n = new Date()
+      const today = `${n.getFullYear()}-${(n.getMonth() + 1).toString().padStart(2, '0')}-${n.getDate().toString().padStart(2, '0')}`
+      const w = new Date(Date.now() + 7 * 86400000)
+      const weekEnd = `${w.getFullYear()}-${(w.getMonth() + 1).toString().padStart(2, '0')}-${w.getDate().toString().padStart(2, '0')}`
 
-    const [clientsRes, apptRes, vacRes, petsRes] = await Promise.all([
-      supabase
-        .from('clients')
-        .select('id', { count: 'exact', head: true }),
-      supabase
-        .from('appointments')
-        .select('id', { count: 'exact', head: true })
-        .gte('scheduled_at', `${today}T00:00:00`)
-        .lte('scheduled_at', `${today}T23:59:59`)
-        .not('status', 'eq', 'Cancelled'),
-      supabase
-        .from('vaccinations')
-        .select('id', { count: 'exact', head: true })
-        .lte('next_due_date', weekEnd)
-        .gte('next_due_date', today),
-      supabase
-        .from('pets')
-        .select('id', { count: 'exact', head: true })
-        .eq('is_active', true),
-    ])
+      const [clientsRes, apptRes, vacRes, petsRes] = await Promise.all([
+        supabase
+          .from('clients')
+          .select('id', { count: 'exact', head: true })
+          .eq('organization_id', organizationId),
+        supabase
+          .from('appointments')
+          .select('id', { count: 'exact', head: true })
+          .eq('organization_id', organizationId)
+          .gte('scheduled_at', `${today}T00:00:00`)
+          .lte('scheduled_at', `${today}T23:59:59`)
+          .not('status', 'eq', 'Cancelled'),
+        supabase
+          .from('vaccinations')
+          .select('id', { count: 'exact', head: true })
+          .eq('organization_id', organizationId)
+          .lte('next_due_date', weekEnd)
+          .gte('next_due_date', today),
+        supabase
+          .from('pets')
+          .select('id', { count: 'exact', head: true })
+          .eq('organization_id', organizationId)
+          .eq('is_active', true),
+      ])
 
-    setStats({
-      totalClients: clientsRes.count ?? 0,
-      appointmentsToday: apptRes.count ?? 0,
-      vaccinesDueThisWeek: vacRes.count ?? 0,
-      activePets: petsRes.count ?? 0,
-      loading: false,
-    })
+      setStats({
+        totalClients: clientsRes.count ?? 0,
+        appointmentsToday: apptRes.count ?? 0,
+        vaccinesDueThisWeek: vacRes.count ?? 0,
+        activePets: petsRes.count ?? 0,
+        loading: false,
+      })
+    } catch {
+      setStats(prev => ({ ...prev, loading: false }))
+    }
   }, [])
 
   useEffect(() => {

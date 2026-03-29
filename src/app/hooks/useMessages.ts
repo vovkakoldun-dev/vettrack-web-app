@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
+import { getOrgContext } from './useOrgContext'
 
 export interface ChatMessage {
   id: string
@@ -36,9 +37,11 @@ export function useMessages(conversationId: string) {
       created_at: new Date().toISOString(),
     }
     setMessages(prev => [...prev, optimistic])
+    const { organizationId } = await getOrgContext()
     const { error } = await supabase
       .from('messages')
       .insert([{
+        organization_id: organizationId,
         conversation_id: conversationId,
         sender_id: senderId,
         content,

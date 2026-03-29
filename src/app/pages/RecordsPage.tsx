@@ -69,7 +69,7 @@ export default function RecordsPage() {
     (async () => {
       const { data } = await supabase
         .from('medical_records')
-        .select('id, record_number, record_type, status, visit_date, visit_time, reason, clinical_notes, duration_minutes, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name), staff!medical_records_vet_id_fkey(id, first_name, last_name)')
+        .select('id, record_number, record_type, status, visit_date, visit_time, reason, clinical_notes, duration_minutes, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name), staff!medical_records_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
         .order('visit_date', { ascending: false });
       if (data) {
         const mapped: MedicalRecord[] = data.map((r: any, i: number) => {
@@ -84,7 +84,7 @@ export default function RecordsPage() {
             recordType: (r.record_type || 'Visit') as RecordType,
             date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
             dateISO: r.visit_date,
-            vet: r.staff ? `Dr. ${r.staff.first_name} ${r.staff.last_name}` : '—',
+            vet: r.staff?.profiles ? `Dr. ${r.staff.profiles.first_name} ${r.staff.profiles.last_name}` : '—',
             summary: r.reason || r.clinical_notes || '—',
             status: (r.status || 'Final') as RecordStatus,
           };

@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { supabase } from '../../lib/supabase';
+import { getOrgContext } from '../hooks/useOrgContext';
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -86,6 +87,7 @@ const FILTER_TABS: { label: string; value: FilterTab }[] = [
 // ─── Data Fetching ───────────────────────────────────────────
 
 async function fetchNotificationsFromSupabase(isAdmin: boolean): Promise<Notification[]> {
+  const { organizationId } = await getOrgContext();
   const now = new Date();
   const today = localDateString(now);
 
@@ -113,31 +115,38 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean): Promise<Notific
     ...rest
   ] = await Promise.all([
     supabase.from('appointments')
-      .select('id, scheduled_at, duration_minutes, status, reason, pets(id, name, species, breed), clients(id, first_name, last_name), staff(id, first_name, last_name)')
+      .select('id, scheduled_at, duration_minutes, status, reason, pets(id, name, species, breed), clients(id, first_name, last_name), staff(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
+      .eq('organization_id', organizationId)
       .gte('scheduled_at', `${today}T00:00:00`).lte('scheduled_at', `${today}T23:59:59`)
       .in('status', ['Scheduled', 'Confirmed']).order('scheduled_at', { ascending: true }),
     supabase.from('appointments')
       .select('id, scheduled_at, status, reason, pets(id, name, species, breed), clients(id, first_name, last_name)')
+      .eq('organization_id', organizationId)
       .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`).lt('scheduled_at', `${today}T00:00:00`)
       .eq('status', 'Completed').order('scheduled_at', { ascending: false }).limit(10),
     supabase.from('appointments')
       .select('id, scheduled_at, reason, pets(id, name), clients(id, first_name, last_name)')
+      .eq('organization_id', organizationId)
       .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`).eq('status', 'Cancelled')
       .order('scheduled_at', { ascending: false }).limit(5),
     supabase.from('vaccinations')
       .select('id, vaccine_name, next_due_date, administered_date, pets(id, name, species, breed)')
+      .eq('organization_id', organizationId)
       .not('next_due_date', 'is', null).lte('next_due_date', thirtyDaysFromNowStr)
       .order('next_due_date', { ascending: true }).limit(10),
     supabase.from('clients')
       .select('id, first_name, last_name, created_at')
+      .eq('organization_id', organizationId)
       .gte('created_at', `${sevenDaysAgoStr}T00:00:00`)
       .order('created_at', { ascending: false }).limit(5),
     supabase.from('appointments')
       .select('id, scheduled_at, reason, pets(id, name), clients(id, first_name, last_name)')
+      .eq('organization_id', organizationId)
       .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`).eq('status', 'No Show')
       .order('scheduled_at', { ascending: false }).limit(5),
     ...(!isAdmin ? [
       supabase.from('notification_events').select('*')
+        .eq('organization_id', organizationId)
         .gte('timestamp', new Date(now.getTime() - 7 * 86400000).toISOString()),
     ] : []),
   ]);
@@ -148,7 +157,7 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean): Promise<Notific
     for (const appt of todayAppointments) {
       const pet = appt.pets as { id: string; name: string; species: string; breed: string | null } | null;
       const client = appt.clients as { id: string; first_name: string; last_name: string } | null;
-      const vet = appt.staff as { id: string; first_name: string; last_name: string } | null;
+      const vet = appt.staff as { id: string; profiles: { first_name: string; last_name: string } | null } | null;
       const apptTime = new Date(appt.scheduled_at);
       const diffMin = Math.round((apptTime.getTime() - now.getTime()) / 60000);
       const isFuture = diffMin > 0;
@@ -156,7 +165,7 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean): Promise<Notific
 
       const petLabel = pet ? `${pet.name}${pet.species ? ` (${pet.species})` : ''}` : 'Unknown pet';
       const ownerLabel = client ? `${client.first_name} ${client.last_name}` : '';
-      const vetLabel = vet ? `Dr. ${vet.first_name} ${vet.last_name}` : '';
+      const vetLabel = vet?.profiles ? `Dr. ${vet.profiles.first_name} ${vet.profiles.last_name}` : '';
       const reasonLabel = appt.reason || 'General visit';
 
       let title: string;
@@ -402,7 +411,8 @@ export default function NotificationsPage() {
         if (cancelled) return;
 
         // Apply persisted read/dismissed state (do NOT auto-mark as read)
-        const { data: stateRows } = await supabase.from('notification_state').select('notification_id, status');
+        const { organizationId } = await getOrgContext();
+        const { data: stateRows } = await supabase.from('notification_state').select('notification_id, status').eq('organization_id', organizationId);
         const readSet = new Set<string>();
         const dismissedSet = new Set<string>();
         for (const row of (stateRows || [])) {
@@ -424,6 +434,59 @@ export default function NotificationsPage() {
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
+  // Auto-mark all as read when the page is opened (including Sidebar-generated IDs)
+  useEffect(() => {
+    if (loading) return;
+    (async () => {
+      try {
+        const { organizationId } = await getOrgContext();
+        // Mark page notifications as read
+        const unread = notifications.filter(n => !n.read);
+        if (unread.length > 0) {
+          setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+          await saveReadState(unread.map(n => n.id));
+        }
+        // Also mark Sidebar-generated IDs as read so badge clears
+        const n = new Date();
+        const todayStr = `${n.getFullYear()}-${(n.getMonth() + 1).toString().padStart(2, '0')}-${n.getDate().toString().padStart(2, '0')}`;
+        const weekAgo = new Date(Date.now() - 7 * 86400000);
+        const weekAgoStr = `${weekAgo.getFullYear()}-${(weekAgo.getMonth() + 1).toString().padStart(2, '0')}-${weekAgo.getDate().toString().padStart(2, '0')}`;
+        const [apptToday, completed, cancelled, vacs, clients, notifEvts] = await Promise.all([
+          supabase.from('appointments').select('id').eq('organization_id', organizationId)
+            .gte('scheduled_at', `${todayStr}T00:00:00`).lte('scheduled_at', `${todayStr}T23:59:59`)
+            .in('status', ['Scheduled', 'Confirmed']),
+          supabase.from('appointments').select('id').eq('organization_id', organizationId)
+            .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Completed'),
+          supabase.from('appointments').select('id').eq('organization_id', organizationId)
+            .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Cancelled'),
+          supabase.from('vaccinations').select('id').eq('organization_id', organizationId)
+            .lte('next_due_date', todayStr),
+          supabase.from('clients').select('id').eq('organization_id', organizationId)
+            .gte('created_at', `${weekAgoStr}T00:00:00`),
+          supabase.from('notification_events').select('id').eq('organization_id', organizationId)
+            .gte('timestamp', weekAgo.toISOString()),
+        ]);
+        const sidebarIds: string[] = [];
+        (apptToday.data || []).forEach(a => sidebarIds.push(`appt-today-${a.id}`));
+        (completed.data || []).forEach(a => sidebarIds.push(`appt-done-${a.id}`));
+        (cancelled.data || []).forEach(a => sidebarIds.push(`appt-cancel-${a.id}`));
+        (vacs.data || []).forEach(v => sidebarIds.push(`vax-${v.id}`));
+        (clients.data || []).forEach(c => sidebarIds.push(`client-${c.id}`));
+        (notifEvts.data || []).forEach(e => sidebarIds.push(e.id));
+        if (sidebarIds.length > 0) {
+          const { data: existing } = await supabase.from('notification_state')
+            .select('notification_id').eq('organization_id', organizationId)
+            .in('notification_id', sidebarIds);
+          const existingSet = new Set((existing || []).map(r => r.notification_id));
+          const toMark = sidebarIds.filter(id => !existingSet.has(id));
+          if (toMark.length > 0) await saveReadState(toMark);
+        }
+        // Broadcast 0 to sidebar
+        window.dispatchEvent(new CustomEvent('notifCountChanged', { detail: { count: 0 } }));
+      } catch {}
+    })();
+  }, [loading]); // runs once after initial load
+
   // Broadcast unread count so sidebar can pick it up
   useEffect(() => {
     window.dispatchEvent(new CustomEvent('notifCountChanged', { detail: { count: unreadCount } }));
@@ -437,13 +500,15 @@ export default function NotificationsPage() {
 
   const saveReadState = async (ids: string[]) => {
     try {
-      const rows = ids.map(id => ({ notification_id: id, status: 'read', updated_at: new Date().toISOString() }));
+      const { organizationId } = await getOrgContext();
+      const rows = ids.map(id => ({ notification_id: id, status: 'read', updated_at: new Date().toISOString(), organization_id: organizationId }));
       if (rows.length > 0) await supabase.from('notification_state').upsert(rows);
     } catch {}
   };
   const saveDismissedState = async (ids: string[]) => {
     try {
-      const rows = ids.map(id => ({ notification_id: id, status: 'dismissed', updated_at: new Date().toISOString() }));
+      const { organizationId } = await getOrgContext();
+      const rows = ids.map(id => ({ notification_id: id, status: 'dismissed', updated_at: new Date().toISOString(), organization_id: organizationId }));
       if (rows.length > 0) await supabase.from('notification_state').upsert(rows);
     } catch {}
   };

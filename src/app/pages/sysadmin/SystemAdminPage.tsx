@@ -35,12 +35,16 @@ export default function SystemAdminPage() {
   // Fetch clinics
   useEffect(() => {
     (async () => {
-      const { data } = await supabase
-        .from('clinics')
-        .select('*')
-        .order('is_dev', { ascending: false })
-        .order('created_at', { ascending: true });
-      if (data) setClinics(data as Clinic[]);
+      try {
+        const { organizationId } = await getOrgContext();
+        const { data } = await supabase
+          .from('clinics')
+          .select('*')
+          .eq('organization_id', organizationId)
+          .order('is_dev', { ascending: false })
+          .order('created_at', { ascending: true });
+        if (data) setClinics(data as Clinic[]);
+      } catch {}
       setLoading(false);
     })();
   }, []);
@@ -71,7 +75,8 @@ export default function SystemAdminPage() {
 
   async function handleDelete(id: string) {
     setClinics(prev => prev.filter(c => c.id !== id));
-    await supabase.from('clinics').delete().eq('id', id);
+    const { organizationId } = await getOrgContext();
+    await supabase.from('clinics').delete().eq('id', id).eq('organization_id', organizationId);
   }
 
   async function handleSync(id: string) {
@@ -79,10 +84,11 @@ export default function SystemAdminPage() {
     setSyncing(id);
     // "Sync" = update the clinic metadata to match dev clinic structure
     const now = new Date().toISOString();
+    const { organizationId } = await getOrgContext();
     await supabase.from('clinics').update({
       last_synced_at: now,
       status: 'active',
-    }).eq('id', id);
+    }).eq('id', id).eq('organization_id', organizationId);
     setClinics(prev => prev.map(c =>
       c.id === id ? { ...c, last_synced_at: now, status: 'active' } : c
     ));
