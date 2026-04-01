@@ -129,7 +129,7 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean, userId?: string)
         .select('id, scheduled_at, status, reason, pets(id, name, species, breed), clients(id, first_name, last_name)')
         .eq('organization_id', organizationId)
         .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`).lt('scheduled_at', `${today}T00:00:00`)
-        .eq('status', 'Completed').order('scheduled_at', { ascending: false }).limit(10);
+        .eq('status', 'Completed').order('scheduled_at', { ascending: false }).limit(50);
       if (!isAdmin && userId) q = q.eq('vet_id', userId);
       return q;
     })(),
@@ -138,7 +138,7 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean, userId?: string)
         .select('id, scheduled_at, reason, pets(id, name), clients(id, first_name, last_name)')
         .eq('organization_id', organizationId)
         .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`).eq('status', 'Cancelled')
-        .order('scheduled_at', { ascending: false }).limit(5);
+        .order('scheduled_at', { ascending: false }).limit(50);
       if (!isAdmin && userId) q = q.eq('vet_id', userId);
       return q;
     })(),
@@ -146,18 +146,18 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean, userId?: string)
       .select('id, vaccine_name, next_due_date, administered_date, pets(id, name, species, breed)')
       .eq('organization_id', organizationId)
       .not('next_due_date', 'is', null).lte('next_due_date', thirtyDaysFromNowStr)
-      .order('next_due_date', { ascending: true }).limit(10),
+      .order('next_due_date', { ascending: true }).limit(50),
     supabase.from('clients')
       .select('id, first_name, last_name, created_at')
       .eq('organization_id', organizationId)
       .gte('created_at', `${sevenDaysAgoStr}T00:00:00`)
-      .order('created_at', { ascending: false }).limit(5),
+      .order('created_at', { ascending: false }).limit(50),
     (() => {
       let q = supabase.from('appointments')
         .select('id, scheduled_at, reason, pets(id, name), clients(id, first_name, last_name)')
         .eq('organization_id', organizationId)
         .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`).eq('status', 'No Show')
-        .order('scheduled_at', { ascending: false }).limit(5);
+        .order('scheduled_at', { ascending: false }).limit(50);
       if (!isAdmin && userId) q = q.eq('vet_id', userId);
       return q;
     })(),
