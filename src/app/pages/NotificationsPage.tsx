@@ -552,6 +552,12 @@ export default function NotificationsPage() {
     });
   };
 
+  const dismissAll = () => {
+    const allIds = notifications.map(n => n.id);
+    saveDismissedState(allIds);
+    setNotifications([]);
+  };
+
   return (
     <div className="max-w-[1000px] mx-auto p-8">
       {/* Header */}
@@ -580,11 +586,18 @@ export default function NotificationsPage() {
             Stay on top of patient care, appointments, and alerts.
           </p>
         </div>
-        {unreadCount > 0 && (
-          <Button variant="outline" className="gap-2" onClick={markAllRead}>
-            <CheckCheck className="w-4 h-4" />
-            Mark all as read
-          </Button>
+        {notifications.length > 0 && (
+          unreadCount > 0 ? (
+            <Button variant="outline" className="gap-2" onClick={markAllRead}>
+              <CheckCheck className="w-4 h-4" />
+              Mark all as read
+            </Button>
+          ) : (
+            <Button variant="outline" className="gap-2 text-red-400 border-red-400/30 hover:bg-red-400/10" onClick={dismissAll}>
+              <Trash2 className="w-4 h-4" />
+              Delete all
+            </Button>
+          )
         )}
       </div>
 
