@@ -461,58 +461,7 @@ export default function NotificationsPage() {
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
-  // Auto-mark all as read when the page is opened (including Sidebar-generated IDs)
-  useEffect(() => {
-    if (loading) return;
-    (async () => {
-      try {
-        const { organizationId } = await getOrgContext();
-        // Mark page notifications as read
-        const unread = notifications.filter(n => !n.read);
-        if (unread.length > 0) {
-          setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-          await saveReadState(unread.map(n => n.id));
-        }
-        // Also mark Sidebar-generated IDs as read so badge clears
-        const n = new Date();
-        const todayStr = `${n.getFullYear()}-${(n.getMonth() + 1).toString().padStart(2, '0')}-${n.getDate().toString().padStart(2, '0')}`;
-        const weekAgo = new Date(Date.now() - 7 * 86400000);
-        const weekAgoStr = `${weekAgo.getFullYear()}-${(weekAgo.getMonth() + 1).toString().padStart(2, '0')}-${weekAgo.getDate().toString().padStart(2, '0')}`;
-        const [apptToday, completed, cancelled, vacs, clients, notifEvts] = await Promise.all([
-          supabase.from('appointments').select('id').eq('organization_id', organizationId)
-            .gte('scheduled_at', `${todayStr}T00:00:00`).lte('scheduled_at', `${todayStr}T23:59:59`)
-            .in('status', ['Scheduled', 'Confirmed']),
-          supabase.from('appointments').select('id').eq('organization_id', organizationId)
-            .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Completed'),
-          supabase.from('appointments').select('id').eq('organization_id', organizationId)
-            .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Cancelled'),
-          supabase.from('vaccinations').select('id').eq('organization_id', organizationId)
-            .lte('next_due_date', todayStr),
-          supabase.from('clients').select('id').eq('organization_id', organizationId)
-            .gte('created_at', `${weekAgoStr}T00:00:00`),
-          supabase.from('notification_events').select('id').eq('organization_id', organizationId)
-            .gte('timestamp', weekAgo.toISOString()),
-        ]);
-        const sidebarIds: string[] = [];
-        (apptToday.data || []).forEach(a => sidebarIds.push(`appt-today-${a.id}`));
-        (completed.data || []).forEach(a => sidebarIds.push(`appt-done-${a.id}`));
-        (cancelled.data || []).forEach(a => sidebarIds.push(`appt-cancel-${a.id}`));
-        (vacs.data || []).forEach(v => sidebarIds.push(`vax-${v.id}`));
-        (clients.data || []).forEach(c => sidebarIds.push(`client-${c.id}`));
-        (notifEvts.data || []).forEach(e => sidebarIds.push(e.id));
-        if (sidebarIds.length > 0) {
-          const { data: existing } = await supabase.from('notification_state')
-            .select('notification_id').eq('organization_id', organizationId)
-            .in('notification_id', sidebarIds);
-          const existingSet = new Set((existing || []).map(r => r.notification_id));
-          const toMark = sidebarIds.filter(id => !existingSet.has(id));
-          if (toMark.length > 0) await saveReadState(toMark);
-        }
-        // Broadcast 0 to sidebar
-        window.dispatchEvent(new CustomEvent('notifCountChanged', { detail: { count: 0 } }));
-      } catch {}
-    })();
-  }, [loading]); // runs once after initial load
+  // Do NOT auto-mark as read — user must click "Mark all as read" or individual notifications
 
   // Broadcast unread count so sidebar can pick it up
   useEffect(() => {
@@ -549,12 +498,50 @@ export default function NotificationsPage() {
     });
   };
 
-  const markAllRead = () => {
+  const markAllRead = async () => {
     setNotifications((prev) => {
       const updated = prev.map((n) => ({ ...n, read: true }));
       saveReadState(updated.map(n => n.id));
       return updated;
     });
+    // Also mark sidebar-generated notification IDs so the badge clears
+    try {
+      const { organizationId } = await getOrgContext();
+      const now = new Date();
+      const todayStr = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}`;
+      const weekAgo = new Date(Date.now() - 7 * 86400000);
+      const weekAgoStr = `${weekAgo.getFullYear()}-${(weekAgo.getMonth() + 1).toString().padStart(2, '0')}-${weekAgo.getDate().toString().padStart(2, '0')}`;
+      const [apptToday, completed, cancelled, vacs, clients, notifEvts] = await Promise.all([
+        supabase.from('appointments').select('id').eq('organization_id', organizationId)
+          .gte('scheduled_at', `${todayStr}T00:00:00`).lte('scheduled_at', `${todayStr}T23:59:59`)
+          .in('status', ['Scheduled', 'Confirmed']),
+        supabase.from('appointments').select('id').eq('organization_id', organizationId)
+          .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Completed'),
+        supabase.from('appointments').select('id').eq('organization_id', organizationId)
+          .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Cancelled'),
+        supabase.from('vaccinations').select('id').eq('organization_id', organizationId)
+          .lte('next_due_date', todayStr),
+        supabase.from('clients').select('id').eq('organization_id', organizationId)
+          .gte('created_at', `${weekAgoStr}T00:00:00`),
+        supabase.from('notification_events').select('id').eq('organization_id', organizationId)
+          .gte('timestamp', weekAgo.toISOString()),
+      ]);
+      const sidebarIds: string[] = [];
+      (apptToday.data || []).forEach(a => sidebarIds.push(`appt-today-${a.id}`));
+      (completed.data || []).forEach(a => sidebarIds.push(`appt-done-${a.id}`));
+      (cancelled.data || []).forEach(a => sidebarIds.push(`appt-cancel-${a.id}`));
+      (vacs.data || []).forEach(v => sidebarIds.push(`vax-${v.id}`));
+      (clients.data || []).forEach(c => sidebarIds.push(`client-${c.id}`));
+      (notifEvts.data || []).forEach(e => sidebarIds.push(e.id));
+      if (sidebarIds.length > 0) {
+        const { data: existing } = await supabase.from('notification_state')
+          .select('notification_id').eq('organization_id', organizationId)
+          .in('notification_id', sidebarIds);
+        const existingSet = new Set((existing || []).map(r => r.notification_id));
+        const toMark = sidebarIds.filter(id => !existingSet.has(id));
+        if (toMark.length > 0) await saveReadState(toMark);
+      }
+    } catch {}
   };
 
   const dismiss = (id: string) => {
