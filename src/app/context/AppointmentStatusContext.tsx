@@ -13,11 +13,7 @@ const AppointmentStatusContext = createContext<AppointmentStatusCtx>({
 });
 
 export function AppointmentStatusProvider({ children }: { children: ReactNode }) {
-  // Pre-seeded demo states to show the full workflow
-  const [overrides, setOverrides] = useState<Record<number, SharedApptStatus>>({
-    1: 'Ready for Billing', // Max (8:00 AM) — visit complete, awaiting payment
-    4: 'In Progress',       // Bella (9:30 AM) — doctor is with the patient
-  });
+  const [overrides, setOverrides] = useState<Record<number, SharedApptStatus>>({});
 
   function setApptStatus(id: number, status: SharedApptStatus) {
     setOverrides(prev => ({ ...prev, [id]: status }));
