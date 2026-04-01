@@ -659,7 +659,176 @@ export default function RecordDetailPage() {
         {/* CTA Export / Share Buttons */}
         <div className="flex items-center gap-2">
           <Button
-            onClick={() => window.print()}
+            onClick={() => {
+              const r = record;
+              const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+
+              const vitalsRows = [
+                ['Weight', r.vitals.weight], ['Temperature', r.vitals.temperature],
+                ['Heart Rate', r.vitals.heartRate], ['Respiratory Rate', r.vitals.respiratoryRate],
+                ['Blood Pressure', r.vitals.bloodPressure], ['Body Condition', r.vitals.bodyConditionScore],
+                ['Pain Score', r.vitals.painScore], ['Hydration', r.vitals.hydrationStatus],
+              ].filter(([, v]) => v && v !== '—').map(([k, v]) => `<div><span class="label">${k}</span><span class="value">${v}</span></div>`).join('');
+
+              const medsHtml = r.medications.length > 0
+                ? r.medications.map(m => `<tr><td><strong>${m.name}</strong></td><td>${m.dosage}</td><td>${m.frequency}</td><td>${m.route}</td><td>${m.duration}</td><td>${m.notes || '—'}</td></tr>`).join('')
+                : '<tr><td colspan="6" class="empty">No medications prescribed</td></tr>';
+
+              const labsHtml = r.labResults.length > 0
+                ? r.labResults.map(l => {
+                    const flagClass = l.flag === 'critical' ? 'badge-critical' : l.flag === 'high' ? 'badge-high' : l.flag === 'low' ? 'badge-low' : 'badge-normal';
+                    return `<tr><td>${l.testName}</td><td><strong>${l.result}</strong> ${l.unit}</td><td>${l.referenceRange}</td><td><span class="badge ${flagClass}">${l.flag}</span></td><td>${l.date}</td></tr>`;
+                  }).join('')
+                : '<tr><td colspan="5" class="empty">No lab results</td></tr>';
+
+              const proceduresHtml = r.treatmentPlan.procedures.length > 0
+                ? r.treatmentPlan.procedures.map(p => `<tr><td>${p.name}</td><td>${p.notes || '—'}</td><td><span class="badge badge-normal">${p.status}</span></td></tr>`).join('')
+                : '<tr><td colspan="3" class="empty">No procedures recorded</td></tr>';
+
+              const icdHtml = r.diagnosis.icdCodes.length > 0
+                ? r.diagnosis.icdCodes.map(c => `<span class="icd-tag">${c.code} — ${c.description}</span>`).join(' ')
+                : '';
+
+              const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Medical Record — ${r.patient.name} — ${r.recordNumber}</title>
+              <style>
+                @page { margin: 18mm; size: A4; }
+                * { box-sizing: border-box; margin: 0; padding: 0; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1a1a2e; line-height: 1.5; }
+                .header { display: flex; align-items: flex-start; justify-content: space-between; border-bottom: 3px solid #2d6a4f; padding-bottom: 14px; margin-bottom: 20px; }
+                .header h1 { font-size: 20px; color: #2d6a4f; }
+                .header .meta { text-align: right; font-size: 11px; color: #666; line-height: 1.6; }
+                .record-badge { display: inline-block; padding: 3px 10px; border-radius: 6px; font-size: 12px; font-weight: 700; }
+                .badge-type { background: #e8f5e9; color: #2d6a4f; }
+                .badge-status { background: #e3f2fd; color: #1565c0; margin-left: 6px; }
+                .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+                .card { background: #f8faf9; border: 1px solid #dce8e0; border-radius: 10px; padding: 16px; }
+                .card h2 { font-size: 14px; color: #2d6a4f; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px; border-bottom: 1px solid #e0e0e0; padding-bottom: 4px; }
+                .card .row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 13px; }
+                .card .row .label { color: #888; }
+                .card .row .val { color: #333; font-weight: 500; }
+                .pet-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+                .pet-photo { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; border: 2px solid #2d6a4f; }
+                .pet-photo-placeholder { width: 48px; height: 48px; border-radius: 50%; background: #2d6a4f; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 700; }
+                .pet-row h3 { font-size: 16px; margin: 0; }
+                .pet-row .sub { font-size: 12px; color: #666; }
+                .vitals-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 20px; }
+                .vitals-grid > div { background: #f0f5f2; padding: 8px 10px; border-radius: 8px; }
+                .vitals-grid .label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: #888; font-weight: 600; display: block; }
+                .vitals-grid .value { font-size: 14px; color: #333; font-weight: 600; }
+                .section { margin-bottom: 18px; page-break-inside: avoid; }
+                .section h2 { font-size: 14px; color: #2d6a4f; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; border-bottom: 1px solid #e8e8e8; padding-bottom: 4px; }
+                .dx-primary { font-size: 15px; font-weight: 700; color: #1a1a2e; margin-bottom: 4px; }
+                .dx-secondary { font-size: 13px; color: #555; }
+                .dx-notes { font-size: 13px; color: #444; margin-top: 8px; line-height: 1.6; white-space: pre-wrap; background: #fafafa; padding: 10px; border-radius: 8px; border-left: 3px solid #2d6a4f; }
+                .icd-tag { display: inline-block; background: #e8edf5; color: #3b5998; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; margin: 2px 4px 2px 0; }
+                table { width: 100%; border-collapse: collapse; margin-bottom: 10px; font-size: 12px; }
+                th { background: #f0f5f2; color: #2d6a4f; text-align: left; padding: 6px 10px; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+                td { padding: 6px 10px; border-bottom: 1px solid #f0f0f0; color: #444; }
+                tr:last-child td { border-bottom: none; }
+                .empty { text-align: center; color: #aaa; font-style: italic; padding: 12px; }
+                .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+                .badge-normal { background: #d4edda; color: #155724; }
+                .badge-high { background: #fff3cd; color: #856404; }
+                .badge-low { background: #cce5ff; color: #004085; }
+                .badge-critical { background: #f8d7da; color: #721c24; }
+                .instructions { background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 12px; font-size: 13px; line-height: 1.6; margin-bottom: 10px; }
+                .followup { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 12px; font-size: 13px; }
+                .footer { margin-top: 28px; padding-top: 10px; border-top: 1px solid #ddd; font-size: 11px; color: #999; text-align: center; }
+                .no-print { text-align: center; margin-top: 24px; }
+                @media print { .no-print { display: none; } body { padding: 0; } }
+              </style></head><body>
+              <div class="header">
+                <div>
+                  <h1>HugoIT &mdash; Medical Record</h1>
+                  <div style="margin-top:6px;">
+                    <span class="record-badge badge-type">${r.visit.recordType}</span>
+                    <span class="record-badge badge-status">${r.visit.status}</span>
+                  </div>
+                </div>
+                <div class="meta">
+                  Record: <strong>${r.recordNumber || '—'}</strong><br/>
+                  ${r.visit.date} ${r.visit.time !== '—' ? '· ' + r.visit.time : ''}<br/>
+                  Generated: ${today}
+                </div>
+              </div>
+
+              <div class="two-col">
+                <div class="card">
+                  <div class="pet-row">
+                    ${r.patient.image ? `<img src="${r.patient.image}" class="pet-photo" alt="${r.patient.name}" />` : `<div class="pet-photo-placeholder">${(r.patient.name || '?')[0]}</div>`}
+                    <div>
+                      <h3>${r.patient.name}</h3>
+                      <p class="sub">${r.patient.species} · ${r.patient.breed} · ${r.patient.sex}</p>
+                    </div>
+                  </div>
+                  <div class="row"><span class="label">Age</span><span class="val">${r.patient.age}</span></div>
+                  <div class="row"><span class="label">Weight</span><span class="val">${r.patient.weight}</span></div>
+                  <div class="row"><span class="label">Microchip</span><span class="val">${r.patient.microchip}</span></div>
+                  <div class="row"><span class="label">Color</span><span class="val">${r.patient.color}</span></div>
+                </div>
+                <div class="card">
+                  <h2>Owner & Visit</h2>
+                  <div class="row"><span class="label">Owner</span><span class="val">${r.owner.name}</span></div>
+                  <div class="row"><span class="label">Email</span><span class="val">${r.owner.email}</span></div>
+                  <div class="row"><span class="label">Phone</span><span class="val">${r.owner.phone}</span></div>
+                  <div class="row"><span class="label">Vet</span><span class="val">${r.visit.vet}</span></div>
+                  <div class="row"><span class="label">Reason</span><span class="val">${r.visit.reason}</span></div>
+                  <div class="row"><span class="label">Duration</span><span class="val">${r.visit.duration}</span></div>
+                  <div class="row"><span class="label">Clinic</span><span class="val">${r.visit.clinic}</span></div>
+                </div>
+              </div>
+
+              ${vitalsRows ? `<div class="section"><h2>Vitals</h2><div class="vitals-grid">${vitalsRows}</div></div>` : ''}
+
+              <div class="section">
+                <h2>Diagnosis</h2>
+                <p class="dx-primary">${r.diagnosis.primary}</p>
+                ${r.diagnosis.secondary.length > 0 ? `<p class="dx-secondary">Secondary: ${r.diagnosis.secondary.join(', ')}</p>` : ''}
+                ${r.diagnosis.differentials.length > 0 ? `<p class="dx-secondary">Differentials: ${r.diagnosis.differentials.join(', ')}</p>` : ''}
+                ${icdHtml ? `<div style="margin-top:6px;">${icdHtml}</div>` : ''}
+                ${r.diagnosis.notes ? `<div class="dx-notes">${r.diagnosis.notes}</div>` : ''}
+              </div>
+
+              <div class="section">
+                <h2>Treatment & Procedures</h2>
+                <table><thead><tr><th>Procedure</th><th>Notes</th><th>Status</th></tr></thead><tbody>${proceduresHtml}</tbody></table>
+                ${r.treatmentPlan.instructions ? `<div class="instructions"><strong>Owner Instructions:</strong><br/>${r.treatmentPlan.instructions}</div>` : ''}
+                ${r.treatmentPlan.restrictions.length > 0 ? `<p style="font-size:13px;color:#444;margin-bottom:8px;"><strong>Restrictions:</strong> ${r.treatmentPlan.restrictions.join(', ')}</p>` : ''}
+                ${r.treatmentPlan.homeCarePlan ? `<p style="font-size:13px;color:#444;"><strong>Home Care:</strong> ${r.treatmentPlan.homeCarePlan}</p>` : ''}
+              </div>
+
+              <div class="section">
+                <h2>Medications</h2>
+                <table><thead><tr><th>Medication</th><th>Dosage</th><th>Frequency</th><th>Route</th><th>Duration</th><th>Notes</th></tr></thead><tbody>${medsHtml}</tbody></table>
+              </div>
+
+              <div class="section">
+                <h2>Lab Results</h2>
+                <table><thead><tr><th>Test</th><th>Result</th><th>Reference</th><th>Flag</th><th>Date</th></tr></thead><tbody>${labsHtml}</tbody></table>
+              </div>
+
+              ${r.followUp.nextVisitDate !== '—' ? `
+              <div class="section">
+                <h2>Follow-Up</h2>
+                <div class="followup">
+                  <strong>Next Visit:</strong> ${r.followUp.nextVisitDate} — ${r.followUp.nextVisitReason}<br/>
+                  ${r.followUp.notes ? `<strong>Notes:</strong> ${r.followUp.notes}` : ''}
+                </div>
+              </div>` : ''}
+
+              <div class="footer">
+                HugoIT Veterinary Management &mdash; Confidential Medical Record &mdash; ${today}<br/>
+                <span style="font-size:10px;">Record created: ${r.createdAt} · Last modified: ${r.lastModified}</span>
+              </div>
+
+              <div class="no-print">
+                <button onclick="window.print()" style="padding:10px 28px;background:#2d6a4f;color:#fff;border:none;border-radius:8px;font-size:14px;cursor:pointer;font-weight:600;">Print / Save as PDF</button>
+              </div>
+              </body></html>`;
+
+              const w = window.open('', '_blank');
+              if (w) { w.document.write(html); w.document.close(); }
+            }}
             className="gap-2"
             style={{ backgroundColor: 'var(--brand-green-text)', color: '#fff' }}
           >
