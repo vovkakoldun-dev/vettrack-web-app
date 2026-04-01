@@ -1768,7 +1768,14 @@ export default function MyPortalPage() {
           <div className="space-y-4 py-2">
             <div>
               <label className="text-[var(--text-primary)] mb-1.5 block" style={{ fontSize: '14px', fontWeight: 600 }}>Type</label>
-              <Select value={blockType} onValueChange={(v) => setBlockType(v as BlockType)}>
+              <Select value={blockType} onValueChange={(v) => {
+                const t = v as BlockType;
+                setBlockType(t);
+                // Auto-set sensible default times per type
+                if (t === 'Work Hours') { setBlockTimeStart('08:00'); setBlockTimeEnd('17:00'); }
+                else if (t === 'Lunch Break') { setBlockTimeStart('12:00'); setBlockTimeEnd('13:00'); }
+                else if (t === 'PTO' || t === 'Sick Day') { setBlockTimeStart('08:00'); setBlockTimeEnd('17:00'); }
+              }}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {(['Lunch Break', 'Meeting', 'Work Hours', 'Personal', 'PTO', 'Sick Day'] as BlockType[]).map((t) => {
