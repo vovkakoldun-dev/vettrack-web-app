@@ -1,11 +1,19 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   CheckSquare, Clock, AlertTriangle, CheckCircle2, Search,
   Phone, Calendar, Pill, FlaskConical, FileText, Bell,
   Filter, ChevronDown, User, Stethoscope, X, Trash2,
-  ArrowUpRight, MoreHorizontal, Circle,
+  ArrowUpRight, MoreHorizontal, Circle, Plus,
 } from 'lucide-react';
 import { Input } from '../../components/ui/input';
+import { Textarea } from '../../components/ui/textarea';
+import { Button } from '../../components/ui/button';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from '../../components/ui/dialog';
+import {
+  Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
+} from '../../components/ui/select';
 import { StatCard } from '../../components/StatCard';
 import { supabase } from '../../../lib/supabase';
 import { getOrgContext } from '../../hooks/useOrgContext';
@@ -50,15 +58,15 @@ const TASKS_SELECT = `
   visit_date, doctor_notes, completed_at, tags,
   pet:pets!tasks_pet_id_fkey(id, name, species),
   client:clients!tasks_client_id_fkey(id, first_name, last_name, phone),
-  assignedByProfile:profiles!tasks_assigned_by_id_fkey(id, first_name, last_name),
-  assignedToProfile:profiles!tasks_assigned_to_id_fkey(id, first_name, last_name)
+  assignedByStaff:staff!tasks_assigned_by_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name)),
+  assignedToStaff:staff!tasks_assigned_to_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))
 `;
 
 function mapRow(r: any): Task {
   const pet = r.pet;
   const client = r.client;
-  const byP = r.assignedByProfile;
-  const toP = r.assignedToProfile;
+  const byP = r.assignedByStaff?.profiles;
+  const toP = r.assignedToStaff?.profiles;
   return {
     id: r.id,
     type: r.type,
@@ -334,7 +342,7 @@ function TaskCard({
           )}
           {task.completedAt && (
             <p style={{ fontSize: 12, color: '#2D6A4F', marginTop: 10, fontWeight: 500 }}>
-              ✓ Completed {task.completedAt}{task.assignedTo ? ` by ${task.assignedTo}` : ''}
+              ✓ Completed {new Date(task.completedAt).toLocaleString()}{task.assignedTo ? ` by ${task.assignedTo}` : ''}
             </p>
           )}
         </div>
@@ -367,23 +375,114 @@ export default function AdminTasksPage() {
   const [priorityOpen, setPriorityOpen] = useState(false);
   const [typeOpen, setTypeOpen] = useState(false);
 
-  // Load tasks from Supabase with joins
+  // ── Add Task dialog ──────────────────────────────────────────
+  const [addOpen, setAddOpen] = useState(false);
+  const [addSaving, setAddSaving] = useState(false);
+  const [addType, setAddType] = useState<TaskType>('Follow-up Call');
+  const [addPriority, setAddPriority] = useState<Priority>('Normal');
+  const [addDueDate, setAddDueDate] = useState(() => getTodayStr());
+  const [addDueTime, setAddDueTime] = useState('');
+  const [addPetId, setAddPetId] = useState('');
+  const [addClientId, setAddClientId] = useState('');
+  const [addAssignedById, setAddAssignedById] = useState('');
+  const [addNotes, setAddNotes] = useState('');
+  const [addTags, setAddTags] = useState('');
+
+  // Dropdown data for the form
+  const [petsList, setPetsList] = useState<{ id: string; name: string; species: string; clientId: string }[]>([]);
+  const [clientsList, setClientsList] = useState<{ id: string; name: string }[]>([]);
+  const [staffList, setStaffList] = useState<{ id: string; name: string; profileId: string }[]>([]);
+
+  // Load dropdown data
   useEffect(() => {
     (async () => {
       try {
         const { organizationId } = await getOrgContext();
-        const { data } = await supabase
-          .from('tasks')
-          .select(TASKS_SELECT)
-          .eq('organization_id', organizationId)
-          .order('due_date', { ascending: true });
-        if (data) setTasks(data.map(mapRow));
+        const [petsRes, clientsRes, staffRes] = await Promise.all([
+          supabase.from('pets').select('id, name, species, client_id').eq('organization_id', organizationId).eq('is_active', true).order('name'),
+          supabase.from('clients').select('id, first_name, last_name').eq('organization_id', organizationId).order('last_name'),
+          supabase.from('staff').select('id, role, profile_id, profiles:profiles!staff_profile_id_fkey(first_name, last_name)').eq('organization_id', organizationId).in('role', ['veterinarian', 'senior_veterinarian', 'specialist']).eq('status', 'Active'),
+        ]);
+        if (petsRes.data) setPetsList(petsRes.data.map((p: any) => ({ id: p.id, name: p.name, species: p.species || '', clientId: p.client_id })));
+        if (clientsRes.data) setClientsList(clientsRes.data.map((c: any) => ({ id: c.id, name: `${c.first_name} ${c.last_name}`.trim() })));
+        if (staffRes.data) setStaffList(staffRes.data.map((s: any) => ({ id: s.id, name: `Dr. ${s.profiles?.first_name || ''} ${s.profiles?.last_name || ''}`.trim(), profileId: s.profile_id })));
       } catch {}
     })();
   }, []);
 
+  // Auto-fill client when pet is selected
+  useEffect(() => {
+    if (addPetId) {
+      const pet = petsList.find(p => p.id === addPetId);
+      if (pet?.clientId) setAddClientId(pet.clientId);
+    }
+  }, [addPetId, petsList]);
+
+  const resetAddForm = () => {
+    setAddType('Follow-up Call');
+    setAddPriority('Normal');
+    setAddDueDate(getTodayStr());
+    setAddDueTime('');
+    setAddPetId('');
+    setAddClientId('');
+    setAddAssignedById('');
+    setAddNotes('');
+    setAddTags('');
+  };
+
+  const handleAddTask = async () => {
+    if (!addPetId || !addAssignedById || !addDueDate) return;
+    setAddSaving(true);
+    try {
+      const { organizationId } = await getOrgContext();
+      let assignedByStaffId: string | null = null;
+      if (addAssignedById === 'self') {
+        const { data: { user } } = await supabase.auth.getUser();
+        assignedByStaffId = user?.id || null; // user.id = staff.id
+      } else {
+        assignedByStaffId = addAssignedById; // already a staff.id from staffList
+      }
+      const { data, error } = await supabase.from('tasks').insert({
+        organization_id: organizationId,
+        type: addType,
+        priority: addPriority,
+        status: 'Pending' as const,
+        due_date: addDueDate,
+        due_time: addDueTime || null,
+        pet_id: addPetId,
+        client_id: addClientId || null,
+        assigned_by_id: assignedByStaffId,
+        visit_date: getTodayStr(),
+        doctor_notes: addNotes || null,
+        tags: addTags ? addTags.split(',').map(t => t.trim()).filter(Boolean) : null,
+      }).select(TASKS_SELECT).single();
+      if (data && !error) {
+        setTasks(prev => [mapRow(data), ...prev]);
+      }
+      setAddOpen(false);
+      resetAddForm();
+    } catch {} finally {
+      setAddSaving(false);
+    }
+  };
+
+  // Load tasks from Supabase with joins
+  const loadTasks = useCallback(async () => {
+    try {
+      const { organizationId } = await getOrgContext();
+      const { data } = await supabase
+        .from('tasks')
+        .select(TASKS_SELECT)
+        .eq('organization_id', organizationId)
+        .order('due_date', { ascending: true });
+      if (data) setTasks(data.map(mapRow));
+    } catch {}
+  }, []);
+
+  useEffect(() => { loadTasks(); }, [loadTasks]);
+
   const handleStatusChange = async (id: string, status: TaskStatus) => {
-    const completedAt = status === 'Completed' ? new Date().toLocaleString() : null;
+    const completedAt = status === 'Completed' ? new Date().toISOString() : null;
     // Update locally immediately
     setTasks(prev => prev.map(t =>
       t.id === id
@@ -436,13 +535,22 @@ export default function AdminTasksPage() {
     <div style={{ padding: '32px 32px 48px', maxWidth: '1100px', margin: '0 auto' }}>
 
       {/* Header */}
-      <div style={{ marginBottom: '28px' }}>
-        <h1 className="text-[var(--text-primary)]" style={{ fontSize: '28px', fontWeight: 700, marginBottom: '4px' }}>
-          Tasks
-        </h1>
-        <p className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>
-          Follow-up tasks and action items assigned by doctors
-        </p>
+      <div className="flex items-start justify-between" style={{ marginBottom: '28px' }}>
+        <div>
+          <h1 className="text-[var(--text-primary)]" style={{ fontSize: '28px', fontWeight: 700, marginBottom: '4px' }}>
+            Tasks
+          </h1>
+          <p className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>
+            Follow-up tasks and action items assigned by doctors
+          </p>
+        </div>
+        <Button
+          onClick={() => setAddOpen(true)}
+          style={{ backgroundColor: '#2D6A4F', color: '#fff', fontWeight: 600, fontSize: '14px', borderRadius: '10px', padding: '10px 20px' }}
+        >
+          <Plus style={{ width: 16, height: 16, marginRight: 6 }} />
+          Add Task
+        </Button>
       </div>
 
       {/* Stat cards */}
@@ -586,6 +694,133 @@ export default function AdminTasksPage() {
           Showing {sorted.length} of {tasks.length} tasks
         </p>
       )}
+
+      {/* ── Add Task Dialog ── */}
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent style={{ maxWidth: '540px' }}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Plus style={{ width: 18, height: 18, color: '#2D6A4F' }} />
+              Add New Task
+            </DialogTitle>
+          </DialogHeader>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', paddingTop: '8px' }}>
+            {/* Row 1: Type + Priority */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div>
+                <label className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600, marginBottom: '6px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Task Type</label>
+                <Select value={addType} onValueChange={(v) => setAddType(v as TaskType)}>
+                  <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(TYPE_CONFIG) as TaskType[]).map(t => (
+                      <SelectItem key={t} value={t}>{t}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600, marginBottom: '6px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Priority</label>
+                <Select value={addPriority} onValueChange={(v) => setAddPriority(v as Priority)}>
+                  <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {(['Urgent', 'High', 'Normal', 'Low'] as Priority[]).map(p => (
+                      <SelectItem key={p} value={p}>{p}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Row 2: Pet + Client (auto-filled) */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div>
+                <label className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600, marginBottom: '6px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Pet *</label>
+                <Select value={addPetId} onValueChange={setAddPetId}>
+                  <SelectTrigger className="h-10"><SelectValue placeholder="Select pet" /></SelectTrigger>
+                  <SelectContent>
+                    {petsList.map(p => (
+                      <SelectItem key={p.id} value={p.id}>{p.name} ({p.species})</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600, marginBottom: '6px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Owner</label>
+                <Select value={addClientId} onValueChange={setAddClientId}>
+                  <SelectTrigger className="h-10"><SelectValue placeholder="Auto-filled from pet" /></SelectTrigger>
+                  <SelectContent>
+                    {clientsList.map(c => (
+                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Row 3: Assigned By (Doctor) */}
+            <div>
+              <label className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600, marginBottom: '6px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Assigned By (Doctor) *</label>
+              <Select value={addAssignedById} onValueChange={setAddAssignedById}>
+                <SelectTrigger className="h-10"><SelectValue placeholder="Select doctor" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="self">By Myself</SelectItem>
+                  {staffList.map(s => (
+                    <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Row 4: Due Date + Due Time */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div>
+                <label className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600, marginBottom: '6px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Due Date *</label>
+                <Input type="date" value={addDueDate} onChange={e => setAddDueDate(e.target.value)} className="h-10" />
+              </div>
+              <div>
+                <label className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600, marginBottom: '6px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Due Time</label>
+                <Input type="time" value={addDueTime} onChange={e => setAddDueTime(e.target.value)} className="h-10" />
+              </div>
+            </div>
+
+            {/* Row 5: Doctor Notes */}
+            <div>
+              <label className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600, marginBottom: '6px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Doctor Notes</label>
+              <Textarea
+                placeholder="Instructions or notes for this task…"
+                value={addNotes}
+                onChange={e => setAddNotes(e.target.value)}
+                rows={3}
+              />
+            </div>
+
+            {/* Row 6: Tags */}
+            <div>
+              <label className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600, marginBottom: '6px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Tags</label>
+              <Input
+                placeholder="Comma-separated, e.g. urgent, follow-up, lab"
+                value={addTags}
+                onChange={e => setAddTags(e.target.value)}
+                className="h-10"
+              />
+            </div>
+          </div>
+
+          <DialogFooter style={{ marginTop: '8px' }}>
+            <Button variant="outline" onClick={() => { setAddOpen(false); resetAddForm(); }}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAddTask}
+              disabled={addSaving || !addPetId || !addAssignedById || !addDueDate}
+              style={{ backgroundColor: '#2D6A4F', color: '#fff' }}
+            >
+              {addSaving ? 'Saving…' : 'Create Task'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

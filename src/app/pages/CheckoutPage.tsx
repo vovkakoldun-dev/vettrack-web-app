@@ -11,7 +11,7 @@ import { Avatar, AvatarImage, AvatarFallback } from '../components/ui/avatar';
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '../components/ui/select';
-import { MOCK_APPOINTMENTS, SERVICE_PRICE_LIST, MEDICATION_PRICE_LIST } from '../data/mockAppointments';
+import { MOCK_APPOINTMENTS, MEDICATION_PRICE_LIST } from '../data/mockAppointments';
 import type { Appointment as MockAppt } from '../data/mockAppointments';
 import { useActiveVisit } from '../context/ActiveVisitContext';
 import { useAppointmentStatus } from '../context/AppointmentStatusContext';
@@ -179,15 +179,66 @@ export default function CheckoutPage() {
 
   const appt = mockAppt || realAppt;
 
-  // ── State ────────────────────────────────────────────────────
-  const [items, setItems] = useState<CheckoutItem[]>([
-    { id: 1, service: 'Office Visit / Consultation', qty: 1, unitPrice: 65 },
-  ]);
-  const [nextItemId, setNextItemId] = useState(2);
-  const [meds, setMeds] = useState<MedItem[]>([]);
-  const [nextMedId, setNextMedId] = useState(1);
+  // ── Saved checkout draft (sessionStorage) ────────────────────
+  const checkoutDraftKey = `checkout_draft_${id}`;
+  const savedCheckoutDraft = useRef<Record<string, any> | null>(null);
+  if (savedCheckoutDraft.current === null) {
+    try {
+      const raw = sessionStorage.getItem(checkoutDraftKey);
+      savedCheckoutDraft.current = raw ? JSON.parse(raw) : {};
+    } catch { savedCheckoutDraft.current = {}; }
+  }
+  const ckDraft = savedCheckoutDraft.current!;
+
+  // ── State (restored from draft if available) ────────────────
+  const [items, setItems] = useState<CheckoutItem[]>(
+    ckDraft.items ?? [{ id: 1, service: 'Office Visit / Consultation', qty: 1, unitPrice: 65 }]
+  );
+  const [nextItemId, setNextItemId] = useState(ckDraft.nextItemId ?? 2);
+  const [meds, setMeds] = useState<MedItem[]>(ckDraft.meds ?? []);
+  const [nextMedId, setNextMedId] = useState(ckDraft.nextMedId ?? 1);
+  const [serviceList, setServiceList] = useState<{ name: string; price: number }[]>([]);
+
+  useEffect(() => {
+    const fetchServices = async () => {
+      try {
+        const { organizationId } = await getOrgContext();
+        const { data } = await supabase
+          .from('services')
+          .select('name, price')
+          .eq('organization_id', organizationId)
+          .eq('is_active', true)
+          .order('sort_order', { ascending: true });
+        if (data && data.length > 0) {
+          setServiceList(data);
+        }
+      } catch (e) {
+        console.error('Failed to load services:', e);
+      }
+    };
+    fetchServices();
+
+    // Re-fetch when services are changed in the admin
+    const handler = () => { fetchServices(); };
+    window.addEventListener('serviceDataChanged', handler);
+    return () => window.removeEventListener('serviceDataChanged', handler);
+  }, []);
   const [completed, setCompleted] = useState(false);
-  const [petHealthStatus, setPetHealthStatus] = useState<'Healthy' | 'Follow-up' | 'Critical'>('Healthy');
+  const [petHealthStatus, setPetHealthStatus] = useState<'Healthy' | 'Follow-up' | 'Critical'>(ckDraft.petHealthStatus ?? 'Healthy');
+
+  // ── Auto-save checkout draft ────────────────────────────────
+  const ckSaveRef = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => {
+    if (ckSaveRef.current) clearTimeout(ckSaveRef.current);
+    ckSaveRef.current = setTimeout(() => {
+      try {
+        sessionStorage.setItem(checkoutDraftKey, JSON.stringify({
+          items, nextItemId, meds, nextMedId, petHealthStatus,
+        }));
+      } catch {}
+    }, 500);
+    return () => { if (ckSaveRef.current) clearTimeout(ckSaveRef.current); };
+  }, [checkoutDraftKey, items, nextItemId, meds, nextMedId, petHealthStatus]);
 
   if (loadingAppt) {
     return (
@@ -238,7 +289,8 @@ export default function CheckoutPage() {
   const total = subtotal + tax;
 
   const addItem = () => {
-    const first = SERVICE_PRICE_LIST[0];
+    if (serviceList.length === 0) return;
+    const first = serviceList[0];
     setItems((prev) => [...prev, { id: nextItemId, service: first.name, qty: 1, unitPrice: first.price }]);
     setNextItemId((n) => n + 1);
   };
@@ -246,7 +298,7 @@ export default function CheckoutPage() {
   const removeItem = (itemId: number) => setItems((prev) => prev.filter((i) => i.id !== itemId));
 
   const updateService = (itemId: number, serviceName: string) => {
-    const preset = SERVICE_PRICE_LIST.find((p) => p.name === serviceName);
+    const preset = serviceList.find((p) => p.name === serviceName);
     setItems((prev) =>
       prev.map((i) =>
         i.id === itemId
@@ -444,7 +496,7 @@ export default function CheckoutPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {SERVICE_PRICE_LIST.map((p) => (
+                      {serviceList.map((p) => (
                         <SelectItem key={p.name} value={p.name}>{p.name}</SelectItem>
                       ))}
                     </SelectContent>
@@ -759,6 +811,9 @@ export default function CheckoutPage() {
           <Button
             onClick={async () => {
               clearVisit();
+              // Clear visit notes draft
+              try { sessionStorage.removeItem(`visit_draft_${id}`); } catch {}
+              try { sessionStorage.removeItem(`checkout_draft_${id}`); } catch {}
               setApptStatus(parseInt(id!) || 0, 'Ready for Billing');
               const { organizationId } = await getOrgContext();
               // Update Supabase status for real appointments

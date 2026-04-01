@@ -399,6 +399,16 @@ export default function SuperAdminChatPage() {
 
   useEffect(() => { fetchConversations(); }, [fetchConversations]);
 
+  // Auto-select first conversation with unread messages on initial load
+  useEffect(() => {
+    if (selectedId || loadingConvs || conversations.length === 0 || !saProfileId) return;
+    const unreadConv = conversations.find(c => c.unread > 0);
+    if (unreadConv) {
+      handleSelectConversation(unreadConv.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversations, loadingConvs, saProfileId]);
+
   // ── Load messages for selected conversation ─────────────────────────────────
 
   const fetchMessages = useCallback(async (convId: string) => {

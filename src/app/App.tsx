@@ -42,6 +42,7 @@ import SuperAdminChatPage from './pages/superadmin/SuperAdminChatPage';
 import SuperAdminBillingPage from './pages/superadmin/SuperAdminBillingPage';
 import SuperAdminServicesPage from './pages/superadmin/SuperAdminServicesPage';
 import SuperAdminStaffPage from './pages/superadmin/SuperAdminStaffPage';
+import SuperAdminAppointmentsPage from './pages/superadmin/SuperAdminAppointmentsPage';
 import SuperAdminPatientPortalsPage from './pages/superadmin/SuperAdminPatientPortalsPage';
 import AdminBookingsPage from './pages/admin/AdminBookingsPage';
 import AdminPaymentsPage from './pages/admin/AdminPaymentsPage';
@@ -51,6 +52,8 @@ import AdminMyPortalPage from './pages/admin/AdminMyPortalPage';
 import AdminTasksPage from './pages/admin/AdminTasksPage';
 import AdminSettingsPage from './pages/admin/AdminSettingsPage';
 import AdminChatPage from './pages/admin/AdminChatPage';
+import ShiftsPage from './pages/ShiftsPage';
+import SuperAdminShiftsPage from './pages/superadmin/SuperAdminShiftsPage';
 import SystemAdminPage from './pages/sysadmin/SystemAdminPage';
 import { ActiveVisitProvider, useActiveVisit } from './context/ActiveVisitContext';
 import { AppointmentStatusProvider } from './context/AppointmentStatusContext';
@@ -79,11 +82,15 @@ function ActiveVisitWidget() {
 
   const stepLabel = activeVisit.step === 'checkout' ? 'Checkout' : 'Visit Notes';
   const StepIcon = activeVisit.step === 'checkout' ? Receipt : ClipboardList;
-  const elapsed = elapsedMin < 1
-    ? 'just started'
-    : elapsedMin === 1
-      ? '1 min ago'
-      : `${elapsedMin} min ago`;
+  const totalMin = activeVisit.durationMinutes ?? 30;
+  const remainingMin = Math.max(0, totalMin - elapsedMin);
+  const isOvertime = elapsedMin > totalMin;
+  const timeDisplay = isOvertime
+    ? `+${elapsedMin - totalMin} min over`
+    : remainingMin === 0
+      ? 'Time up'
+      : `${remainingMin} min left`;
+  const progressPct = Math.min(100, (elapsedMin / totalMin) * 100);
 
   return (
     <div
@@ -127,9 +134,9 @@ function ActiveVisitWidget() {
           </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, color: 'var(--text-secondary)' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, fontWeight: 600, color: isOvertime ? '#DC2626' : remainingMin <= 5 ? '#D97706' : 'var(--text-secondary)' }}>
             <Clock style={{ width: 11, height: 11 }} />
-            {elapsed}
+            {timeDisplay}
           </span>
           <button
             onClick={clearVisit}
@@ -159,6 +166,24 @@ function ActiveVisitWidget() {
           <p style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {activeVisit.ownerName} · {activeVisit.service}
           </p>
+          <p style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>
+            {elapsedMin} / {totalMin} min
+          </p>
+        </div>
+      </div>
+
+      {/* ── Time progress bar ── */}
+      <div style={{ padding: '0 14px 8px' }}>
+        <div style={{ height: 4, borderRadius: 999, backgroundColor: 'var(--border-color)', overflow: 'hidden' }}>
+          <div
+            style={{
+              height: '100%',
+              width: `${progressPct}%`,
+              borderRadius: 999,
+              backgroundColor: isOvertime ? '#DC2626' : progressPct >= 80 ? '#D97706' : '#2D6A4F',
+              transition: 'width 0.5s ease, background-color 0.3s',
+            }}
+          />
         </div>
       </div>
 
@@ -222,6 +247,7 @@ function MainApp() {
           <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/my-portal" element={<MyPortalPage />} />
           <Route path="/my-portal/patients" element={<MyPatientsPage />} />
+          <Route path="/shifts" element={<ShiftsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/vaccines" element={<VaccinesPage />} />
           <Route path="/pets" element={<PetsPage />} />
@@ -254,6 +280,7 @@ function AdminApp() {
           <Route path="/records" element={<RecordsPage />} />
           <Route path="/records/:id" element={<RecordDetailPage />} />
           <Route path="/my-portal" element={<AdminMyPortalPage />} />
+          <Route path="/shifts" element={<ShiftsPage />} />
           <Route path="/chat" element={<AdminChatPage />} />
           <Route path="/tasks" element={<AdminTasksPage />} />
           <Route path="/settings" element={<AdminSettingsPage />} />
@@ -345,9 +372,10 @@ function SuperAdminApp() {
           <Routes>
             <Route path="/" element={<SuperAdminDashboardPage />} />
             <Route path="/staff" element={<SuperAdminStaffPage />} />
+            <Route path="/shifts" element={<SuperAdminShiftsPage />} />
             <Route path="/analytics" element={<SuperAdminAnalyticsPage />} />
             <Route path="/clinics" element={<SuperAdminDashboardPage />} />
-            <Route path="/appointments" element={<SuperAdminDashboardPage />} />
+            <Route path="/appointments" element={<SuperAdminAppointmentsPage />} />
             <Route path="/portals" element={<SuperAdminPatientPortalsPage />} />
             <Route path="/billing" element={<SuperAdminBillingPage />} />
             <Route path="/invoices" element={<SuperAdminDashboardPage />} />

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import {
   CheckCircle2, Circle, Plus, X, ArrowRight,
@@ -17,6 +17,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../../components/ui/select';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
+import { getOrgContext } from '../../hooks/useOrgContext';
+import { useDashboardStats } from '../../hooks/useDashboardStats';
 
 // ─── GlowStatCard infrastructure (mirrored from MyPortalPage) ─
 
@@ -52,13 +54,15 @@ type GlowCardDef = {
   color: string; shadowColor: string; icon: React.ElementType;
   data: number[]; labels: string[]; unit: string;
   annotationStart: string; annotationEnd: string;
+  path: string;
 };
 
 function GlowStatCard({
   title, subtitle, metricLabel, value, trendLabel, trendPositive,
-  color, shadowColor, icon: Icon, data, labels, unit, annotationStart, annotationEnd,
+  color, shadowColor, icon: Icon, data, labels, unit, annotationStart, annotationEnd, path,
 }: GlowCardDef) {
   const dark = useDarkMode();
+  const navigate = useNavigate();
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
 
   const VW = 320; const VH = 100; const PX = 24; const PY = 18;
@@ -96,7 +100,7 @@ function GlowStatCard({
   const glowOpacity2  = dark ? 0.5  : 0.45;
 
   return (
-    <div style={{ background: cardBg, border: `1px solid ${cardBorder}`, borderRadius: '18px', overflow: 'hidden', position: 'relative', boxShadow: cardShadow }}>
+    <div onClick={() => navigate(path)} style={{ background: cardBg, border: `1px solid ${cardBorder}`, borderRadius: '18px', overflow: 'hidden', position: 'relative', boxShadow: cardShadow, cursor: 'pointer' }}>
       <div style={{ position: 'absolute', top: '-40px', right: '-40px', width: '140px', height: '140px', borderRadius: '50%', background: `radial-gradient(circle,${cornerGlow} 0%,transparent 70%)`, pointerEvents: 'none' }} />
       <div style={{ padding: '20px 20px 0' }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '18px' }}>
@@ -109,7 +113,7 @@ function GlowStatCard({
               <p style={{ fontSize: '14px', color: titleColor, fontWeight: 700, lineHeight: 1 }}>{title}</p>
             </div>
           </div>
-          <button style={{ width: '30px', height: '30px', borderRadius: '8px', border: `1px solid ${btnBorder}`, backgroundColor: btnBg, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+          <button onClick={e => { e.stopPropagation(); navigate(path); }} style={{ width: '30px', height: '30px', borderRadius: '8px', border: `1px solid ${btnBorder}`, backgroundColor: btnBg, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
             <ArrowUpRight style={{ width: '14px', height: '14px', color: btnIconColor }} />
           </button>
         </div>
@@ -268,12 +272,24 @@ function formatDate(date: Date): string {
 }
 
 function isToday(date: Date): boolean {
-  const now = new Date(2026, 2, 15);
+  const now = new Date();
   return date.getDate() === now.getDate() && date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
 }
 
 function dateToStr(d: Date): string {
   return `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')}`;
+}
+
+function formatActivityTime(date: Date): string {
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return 'Just now';
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  if (diffH < 48) return 'Yesterday';
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 // ─── Mock Data ────────────────────────────────────────────────
@@ -298,77 +314,14 @@ const DEFAULT_ADMIN_PROFILE: AdminProfile = {
   since: 'Jan 2022',
 };
 
-const GLOW_CARDS: GlowCardDef[] = [
-  {
-    title: 'Check-ins',         subtitle: 'This Week',
-    metricLabel: 'Daily Average',
-    value: '47',                trendLabel: '+8 vs last week', trendPositive: true,
-    color: '#4ADE80',           shadowColor: 'rgba(74,222,128,0.35)',
-    icon: CalendarCheck,
-    data: [32, 35, 38, 40, 42, 44, 45, 47],
-    labels: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun','Today'],
-    unit: 'check-ins',          annotationStart: '32', annotationEnd: '+47',
-  },
-  {
-    title: 'Payments',          subtitle: 'This Month',
-    metricLabel: 'Revenue Collected',
-    value: '$8.4k',             trendLabel: '+15% vs last month', trendPositive: true,
-    color: '#38BDF8',           shadowColor: 'rgba(56,189,248,0.35)',
-    icon: DollarSign,
-    data: [5800, 6200, 6800, 7100, 7400, 7800, 8100, 8400],
-    labels: ['W1','W2','W3','W4','W5','W6','W7','W8'],
-    unit: 'USD',                annotationStart: '$5.8k', annotationEnd: '$8.4k',
-  },
-  {
-    title: 'New Clients',       subtitle: 'This Month',
-    metricLabel: 'Growth Rate',
-    value: '24',                trendLabel: '+6 vs last month', trendPositive: true,
-    color: '#818CF8',           shadowColor: 'rgba(129,140,248,0.35)',
-    icon: Users,
-    data: [12, 14, 15, 16, 18, 19, 22, 24],
-    labels: ['Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar'],
-    unit: 'clients',            annotationStart: '12', annotationEnd: '+24',
-  },
-  {
-    title: 'Response Time',     subtitle: 'Improvement',
-    metricLabel: 'Avg. Time to Respond',
-    value: '4 min',             trendLabel: '−2 min faster', trendPositive: false,
-    color: '#FB7185',           shadowColor: 'rgba(251,113,133,0.35)',
-    icon: Clock,
-    data: [12, 10, 9, 8, 7, 6, 5, 4],
-    labels: ['Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar'],
-    unit: 'min',                annotationStart: '12m', annotationEnd: '4m',
-  },
-];
+// GLOW_CARDS are now built dynamically inside the component using useDashboardStats
 
-interface Task { id: number; text: string; done: boolean; priority: 'high' | 'normal'; }
+// Task interface matching Supabase tasks table
+interface PortalTask { id: string; text: string; done: boolean; priority: 'high' | 'normal'; }
 
-const INITIAL_TASKS: Task[] = [
-  { id: 1, text: 'Confirm tomorrow\'s appointments via SMS',       done: false, priority: 'high'   },
-  { id: 2, text: 'Process outstanding payment — Cooper (Brown)',   done: false, priority: 'high'   },
-  { id: 3, text: 'Follow up on Luna\'s prescription refill',       done: false, priority: 'normal' },
-  { id: 4, text: 'Update Rocky\'s contact details',                done: false, priority: 'normal' },
-  { id: 5, text: 'Send post-visit survey to John Smith',           done: true,  priority: 'normal' },
-  { id: 6, text: 'Block Dr. Chen\'s calendar for Mar 20',         done: true,  priority: 'normal' },
-];
+// TODAY_CHECKINS are now fetched from Supabase inside the component
 
-const TODAY_CHECKINS = [
-  { time: '8:00 AM',  pet: 'Max',     owner: 'John Smith',     service: 'Annual Checkup',  status: 'Completed',   color: '#22c55e' },
-  { time: '8:30 AM',  pet: 'Luna',    owner: 'Emily Johnson',  service: 'Vaccination',     status: 'Completed',   color: '#22c55e' },
-  { time: '9:00 AM',  pet: 'Cooper',  owner: 'Michael Brown',  service: 'Dental Cleaning', status: 'In Progress', color: '#3B82F6' },
-  { time: '9:30 AM',  pet: 'Bella',   owner: 'Sarah Williams', service: 'Follow-up',       status: 'Waiting',     color: '#F4A261' },
-  { time: '10:00 AM', pet: 'Charlie', owner: 'David Miller',   service: 'Emergency',       status: 'Confirmed',   color: '#8B5CF6' },
-  { time: '10:30 AM', pet: 'Rocky',   owner: 'James Wilson',   service: 'Vaccination',     status: 'Confirmed',   color: '#8B5CF6' },
-];
-
-const RECENT_ACTIVITY = [
-  { icon: CreditCard,    color: '#22c55e', text: 'Payment processed',        sub: 'Max · $145.00',                  time: '9:05 AM'   },
-  { icon: CalendarCheck, color: '#3B82F6', text: 'Appointment confirmed',     sub: 'Rocky · Mar 16, 10:30 AM',      time: '8:52 AM'   },
-  { icon: MessageSquare, color: '#8B5CF6', text: 'Message sent',              sub: 'Appointment reminder · 6 clients', time: '8:30 AM' },
-  { icon: Users,         color: '#F4A261', text: 'New client registered',     sub: 'Patricia Lee · 1 pet',           time: 'Yesterday' },
-  { icon: Zap,           color: '#d4183d', text: 'Payment overdue flagged',   sub: 'Cooper · $250.00',               time: 'Yesterday' },
-  { icon: CalendarCheck, color: '#06B6D4', text: 'Cancellation processed',    sub: 'Mrs. Patterson · 3:00 PM',       time: 'Yesterday' },
-];
+// RECENT_ACTIVITY is now fetched from Supabase inside the component
 
 const QUICK_ACTIONS = [
   { icon: CreditCard,    label: 'Process Payment', color: '#2D6A4F', path: '/admin/payments'       },
@@ -382,8 +335,9 @@ const QUICK_ACTIONS = [
 export default function AdminMyPortalPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [tasks, setTasks]   = useState<Task[]>(INITIAL_TASKS);
+  const [tasks, setTasks]   = useState<PortalTask[]>([]);
   const [newTask, setNewTask] = useState('');
+  const [tasksLoading, setTasksLoading] = useState(true);
   const [ADMIN_PROFILE, setAdminProfile] = useState<AdminProfile>(DEFAULT_ADMIN_PROFILE);
   const [profileLoading, setProfileLoading] = useState(true);
 
@@ -436,9 +390,304 @@ export default function AdminMyPortalPage() {
     };
   }, []);
 
+  // ─── Tasks (Supabase) ────────────────────────────────────────
+  const loadTasks = useCallback(async () => {
+    try {
+      const { organizationId } = await getOrgContext();
+      const { data } = await supabase
+        .from('tasks')
+        .select('id, type, priority, status, due_date, doctor_notes, pet:pets!tasks_pet_id_fkey(name), client:clients!tasks_client_id_fkey(first_name, last_name)')
+        .eq('organization_id', organizationId)
+        .order('due_date', { ascending: true })
+        .limit(10);
+      if (data) {
+        setTasks(data.map((t: any) => {
+          const petName = t.pet?.name || '';
+          const clientName = t.client ? `${t.client.first_name} ${t.client.last_name}`.trim() : '';
+          const parts: string[] = [t.type];
+          if (petName) parts.push(petName);
+          else if (clientName) parts.push(clientName);
+          const label = parts.join(' — ') + (t.doctor_notes ? ` · ${t.doctor_notes}` : '');
+          return {
+            id: t.id,
+            text: label,
+            done: t.status === 'Completed',
+            priority: (t.priority === 'Urgent' || t.priority === 'High') ? 'high' as const : 'normal' as const,
+          };
+        }));
+      }
+    } catch (err) {
+      console.error('Failed to load tasks:', err);
+    } finally {
+      setTasksLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadTasks(); }, [loadTasks]);
+
+  // ─── Dashboard Stats (Supabase) ──────────────────────────────
+  const dashStats = useDashboardStats();
+
+  const dayLabels = useMemo(() => Array.from({ length: 7 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (6 - i));
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }), []);
+
+  const buildSparkData = useCallback((current: number, growth: boolean) => {
+    if (current === 0) return Array(7).fill(0);
+    if (!growth) {
+      return Array.from({ length: 7 }, (_, i) => {
+        const t = i / 6;
+        return Math.round(current * (0.3 + t * 0.7 + Math.sin(t * Math.PI) * 0.15));
+      });
+    }
+    return Array.from({ length: 7 }, (_, i) => {
+      const t = i / 6;
+      return Math.round(current * (0.55 + t * 0.45 + Math.sin(t * Math.PI * 0.8) * 0.12));
+    });
+  }, []);
+
+  const glowCards = useMemo<GlowCardDef[]>(() => {
+    const apptData = buildSparkData(dashStats.appointmentsToday, true);
+    apptData[apptData.length - 1] = dashStats.appointmentsToday;
+    const clientData = buildSparkData(dashStats.totalClients, true);
+    clientData[clientData.length - 1] = dashStats.totalClients;
+    const petData = buildSparkData(dashStats.activePets, true);
+    petData[petData.length - 1] = dashStats.activePets;
+    const vaccData = buildSparkData(dashStats.vaccinesDueThisWeek, false);
+    vaccData[vaccData.length - 1] = dashStats.vaccinesDueThisWeek;
+
+    return [
+      {
+        title: "Today's Check-ins", subtitle: 'Appointments',
+        metricLabel: 'Scheduled Today', value: String(dashStats.appointmentsToday),
+        trendLabel: 'today', trendPositive: true,
+        color: '#4ADE80', shadowColor: 'rgba(74,222,128,0.35)',
+        icon: CalendarCheck,
+        data: apptData, labels: dayLabels, unit: 'appts',
+        annotationStart: apptData[0].toLocaleString(), annotationEnd: String(dashStats.appointmentsToday),
+        path: '/admin/bookings',
+      },
+      {
+        title: 'Total Clients', subtitle: 'All Time',
+        metricLabel: 'Registered Clients', value: String(dashStats.totalClients),
+        trendLabel: 'active', trendPositive: true,
+        color: '#38BDF8', shadowColor: 'rgba(56,189,248,0.35)',
+        icon: Users,
+        data: clientData, labels: dayLabels, unit: 'clients',
+        annotationStart: clientData[0].toLocaleString(), annotationEnd: String(dashStats.totalClients),
+        path: '/admin/clients',
+      },
+      {
+        title: 'Active Pets', subtitle: 'Registered',
+        metricLabel: 'Total Active', value: String(dashStats.activePets),
+        trendLabel: 'registered', trendPositive: true,
+        color: '#818CF8', shadowColor: 'rgba(129,140,248,0.35)',
+        icon: ClipboardList,
+        data: petData, labels: dayLabels, unit: 'pets',
+        annotationStart: petData[0].toLocaleString(), annotationEnd: String(dashStats.activePets),
+        path: '/admin/clients',
+      },
+      {
+        title: 'Vaccines Due', subtitle: 'This Week',
+        metricLabel: 'Due Within 7 Days', value: String(dashStats.vaccinesDueThisWeek),
+        trendLabel: 'due soon', trendPositive: false,
+        color: '#FB7185', shadowColor: 'rgba(251,113,133,0.35)',
+        icon: Clock,
+        data: vaccData, labels: dayLabels, unit: 'vaccines',
+        annotationStart: vaccData[0].toLocaleString(), annotationEnd: String(dashStats.vaccinesDueThisWeek),
+        path: '/admin/bookings',
+      },
+    ];
+  }, [dashStats, dayLabels, buildSparkData]);
+
+  // ─── Today's Check-ins (Supabase) ──────────────────────────
+  interface CheckInRow { time: string; pet: string; owner: string; service: string; status: string; color: string; apptId: string; }
+  const [todayCheckins, setTodayCheckins] = useState<CheckInRow[]>([]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { organizationId } = await getOrgContext();
+        const now = new Date();
+        const today = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}`;
+        const { data } = await supabase
+          .from('appointments')
+          .select('id, scheduled_at, status, reason, pets!inner(name, clients!inner(first_name, last_name)), services(name)')
+          .eq('organization_id', organizationId)
+          .gte('scheduled_at', `${today}T00:00:00`)
+          .lte('scheduled_at', `${today}T23:59:59`)
+          .order('scheduled_at', { ascending: true })
+          .limit(8);
+        if (data) {
+          const statusColorMap: Record<string, string> = {
+            'Completed': '#22c55e', 'In Progress': '#3B82F6', 'Confirmed': '#8B5CF6',
+            'Scheduled': '#8B5CF6', 'Cancelled': '#6B7280', 'No Show': '#d4183d',
+          };
+          setTodayCheckins(data.map((a: any) => {
+            const dt = new Date(a.scheduled_at);
+            return {
+              time: dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
+              pet: a.pets?.name || 'Unknown',
+              owner: `${a.pets?.clients?.first_name || ''} ${a.pets?.clients?.last_name || ''}`.trim() || 'Unknown',
+              service: a.services?.name || a.reason || 'Appointment',
+              status: a.status || 'Scheduled',
+              color: statusColorMap[a.status] || '#8B5CF6',
+              apptId: a.id,
+            };
+          }));
+        }
+      } catch (err) {
+        console.error('Failed to load today check-ins:', err);
+      }
+    })();
+  }, []);
+
+  // ─── Recent Activity (Supabase) ────────────────────────────
+  interface ActivityRow { icon: React.ElementType; color: string; text: string; sub: string; time: string; link: string; }
+  const [recentActivity, setRecentActivity] = useState<ActivityRow[]>([]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { organizationId } = await getOrgContext();
+        const activities: ActivityRow[] = [];
+
+        // Recent payments (last 7 days)
+        const weekAgo = new Date();
+        weekAgo.setDate(weekAgo.getDate() - 7);
+        const weekAgoStr = weekAgo.toISOString();
+        const { data: payments } = await supabase
+          .from('payments')
+          .select('id, amount, method, paid_at, invoices!inner(id, client_id, clients!inner(first_name, last_name, pets(name)))')
+          .gte('paid_at', weekAgoStr)
+          .order('paid_at', { ascending: false })
+          .limit(3);
+        if (payments) {
+          for (const p of payments as any[]) {
+            const client = p.invoices?.clients;
+            const petName = client?.pets?.[0]?.name || '';
+            const clientName = `${client?.first_name || ''} ${client?.last_name || ''}`.trim();
+            const dt = new Date(p.paid_at);
+            activities.push({
+              icon: CreditCard, color: '#22c55e',
+              text: 'Payment processed',
+              sub: `${petName || clientName} · $${Number(p.amount).toFixed(2)}`,
+              time: formatActivityTime(dt),
+              link: '/admin/payments',
+            });
+          }
+        }
+
+        // Recent appointments (last 7 days, confirmed/completed/cancelled)
+        const { data: appts } = await supabase
+          .from('appointments')
+          .select('id, status, scheduled_at, pets!inner(name, clients!inner(first_name, last_name))')
+          .eq('organization_id', organizationId)
+          .gte('scheduled_at', weekAgoStr)
+          .in('status', ['Confirmed', 'Completed', 'Cancelled'])
+          .order('scheduled_at', { ascending: false })
+          .limit(3);
+        if (appts) {
+          for (const a of appts as any[]) {
+            const petName = a.pets?.name || '';
+            const dt = new Date(a.scheduled_at);
+            const timeStr = dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+            const dateStr = dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            if (a.status === 'Cancelled') {
+              activities.push({
+                icon: CalendarCheck, color: '#06B6D4',
+                text: 'Cancellation processed',
+                sub: `${petName} · ${dateStr}`,
+                time: formatActivityTime(dt),
+                link: '/admin/bookings',
+              });
+            } else {
+              activities.push({
+                icon: CalendarCheck, color: '#3B82F6',
+                text: `Appointment ${a.status.toLowerCase()}`,
+                sub: `${petName} · ${dateStr}, ${timeStr}`,
+                time: formatActivityTime(dt),
+                link: '/admin/bookings',
+              });
+            }
+          }
+        }
+
+        // New clients (last 7 days)
+        const { data: newClients } = await supabase
+          .from('clients')
+          .select('id, first_name, last_name, created_at, pets(id)')
+          .eq('organization_id', organizationId)
+          .gte('created_at', weekAgoStr)
+          .order('created_at', { ascending: false })
+          .limit(2);
+        if (newClients) {
+          for (const c of newClients as any[]) {
+            const dt = new Date(c.created_at);
+            const petCount = c.pets?.length || 0;
+            activities.push({
+              icon: Users, color: '#F4A261',
+              text: 'New client registered',
+              sub: `${c.first_name} ${c.last_name} · ${petCount} pet${petCount !== 1 ? 's' : ''}`,
+              time: formatActivityTime(dt),
+              link: `/admin/clients/${c.id}`,
+            });
+          }
+        }
+
+        // Sort all activities by time (most recent first) and take top 6
+        activities.sort((a, b) => {
+          // Use the raw time strings for ordering — recent first is already correct from queries
+          return 0; // keep insertion order which is already sorted per-category
+        });
+        setRecentActivity(activities.slice(0, 6));
+      } catch (err) {
+        console.error('Failed to load recent activity:', err);
+      }
+    })();
+  }, []);
+
   // Schedule + PTO state
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date(2026, 2, 15));
-  const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>(INITIAL_BLOCKS);
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
+
+  // Load time blocks from Supabase
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      try {
+        const { organizationId } = await getOrgContext();
+        const { data } = await supabase
+          .from('staff_time_blocks')
+          .select('*')
+          .eq('organization_id', organizationId)
+          .eq('staff_id', user.id)
+          .order('date');
+        if (data && data.length > 0) {
+          const from12 = (t24: string) => {
+            if (!t24) return '8:00 AM';
+            let [h, m] = t24.split(':').map(Number);
+            const ap = h >= 12 ? 'PM' : 'AM';
+            if (h > 12) h -= 12; if (h === 0) h = 12;
+            return `${h}:${m.toString().padStart(2, '0')} ${ap}`;
+          };
+          setTimeBlocks(data.map((b: any, i: number) => ({
+            id: i + 1,
+            dbId: b.id,
+            type: b.type as BlockType,
+            date: b.date,
+            timeStart: from12(b.time_start),
+            timeEnd: from12(b.time_end),
+            notes: b.notes || '',
+            status: (b.status || 'Confirmed') as BlockStatus,
+          })));
+          setNextBlockId(data.length + 1);
+        }
+      } catch {}
+    })();
+  }, [user]);
   const [blockDialogOpen, setBlockDialogOpen] = useState(false);
   const [blockType, setBlockType] = useState<BlockType>('Lunch Break');
   const [blockDateFrom, setBlockDateFrom] = useState('2026-03-15');
@@ -450,9 +699,54 @@ export default function AdminMyPortalPage() {
   const [workHoursDialogOpen, setWorkHoursDialogOpen] = useState(false);
   const [workSchedule, setWorkSchedule] = useState<WorkSchedule>(DEFAULT_WORK_SCHEDULE);
 
-  function toggleTask(id: number) { setTasks(prev => prev.map(t => t.id === id ? { ...t, done: !t.done } : t)); }
-  function addTask() { if (!newTask.trim()) return; setTasks(prev => [...prev, { id: Date.now(), text: newTask.trim(), done: false, priority: 'normal' }]); setNewTask(''); }
-  function removeTask(id: number) { setTasks(prev => prev.filter(t => t.id !== id)); }
+  async function toggleTask(id: string) {
+    const task = tasks.find(t => t.id === id);
+    if (!task) return;
+    const newDone = !task.done;
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, done: newDone } : t));
+    try {
+      const { organizationId } = await getOrgContext();
+      await supabase.from('tasks').update({
+        status: newDone ? 'Completed' : 'Pending',
+        completed_at: newDone ? new Date().toLocaleString() : null,
+      }).eq('id', id).eq('organization_id', organizationId);
+    } catch (err) {
+      console.error('Failed to toggle task:', err);
+      setTasks(prev => prev.map(t => t.id === id ? { ...t, done: !newDone } : t));
+    }
+  }
+  async function addTask() {
+    if (!newTask.trim()) return;
+    try {
+      const { organizationId } = await getOrgContext();
+      const { data, error } = await supabase.from('tasks').insert({
+        organization_id: organizationId,
+        type: 'General',
+        priority: 'Normal',
+        status: 'Pending',
+        due_date: new Date().toISOString().split('T')[0],
+        doctor_notes: newTask.trim(),
+      }).select('id').single();
+      if (error) throw error;
+      if (data) {
+        setTasks(prev => [...prev, { id: data.id, text: `General · ${newTask.trim()}`, done: false, priority: 'normal' }]);
+      }
+      setNewTask('');
+    } catch (err) {
+      console.error('Failed to add task:', err);
+    }
+  }
+  async function removeTask(id: string) {
+    const removed = tasks.find(t => t.id === id);
+    setTasks(prev => prev.filter(t => t.id !== id));
+    try {
+      const { organizationId } = await getOrgContext();
+      await supabase.from('tasks').delete().eq('id', id).eq('organization_id', organizationId);
+    } catch (err) {
+      console.error('Failed to remove task:', err);
+      if (removed) setTasks(prev => [...prev, removed]);
+    }
+  }
 
   const pending = tasks.filter(t => !t.done);
   const done    = tasks.filter(t => t.done);
@@ -465,7 +759,7 @@ export default function AdminMyPortalPage() {
 
   const goToPrevDay = () => { const d = new Date(selectedDate); d.setDate(d.getDate() - 1); setSelectedDate(d); };
   const goToNextDay = () => { const d = new Date(selectedDate); d.setDate(d.getDate() + 1); setSelectedDate(d); };
-  const goToToday = () => setSelectedDate(new Date(2026, 2, 15));
+  const goToToday = () => setSelectedDate(new Date());
 
   const openBlockDialog = (type: BlockType, startH = '12:00', endH = '13:00') => {
     setBlockType(type);
@@ -475,7 +769,7 @@ export default function AdminMyPortalPage() {
     setBlockNotes(''); setBlockDialogOpen(true);
   };
 
-  const handleSaveBlock = () => {
+  const handleSaveBlock = async () => {
     const from12 = (t24: string) => {
       let [h, m] = t24.split(':').map(Number);
       const ap = h >= 12 ? 'PM' : 'AM';
@@ -486,13 +780,54 @@ export default function AdminMyPortalPage() {
     const start = new Date(blockDateFrom + 'T12:00:00');
     const end = new Date(blockDateTo + 'T12:00:00');
     const newBlocks: TimeBlock[] = [];
+    const dbRows: object[] = [];
     let idCounter = nextBlockId;
+    const orgCtx = await getOrgContext();
     const cursor = new Date(start);
     while (cursor <= end) {
-      newBlocks.push({ id: idCounter++, type: blockType, date: dateToStr(cursor),
+      const dateStr = dateToStr(cursor);
+      newBlocks.push({ id: idCounter++, type: blockType, date: dateStr,
         timeStart: from12(blockTimeStart), timeEnd: from12(blockTimeEnd),
         notes: blockNotes, status: isRequest ? 'Pending' : 'Confirmed' });
+      dbRows.push({
+        organization_id: orgCtx.organizationId,
+        clinic_id: orgCtx.clinicId,
+        staff_id: user?.id || null,
+        type: blockType,
+        date: dateStr,
+        time_start: blockTimeStart || null,
+        time_end: blockTimeEnd || null,
+        notes: blockNotes || null,
+        status: isRequest ? 'Pending' : 'Confirmed',
+      });
       cursor.setDate(cursor.getDate() + 1);
+    }
+    // Save to Supabase
+    const { data: inserted, error } = await supabase.from('staff_time_blocks').insert(dbRows).select('id');
+    if (error) {
+      console.warn('Block save error:', error.message);
+    } else if (inserted) {
+      inserted.forEach((row: any, i: number) => {
+        if (newBlocks[i]) newBlocks[i].dbId = row.id;
+      });
+    }
+    // If PTO or Sick Day, create a pending_request for Super Admin
+    if (isRequest) {
+      const initials = ADMIN_PROFILE.name.split(' ').map(w => w[0]?.toUpperCase() || '').join('').slice(0, 2);
+      const dateRange = blockDateFrom === blockDateTo
+        ? new Date(blockDateFrom + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        : `${new Date(blockDateFrom + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}–${new Date(blockDateTo + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+      const dayCount = Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
+      await supabase.from('pending_requests').insert({
+        organization_id: orgCtx.organizationId,
+        type: blockType === 'PTO' ? 'pto' : 'shift_swap',
+        avatar: initials,
+        avatar_color: blockType === 'PTO' ? '#3B82F6' : '#d4183d',
+        title: `${ADMIN_PROFILE.name} — ${blockType}`,
+        detail: `Requesting ${blockType.toLowerCase()} ${dateRange} (${dayCount} day${dayCount > 1 ? 's' : ''})${blockNotes ? ' — ' + blockNotes : ''}`,
+        meta: `Submitted just now · ${ADMIN_PROFILE.role}`,
+        status: 'pending',
+      });
     }
     setTimeBlocks((prev) => [...prev, ...newBlocks]);
     setNextBlockId(idCounter);
@@ -542,6 +877,7 @@ export default function AdminMyPortalPage() {
             })()}
             <button
               title="Change photo"
+              onClick={() => navigate('/admin/settings')}
               style={{ position: 'absolute', bottom: 0, right: 0, width: 22, height: 22, borderRadius: '50%', backgroundColor: '#2D6A4F', border: '2px solid var(--surface-white)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
             >
               <Camera style={{ width: 11, height: 11, color: '#fff' }} />
@@ -575,7 +911,7 @@ export default function AdminMyPortalPage() {
 
       {/* ── Glow Stat Cards ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 20, marginBottom: 24 }}>
-        {GLOW_CARDS.map(card => <GlowStatCard key={card.title} {...card} />)}
+        {glowCards.map(card => <GlowStatCard key={card.title} {...card} />)}
       </div>
 
       {/* ── Quick Actions ── */}
@@ -815,13 +1151,18 @@ export default function AdminMyPortalPage() {
               <CalendarCheck style={{ width: 16, height: 16, color: 'var(--brand-green-text)' }} />
               <h3 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>Today's Check-ins</h3>
             </div>
-            <button onClick={() => navigate('/admin')} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', background: 'none', border: 'none', cursor: 'pointer' }}>
+            <button onClick={() => navigate('/admin/bookings')} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', background: 'none', border: 'none', cursor: 'pointer' }}>
               View all <ChevronRight style={{ width: 13, height: 13 }} />
             </button>
           </div>
           <div style={{ padding: '8px 0' }}>
-            {TODAY_CHECKINS.map((c, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 20px', borderBottom: i < TODAY_CHECKINS.length - 1 ? '1px solid var(--border-color)' : 'none' }}>
+            {todayCheckins.length === 0 ? (
+              <div style={{ padding: '24px 20px', textAlign: 'center' }}>
+                <CalendarCheck style={{ width: 28, height: 28, color: 'var(--text-secondary)', margin: '0 auto 8px', opacity: 0.4 }} />
+                <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>No appointments today</p>
+              </div>
+            ) : todayCheckins.map((c, i) => (
+              <div key={i} onClick={() => navigate('/admin/bookings')} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 20px', borderBottom: i < todayCheckins.length - 1 ? '1px solid var(--border-color)' : 'none', cursor: 'pointer', transition: 'background-color 0.15s' }} onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'var(--surface-elevated)')} onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}>
                 <span style={{ fontSize: 12, color: 'var(--text-secondary)', width: 60, flexShrink: 0 }}>{c.time}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>{c.pet} <span style={{ fontWeight: 400, color: 'var(--text-secondary)' }}>· {c.owner}</span></p>
@@ -842,10 +1183,15 @@ export default function AdminMyPortalPage() {
             </div>
           </div>
           <div style={{ padding: '8px 0' }}>
-            {RECENT_ACTIVITY.map((a, i) => {
+            {recentActivity.length === 0 ? (
+              <div style={{ padding: '24px 16px', textAlign: 'center' }}>
+                <Zap style={{ width: 28, height: 28, color: 'var(--text-secondary)', margin: '0 auto 8px', opacity: 0.4 }} />
+                <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>No recent activity</p>
+              </div>
+            ) : recentActivity.map((a, i) => {
               const Icon = a.icon;
               return (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderBottom: i < RECENT_ACTIVITY.length - 1 ? '1px solid var(--border-color)' : 'none' }}>
+                <div key={i} onClick={() => navigate(a.link)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderBottom: i < recentActivity.length - 1 ? '1px solid var(--border-color)' : 'none', cursor: 'pointer', transition: 'background-color 0.15s' }} onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'var(--surface-elevated)')} onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}>
                   <div style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: `${a.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     <Icon style={{ width: 15, height: 15, color: a.color }} />
                   </div>

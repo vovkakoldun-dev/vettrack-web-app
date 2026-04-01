@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router';
 import {
-  Search, FileText, CalendarDays, ClipboardList, FlaskConical,
+  Search, FileText, CalendarDays, ClipboardList, FlaskConical, Trash2, X,
 } from 'lucide-react';
 import { Input } from '../components/ui/input';
 import { StatCard } from '../components/StatCard';
@@ -64,12 +64,46 @@ export default function RecordsPage() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [records, setRecords] = useState<MedicalRecord[]>([]);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const toggleSelect = (dbId: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(dbId)) next.delete(dbId); else next.add(dbId);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filtered.length && filtered.length > 0) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filtered.map(r => r.dbId!).filter(Boolean)));
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selectedIds.size === 0) return;
+    setDeleting(true);
+    const ids = Array.from(selectedIds);
+    const { error } = await supabase.from('medical_records').delete().in('id', ids);
+    if (!error) {
+      setRecords(prev => prev.filter(r => !r.dbId || !selectedIds.has(r.dbId)));
+      setSelectedIds(new Set());
+      setSelectMode(false);
+    }
+    setDeleting(false);
+    setShowDeleteConfirm(false);
+  };
 
   useEffect(() => {
     (async () => {
       const { data } = await supabase
         .from('medical_records')
-        .select('id, record_number, record_type, status, visit_date, visit_time, reason, clinical_notes, duration_minutes, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name), staff!medical_records_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
+        .select('id, record_number, record_type, status, visit_date, visit_time, reason, clinical_notes, duration_minutes, pets!left(id, name, species, breed, photo_url), clients!left(id, first_name, last_name), staff!medical_records_vet_id_fkey!left(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
         .order('visit_date', { ascending: false });
       if (data) {
         const mapped: MedicalRecord[] = data.map((r: any, i: number) => {
@@ -165,11 +199,98 @@ export default function RecordsPage() {
         </div>
       </div>
 
+      {/* Selection bar */}
+      {selectMode && (
+        <div className="flex items-center gap-3 mb-4 px-4 py-3 border border-[var(--border-color)] bg-[var(--surface-elevated)]" style={{ borderRadius: '10px' }}>
+          <span className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 600 }}>
+            {selectedIds.size > 0 ? `${selectedIds.size} record${selectedIds.size !== 1 ? 's' : ''} selected` : 'Select records to delete'}
+          </span>
+          {selectedIds.size > 0 && (
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-white hover:opacity-90 transition-opacity"
+              style={{ backgroundColor: '#EF4444', borderRadius: '8px', fontSize: '13px', fontWeight: 600, border: 'none', cursor: 'pointer' }}
+            >
+              <Trash2 style={{ width: '14px', height: '14px' }} /> Delete
+            </button>
+          )}
+          <button
+            onClick={() => { setSelectedIds(new Set()); setSelectMode(false); }}
+            className="flex items-center gap-1 px-3 py-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 500 }}
+          >
+            <X style={{ width: '14px', height: '14px' }} /> Cancel
+          </button>
+        </div>
+      )}
+
+      {/* Delete confirmation dialog */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 flex items-center justify-center" style={{ zIndex: 9999, backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6" style={{ borderRadius: '14px', maxWidth: '420px', width: '90%', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex items-center justify-center" style={{ width: '40px', height: '40px', borderRadius: '10px', backgroundColor: '#FEE2E2' }}>
+                <Trash2 style={{ width: '20px', height: '20px', color: '#EF4444' }} />
+              </div>
+              <h3 className="text-[var(--text-primary)]" style={{ fontSize: '18px', fontWeight: 700 }}>Delete Records</h3>
+            </div>
+            <p className="text-[var(--text-secondary)] mb-6" style={{ fontSize: '14px', lineHeight: '1.5' }}>
+              Are you sure you want to delete <strong className="text-[var(--text-primary)]">{selectedIds.size} record{selectedIds.size !== 1 ? 's' : ''}</strong>? This action cannot be undone.
+            </p>
+            <div className="flex items-center justify-end gap-3">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={deleting}
+                className="px-4 py-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+                style={{ background: 'none', border: '1px solid var(--border-color)', borderRadius: '8px', fontSize: '14px', fontWeight: 500, cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteSelected}
+                disabled={deleting}
+                className="px-4 py-2 text-white hover:opacity-90 transition-opacity"
+                style={{ backgroundColor: '#EF4444', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: 600, cursor: 'pointer', opacity: deleting ? 0.6 : 1 }}
+              >
+                {deleting ? 'Deleting...' : `Delete ${selectedIds.size} Record${selectedIds.size !== 1 ? 's' : ''}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Table */}
       <div className="bg-[var(--surface-white)] border border-[var(--border-color)]" style={{ borderRadius: '12px' }}>
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
+              <TableHead className="py-3 px-4" style={{ width: '44px' }}>
+                <div
+                  onClick={() => {
+                    if (!selectMode) { setSelectMode(true); }
+                    else { toggleSelectAll(); }
+                  }}
+                  style={{
+                    width: '18px', height: '18px', borderRadius: '4px', cursor: 'pointer',
+                    border: selectMode && selectedIds.size === filtered.length && filtered.length > 0
+                      ? '2px solid #2D6A4F'
+                      : '2px solid var(--text-secondary)',
+                    backgroundColor: selectMode && selectedIds.size === filtered.length && filtered.length > 0
+                      ? '#2D6A4F' : 'transparent',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    opacity: selectMode ? 1 : 0.5,
+                    transition: 'all 0.15s ease',
+                  }}
+                  title={selectMode ? 'Select all' : 'Enable selection mode'}
+                >
+                  {selectMode && selectedIds.size === filtered.length && filtered.length > 0 && (
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  )}
+                  {selectMode && selectedIds.size > 0 && selectedIds.size < filtered.length && (
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M3 6h6" stroke="var(--text-secondary)" strokeWidth="2" strokeLinecap="round"/></svg>
+                  )}
+                </div>
+              </TableHead>
               {['Pet', 'Owner', 'Type', 'Date', 'Veterinarian', 'Summary', 'Status'].map((h) => (
                 <TableHead key={h} className="py-3 px-4" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>
                   {h}
@@ -181,12 +302,33 @@ export default function RecordsPage() {
             {filtered.map((rec) => {
               const typeStyle = recordTypeColors[rec.recordType];
               const statusStyle = statusColors[rec.status];
+              const isSelected = rec.dbId ? selectedIds.has(rec.dbId) : false;
               return (
                 <TableRow
                   key={rec.id}
                   className="hover:bg-[var(--surface-elevated)] cursor-pointer transition-colors"
+                  style={isSelected ? { backgroundColor: 'rgba(45,106,79,0.08)' } : undefined}
                   onClick={() => navigate(`${basePath}/${rec.dbId || rec.id}`)}
                 >
+                  {/* Checkbox */}
+                  <TableCell className="py-4 px-4" style={{ width: '44px' }}>
+                    {selectMode && (
+                      <div
+                        onClick={(e) => { e.stopPropagation(); toggleSelect(rec.dbId!); }}
+                        style={{
+                          width: '18px', height: '18px', borderRadius: '4px', cursor: 'pointer',
+                          border: isSelected ? '2px solid #2D6A4F' : '2px solid var(--text-secondary)',
+                          backgroundColor: isSelected ? '#2D6A4F' : 'transparent',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          transition: 'all 0.15s ease',
+                        }}
+                      >
+                        {isSelected && (
+                          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                        )}
+                      </div>
+                    )}
+                  </TableCell>
                   {/* Pet */}
                   <TableCell className="py-4 px-4">
                     <div className="flex items-center gap-3">

@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import {
-  Search, Plus, Syringe, AlertTriangle, CheckCircle2, Clock, Filter,
+  Search, Plus, Syringe, AlertTriangle, CheckCircle2, Clock,
 } from 'lucide-react';
 import { StatCard } from '../components/StatCard';
 import { Input } from '../components/ui/input';
@@ -21,19 +21,22 @@ import {
   SelectContent,
   SelectItem,
 } from '../components/ui/select';
+import { Avatar, AvatarImage, AvatarFallback } from '../components/ui/avatar';
+import { supabase } from '../../lib/supabase';
+import { getOrgContext } from '../hooks/useOrgContext';
 
 // ─── Types ───────────────────────────────────────────────────
 
 type VaccineStatus = 'Overdue' | 'Due Soon' | 'Up to Date';
 
 interface VaccineRecord {
-  id: number;
-  petId: number;
+  id: string;
   petName: string;
   petImage: string;
   breed: string;
   species: string;
   ownerName: string;
+  clientId: string;
   vaccine: string;
   lastGiven: string;
   nextDue: string;
@@ -41,10 +44,6 @@ interface VaccineRecord {
   status: VaccineStatus;
   vet: string;
 }
-
-// ─── Mock Data ───────────────────────────────────────────────
-
-const MOCK_VACCINES: VaccineRecord[] = []
 
 // ─── Status Config ───────────────────────────────────────────
 
@@ -62,8 +61,79 @@ export default function VaccinesPage() {
   const [speciesFilter, setSpeciesFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [vetFilter, setVetFilter] = useState('all');
+  const [vaccines, setVaccines] = useState<VaccineRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [vets, setVets] = useState<string[]>([]);
 
-  const filtered = [].filter((v) => {
+  useEffect(() => {
+    (async () => {
+      try {
+        const { organizationId } = await getOrgContext();
+        const { data } = await supabase
+          .from('vaccinations')
+          .select('id, vaccine_name, administered_date, next_due_date, notes, pets!inner(id, name, species, breed, photo_url, client_id, clients!inner(id, first_name, last_name)), staff:staff!vaccinations_administered_by_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
+          .order('administered_date', { ascending: false });
+
+        if (data) {
+          const now = new Date();
+          const mapped: VaccineRecord[] = data.map((v: any) => {
+            const lastGiven = v.administered_date
+              ? new Date(v.administered_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+              : '—';
+            const nextDue = v.next_due_date
+              ? new Date(v.next_due_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+              : '—';
+            const daysUntilDue = v.next_due_date
+              ? Math.ceil((new Date(v.next_due_date).getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+              : 999;
+            let status: VaccineStatus = 'Up to Date';
+            if (v.next_due_date) {
+              if (daysUntilDue < 0) status = 'Overdue';
+              else if (daysUntilDue <= 30) status = 'Due Soon';
+            }
+            const vetName = v.staff?.profiles
+              ? `Dr. ${v.staff.profiles.first_name} ${v.staff.profiles.last_name}`
+              : '—';
+            return {
+              id: v.id,
+              petName: v.pets?.name ?? '—',
+              petImage: v.pets?.photo_url || '',
+              breed: v.pets?.breed || '—',
+              species: v.pets?.species || '—',
+              ownerName: v.pets?.clients ? `${v.pets.clients.first_name} ${v.pets.clients.last_name}` : '—',
+              clientId: v.pets?.clients?.id || '',
+              vaccine: v.vaccine_name,
+              lastGiven,
+              nextDue,
+              daysUntilDue,
+              status,
+              vet: vetName,
+            };
+          });
+          setVaccines(mapped);
+          // Extract unique vet names for the filter
+          const uniqueVets = Array.from(new Set(mapped.map(v => v.vet).filter(v => v !== '—')));
+          setVets(uniqueVets);
+        }
+      } catch (e) {
+        console.error('Error loading vaccines:', e);
+      }
+      setLoading(false);
+    })();
+  }, []);
+
+  // Compute stat card values from real data
+  const overdue = vaccines.filter(v => v.status === 'Overdue').length;
+  const dueThisWeek = vaccines.filter(v => v.daysUntilDue >= 0 && v.daysUntilDue <= 7).length;
+  const dueThisMonth = vaccines.filter(v => v.daysUntilDue >= 0 && v.daysUntilDue <= 30).length;
+  const upToDate = vaccines.filter(v => v.status === 'Up to Date').length;
+  const totalVaccines = vaccines.length;
+  const upToDatePct = totalVaccines > 0 ? Math.round((upToDate / totalVaccines) * 100) : 0;
+
+  // Get unique species
+  const speciesOptions = Array.from(new Set(vaccines.map(v => v.species).filter(s => s !== '—')));
+
+  const filtered = vaccines.filter((v) => {
     const q = search.toLowerCase();
     const matchesSearch =
       v.petName.toLowerCase().includes(q) ||
@@ -85,7 +155,7 @@ export default function VaccinesPage() {
             Track vaccination schedules across all patients.
           </p>
         </div>
-        <Button>
+        <Button onClick={() => navigate('/appointments')}>
           <Plus className="w-4 h-4" />
           Record Vaccination
         </Button>
@@ -95,31 +165,31 @@ export default function VaccinesPage() {
       <div className="grid grid-cols-4 gap-6 mb-8">
         <StatCard
           title="Overdue"
-          value={7}
+          value={overdue}
           icon={AlertTriangle}
           iconColor="#d4183d"
           trend={{ value: 'Needs immediate attention', isPositive: false }}
         />
         <StatCard
           title="Due This Week"
-          value={11}
+          value={dueThisWeek}
           icon={Clock}
           iconColor="#F4A261"
           trend={{ value: 'Next 7 days', isPositive: false }}
         />
         <StatCard
           title="Due This Month"
-          value={18}
+          value={dueThisMonth}
           icon={Syringe}
           iconColor="#3B82F6"
           trend={{ value: 'Next 30 days', isPositive: true }}
         />
         <StatCard
           title="Up to Date"
-          value={1847}
+          value={upToDate}
           icon={CheckCircle2}
           iconColor="var(--brand-green-text)"
-          trend={{ value: '96% of active patients', isPositive: true }}
+          trend={{ value: `${upToDatePct}% of records`, isPositive: true }}
         />
       </div>
 
@@ -140,11 +210,9 @@ export default function VaccinesPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Species</SelectItem>
-            <SelectItem value="Dog">Dog</SelectItem>
-            <SelectItem value="Cat">Cat</SelectItem>
-            <SelectItem value="Rabbit">Rabbit</SelectItem>
-            <SelectItem value="Bird">Bird</SelectItem>
-            <SelectItem value="Other">Other</SelectItem>
+            {speciesOptions.map(s => (
+              <SelectItem key={s} value={s}>{s}</SelectItem>
+            ))}
           </SelectContent>
         </Select>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -164,9 +232,9 @@ export default function VaccinesPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Vets</SelectItem>
-            <SelectItem value="Dr. Chen">Dr. Chen</SelectItem>
-            <SelectItem value="Dr. Patel">Dr. Patel</SelectItem>
-            <SelectItem value="Dr. Williams">Dr. Williams</SelectItem>
+            {vets.map(v => (
+              <SelectItem key={v} value={v}>{v}</SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>
@@ -184,7 +252,24 @@ export default function VaccinesPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filtered.map((v) => {
+            {loading ? (
+              <TableRow>
+                <TableCell colSpan={7} className="text-center py-12">
+                  <p className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>Loading vaccination records...</p>
+                </TableCell>
+              </TableRow>
+            ) : filtered.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={7} className="text-center py-12">
+                  <Syringe className="w-8 h-8 text-[var(--text-secondary)] mx-auto mb-3 opacity-40" />
+                  <p className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>
+                    {search || speciesFilter !== 'all' || statusFilter !== 'all' || vetFilter !== 'all'
+                      ? 'No vaccination records match your filters.'
+                      : 'No vaccination records yet. Complete a vaccination visit to see records here.'}
+                  </p>
+                </TableCell>
+              </TableRow>
+            ) : filtered.map((v) => {
               const cfg = STATUS_CONFIG[v.status];
               const StatusIcon = cfg.icon;
 
@@ -195,7 +280,7 @@ export default function VaccinesPage() {
                     {Math.abs(v.daysUntilDue)}d overdue
                   </span>
                 );
-              } else if (v.daysUntilDue < 30) {
+              } else if (v.daysUntilDue <= 30) {
                 daysDisplay = (
                   <span style={{ fontSize: '14px', fontWeight: 600, color: '#F4A261' }}>
                     {v.daysUntilDue}d
@@ -213,17 +298,15 @@ export default function VaccinesPage() {
                 <TableRow
                   key={v.id}
                   className="hover:bg-[var(--surface-elevated)] cursor-pointer transition-colors"
-                  onClick={() => navigate(`/clients/${v.petId}`)}
+                  onClick={() => v.clientId && navigate(`/clients/${v.clientId}`)}
                 >
                   {/* Pet */}
                   <TableCell className="py-4 px-4">
                     <div className="flex items-center gap-3">
-                      <img
-                        src={v.petImage}
-                        alt={v.petName}
-                        className="w-10 h-10 object-cover"
-                        style={{ borderRadius: '9999px' }}
-                      />
+                      <Avatar className="w-10 h-10">
+                        <AvatarImage src={v.petImage} alt={v.petName} className="object-cover" />
+                        <AvatarFallback style={{ fontSize: '13px', fontWeight: 600 }}>{v.petName.slice(0, 2)}</AvatarFallback>
+                      </Avatar>
                       <div>
                         <p className="text-[var(--text-primary)]" style={{ fontSize: '15px', fontWeight: 600 }}>
                           {v.petName}
@@ -294,7 +377,7 @@ export default function VaccinesPage() {
         {/* Footer */}
         <div className="px-6 py-4 border-t border-[var(--border-color)] flex items-center justify-between">
           <p className="text-[var(--text-secondary)]" style={{ fontSize: '14px', fontWeight: 400 }}>
-            Showing {filtered.length} of {0} vaccine records
+            Showing {filtered.length} of {vaccines.length} vaccine records
           </p>
         </div>
       </div>

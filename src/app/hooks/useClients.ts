@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
 import { getOrgContext } from './useOrgContext'
 
@@ -40,6 +40,47 @@ export interface AddClientValues {
   zip?: string
   notes?: string
 }
+
+// ─── Standalone cascade-delete helpers (no hooks) ─────────────
+
+/** Delete all data for a single pet across every table + storage */
+export async function deletePetCascade(petId: string) {
+  // 1. Delete pet-dependent records (deepest first)
+  await Promise.all([
+    supabase.from('pet_weight_history').delete().eq('pet_id', petId),
+    supabase.from('lab_results').delete().eq('pet_id', petId),
+    supabase.from('medications').delete().eq('pet_id', petId),
+    supabase.from('vaccinations').delete().eq('pet_id', petId),
+    supabase.from('pet_allergies').delete().eq('pet_id', petId),
+    supabase.from('pet_conditions').delete().eq('pet_id', petId),
+    supabase.from('pet_treatments').delete().eq('pet_id', petId),
+    supabase.from('pet_notes').delete().eq('pet_id', petId),
+  ])
+
+  // 2. Delete shared-FK records (appointments, medical_records, tasks)
+  await Promise.all([
+    supabase.from('appointments').delete().eq('pet_id', petId),
+    supabase.from('medical_records').delete().eq('pet_id', petId),
+    supabase.from('tasks').delete().eq('pet_id', petId),
+  ])
+
+  // 3. Delete photos from storage (try both buckets)
+  try {
+    const { data: files1 } = await supabase.storage.from('pet-photos').list(petId)
+    if (files1 && files1.length > 0) {
+      await supabase.storage.from('pet-photos').remove(files1.map(f => `${petId}/${f.name}`))
+    }
+    const { data: files2 } = await supabase.storage.from('pet-images').list(petId)
+    if (files2 && files2.length > 0) {
+      await supabase.storage.from('pet-images').remove(files2.map(f => `${petId}/${f.name}`))
+    }
+  } catch {}
+
+  // 4. Delete the pet itself
+  await supabase.from('pets').delete().eq('id', petId)
+}
+
+// ─── Hook ─────────────────────────────────────────────────────
 
 export function useClients() {
   const [clients, setClients] = useState<ClientRow[]>([])
@@ -114,9 +155,31 @@ export function useClients() {
 
   const deleteClient = useCallback(async (id: string) => {
     const { organizationId } = await getOrgContext()
-    // Delete associated pets first (cascade)
-    await supabase.from('pets').delete().eq('client_id', id).eq('organization_id', organizationId)
-    // Then delete the client
+
+    // 1. Get all pet IDs for this client
+    const { data: pets } = await supabase
+      .from('pets')
+      .select('id')
+      .eq('client_id', id)
+      .eq('organization_id', organizationId)
+
+    // 2. Cascade-delete every pet
+    if (pets && pets.length > 0) {
+      for (const pet of pets) {
+        await deletePetCascade(pet.id)
+      }
+    }
+
+    // 3. Delete client-only FK records
+    await Promise.all([
+      supabase.from('invoices').delete().eq('client_id', id),
+      supabase.from('staff_ratings').delete().eq('client_id', id),
+      supabase.from('appointments').delete().eq('client_id', id),
+      supabase.from('medical_records').delete().eq('client_id', id),
+      supabase.from('tasks').delete().eq('client_id', id),
+    ])
+
+    // 4. Delete the client
     const { error: err } = await supabase.from('clients').delete().eq('id', id).eq('organization_id', organizationId)
     if (!err) {
       setClients(prev => prev.filter(c => c.id !== id))

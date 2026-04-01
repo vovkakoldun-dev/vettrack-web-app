@@ -442,7 +442,7 @@ export default function RecordDetailPage() {
       setLoading(true);
       const { data } = await supabase
         .from('medical_records')
-        .select('*, pets(id, name, species, breed, photo_url, date_of_birth, sex, weight_kg, color, microchip_no), clients(id, first_name, last_name, email, phone), staff!medical_records_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
+        .select('*, pets(id, name, species, breed, photo_url, date_of_birth, sex, weight_kg, color, microchip_no), clients(id, first_name, last_name, email, phone), staff!medical_records_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name)), record_vitals(weight_kg, temperature_c, heart_rate_bpm, respiratory_rate_bpm, blood_pressure_systolic, blood_pressure_diastolic, body_condition_score, pain_score, hydration_status), record_diagnoses(type, description, icd_code, notes), record_treatments(procedure_name, description, post_visit_instructions, activity_restrictions, home_care_plan)')
         .eq('id', id)
         .single();
       if (data) {
@@ -486,7 +486,16 @@ export default function RecordDetailPage() {
           },
           visit: {
             date: visitDate.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
-            time: data.visit_time ?? '—',
+            time: (() => {
+              if (!data.visit_time) return '—';
+              const parts = data.visit_time.split(':');
+              let h = parseInt(parts[0], 10);
+              const m = parts[1] || '00';
+              const ampm = h >= 12 ? 'PM' : 'AM';
+              if (h > 12) h -= 12;
+              if (h === 0) h = 12;
+              return `${h}:${m} ${ampm}`;
+            })(),
             reason: data.reason ?? '—',
             vet: (data as any).staff?.profiles ? `Dr. ${(data as any).staff.profiles.first_name} ${(data as any).staff.profiles.last_name}` : '—',
             vetLicense: '—',
@@ -497,16 +506,91 @@ export default function RecordDetailPage() {
             recordType: (data.record_type || 'Visit') as RecordType,
             status: (data.status || 'Final') as RecordStatus,
           },
-          vitals: { weight: '—', temperature: '—', heartRate: '—', respiratoryRate: '—', bloodPressure: '—', bodyConditionScore: '—', painScore: '—', hydrationStatus: '—' },
-          diagnosis: { primary: data.clinical_notes || '—', secondary: [], differentials: [], notes: '', icdCodes: [] },
-          treatmentPlan: { procedures: [], instructions: '', restrictions: [], homeCarePlan: '' },
-          medications: [],
-          labResults: [],
+          vitals: (() => {
+            const rv = Array.isArray((data as any).record_vitals) ? (data as any).record_vitals[0] : (data as any).record_vitals;
+            const weight = rv?.weight_kg ? String(rv.weight_kg) : null;
+            const temp = rv?.temperature_c ? String((rv.temperature_c * 9/5 + 32).toFixed(1)) : null;
+            const hr = rv?.heart_rate_bpm ? String(rv.heart_rate_bpm) : null;
+            const rr = rv?.respiratory_rate_bpm ? String(rv.respiratory_rate_bpm) : null;
+            const bpSys = rv?.blood_pressure_systolic;
+            const bpDia = rv?.blood_pressure_diastolic;
+            const bcs = rv?.body_condition_score ? String(rv.body_condition_score) : null;
+            const ps = rv?.pain_score ? String(rv.pain_score) : null;
+            const hydration = rv?.hydration_status || null;
+            return {
+              weight: weight ? `${weight} kg` : '—',
+              temperature: temp ? `${temp}°F` : '—',
+              heartRate: hr ? `${hr} bpm` : '—',
+              respiratoryRate: rr ? `${rr} brpm` : '—',
+              bloodPressure: bpSys && bpDia ? `${bpSys}/${bpDia} mmHg` : '—',
+              bodyConditionScore: bcs ? `${bcs}/9` : '—',
+              painScore: ps ? `${ps}/10` : '—',
+              hydrationStatus: hydration || '—',
+            };
+          })(),
+          diagnosis: (() => {
+            const dxRows = (data as any).record_diagnoses || [];
+            const primaryDx = dxRows.find((d: any) => d.type === 'primary')?.description || '—';
+            const secondary = dxRows.filter((d: any) => d.type === 'secondary').map((d: any) => d.description);
+            const differentials = dxRows.filter((d: any) => d.type === 'differential').map((d: any) => d.description);
+            const icdCodes = dxRows.filter((d: any) => d.icd_code).map((d: any) => ({ code: d.icd_code, description: d.description || '' }));
+            return {
+              primary: primaryDx,
+              secondary,
+              differentials,
+              notes: (data as any).clinical_notes || dxRows.map((d: any) => d.notes).filter(Boolean).join('\n') || '',
+              icdCodes,
+            };
+          })(),
+          treatmentPlan: (() => {
+            const txRows = (data as any).record_treatments || [];
+            const procedures = txRows.map((t: any) => ({ name: t.procedure_name || '—', notes: t.description || '', status: 'Completed' }));
+            const instructions = txRows.map((t: any) => t.post_visit_instructions).filter(Boolean).join('\n') || '';
+            const restrictions = txRows.map((t: any) => t.activity_restrictions).filter(Boolean);
+            const homeCarePlan = txRows.map((t: any) => t.home_care_plan).filter(Boolean).join('\n') || '';
+            return { procedures, instructions, restrictions, homeCarePlan };
+          })(),
+          medications: await (async () => {
+            try {
+              const { data: medsData } = await supabase
+                .from('medications')
+                .select('name, dosage, frequency, route, duration_days, start_date, notes, prescribed_by')
+                .eq('record_id', data.id);
+              if (medsData && medsData.length > 0) {
+                return medsData.map((m: any) => ({
+                  name: m.name || '—', dosage: m.dosage || '—', frequency: m.frequency || '—',
+                  route: m.route || '—', duration: m.duration_days ? `${m.duration_days} days` : '—',
+                  prescribedBy: '—', startDate: m.start_date || data.visit_date || '—', notes: m.notes || '',
+                }));
+              }
+              return [];
+            } catch { return []; }
+          })(),
+          labResults: await (async () => {
+            try {
+              const { data: labs } = await supabase
+                .from('lab_results')
+                .select('test_name, result_value, reference_range, unit, flag, tested_at')
+                .eq('record_id', data.id);
+              if (labs && labs.length > 0) {
+                const flagMap: Record<string, LabFlag> = { normal: 'normal', high: 'high', low: 'low', critical: 'critical' };
+                return labs.map((l: any) => ({
+                  testName: l.test_name || '—',
+                  result: l.result_value || 'Pending',
+                  referenceRange: l.reference_range || '—',
+                  unit: l.unit || '',
+                  flag: flagMap[l.flag] || 'Normal',
+                  date: l.tested_at ? new Date(l.tested_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—',
+                }));
+              }
+            } catch {}
+            return [];
+          })(),
           followUp: {
-            nextVisitDate: data.follow_up_date ?? '—',
+            nextVisitDate: data.follow_up_date ? new Date(data.follow_up_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—',
             nextVisitReason: data.follow_up_reason ?? '—',
             notes: data.follow_up_notes ?? '',
-            reminderSet: false,
+            reminderSet: !!data.follow_up_date,
           },
           createdAt: new Date(data.created_at).toLocaleString(),
           lastModified: new Date(data.updated_at).toLocaleString(),

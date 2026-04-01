@@ -6,7 +6,7 @@ import { useProfile } from '../hooks/useProfile';
 import { getOrgContext } from '../hooks/useOrgContext';
 import { showToast } from './ToastNotification';
 import {
-  Home, Calendar, CreditCard, MessageSquare, MessageCircle, Users, FileText, UserCircle,
+  Home, Calendar, CreditCard, MessageSquare, MessageCircle, Users, FileText, UserCircle, Clock,
   PawPrint, Sun, Moon, ChevronLeft, ChevronRight, LogOut, ChevronUp, Settings, CheckSquare,
   Bell,
 } from 'lucide-react';
@@ -31,6 +31,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { name: 'Dashboard',      icon: Home,            path: '/admin' },
       { name: 'My Portal',      icon: UserCircle,     path: '/admin/my-portal' },
+      { name: 'Shifts',         icon: Clock,          path: '/admin/shifts' },
       { name: 'Team Chat',      icon: MessageCircle,  path: '/admin/chat' },
       { name: 'Communications', icon: MessageSquare,  path: '/admin/communications', badge: 5 },
       { name: 'Notifications',  icon: Bell,           path: '/admin/notifications' },

@@ -11,6 +11,8 @@ import { Textarea } from '../../components/ui/textarea';
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '../../components/ui/select';
+import { supabase } from '../../../lib/supabase';
+import { getOrgContext } from '../../hooks/useOrgContext';
 
 // ─── Theme ────────────────────────────────────────────────────
 const ACCENT   = '#F4A261';
@@ -58,70 +60,21 @@ const ALL_CATS: Category[] = [
   'Lab & Imaging', 'Emergency', 'Prescriptions', 'Specialist',
 ];
 
-// ─── Mock Data ────────────────────────────────────────────────
-const INITIAL_SERVICES: Service[] = [
-  // Wellness
-  { id: 's001', name: 'Annual Wellness Exam',         category: 'Wellness',      price: 85,   duration: 30, description: 'Comprehensive physical exam including weight, temperature, heart & lung auscultation, and full body assessment.', active: true,  popular: true,  taxable: false, sku: 'WEL-001' },
-  { id: 's002', name: 'Puppy/Kitten Wellness Exam',   category: 'Wellness',      price: 75,   duration: 30, description: 'Initial health check for puppies and kittens under 6 months, includes parasite screening.', active: true,  popular: true,  taxable: false, sku: 'WEL-002' },
-  { id: 's003', name: 'Senior Wellness Package',      category: 'Wellness',      price: 145,  duration: 45, description: 'Comprehensive exam for pets 7+ years including blood panel, urinalysis, and blood pressure.', active: true,  popular: false, taxable: false, sku: 'WEL-003' },
-  { id: 's004', name: 'Progress/Recheck Exam',        category: 'Wellness',      price: 55,   duration: 20, description: 'Follow-up visit to assess response to treatment or monitor a diagnosed condition.', active: true,  popular: false, taxable: false, sku: 'WEL-004' },
-  { id: 's005', name: 'Nutrition Consultation',       category: 'Wellness',      price: 65,   duration: 30, description: 'Dietary assessment and personalized nutrition plan for weight management or health conditions.', active: true,  popular: false, taxable: false, sku: 'WEL-005' },
-
-  // Vaccinations
-  { id: 's010', name: 'Rabies Vaccine (1-year)',      category: 'Vaccinations',  price: 28,   duration: 10, description: 'USDA-licensed killed-virus rabies vaccine. Required by law in most states.', active: true,  popular: true,  taxable: true,  sku: 'VAC-001' },
-  { id: 's011', name: 'Rabies Vaccine (3-year)',      category: 'Vaccinations',  price: 32,   duration: 10, description: '3-year approved rabies vaccination for dogs and cats.', active: true,  popular: true,  taxable: true,  sku: 'VAC-002' },
-  { id: 's012', name: 'DHPP (Dog Core Combo)',        category: 'Vaccinations',  price: 38,   duration: 10, description: 'Distemper, Hepatitis, Parvovirus, and Parainfluenza combination vaccine.', active: true,  popular: true,  taxable: true,  sku: 'VAC-003' },
-  { id: 's013', name: 'Bordetella (Kennel Cough)',    category: 'Vaccinations',  price: 24,   duration: 10, description: 'Intranasal Bordetella bronchiseptica vaccine. Required for boarding and grooming.', active: true,  popular: false, taxable: true,  sku: 'VAC-004' },
-  { id: 's014', name: 'FVRCP (Cat Core Combo)',       category: 'Vaccinations',  price: 34,   duration: 10, description: 'Feline Viral Rhinotracheitis, Calicivirus, and Panleukopenia combination.', active: true,  popular: true,  taxable: true,  sku: 'VAC-005' },
-  { id: 's015', name: 'Feline Leukemia (FeLV)',       category: 'Vaccinations',  price: 36,   duration: 10, description: 'Annual FeLV vaccine for cats at risk of outdoor exposure.', active: true,  popular: false, taxable: true,  sku: 'VAC-006' },
-  { id: 's016', name: 'Leptospirosis',                category: 'Vaccinations',  price: 30,   duration: 10, description: 'Protection against Leptospira bacteria. Recommended for dogs with outdoor exposure.', active: true,  popular: false, taxable: true,  sku: 'VAC-007' },
-  { id: 's017', name: 'Lyme Disease',                 category: 'Vaccinations',  price: 34,   duration: 10, description: 'Recommended for dogs in tick-endemic regions or with outdoor lifestyle.', active: false, popular: false, taxable: true,  sku: 'VAC-008' },
-
-  // Surgery
-  { id: 's020', name: 'Spay — Cat',                  category: 'Surgery',       price: 320,  duration: 90, description: 'Ovariohysterectomy for female cats. Includes pre-anesthetic bloodwork and IV catheter.', active: true,  popular: true,  taxable: false, sku: 'SUR-001' },
-  { id: 's021', name: 'Neuter — Cat',                category: 'Surgery',       price: 240,  duration: 60, description: 'Orchiectomy for male cats. Includes anesthesia and post-op monitoring.', active: true,  popular: true,  taxable: false, sku: 'SUR-002' },
-  { id: 's022', name: 'Spay — Dog (Small, <20 lbs)', category: 'Surgery',       price: 420,  duration: 90, description: 'Ovariohysterectomy for small dogs. Includes complete surgical pack.', active: true,  popular: true,  taxable: false, sku: 'SUR-003' },
-  { id: 's023', name: 'Spay — Dog (Med, 20–50 lbs)', category: 'Surgery',       price: 520,  duration: 120,description: 'Ovariohysterectomy for medium-sized dogs.', active: true,  popular: false, taxable: false, sku: 'SUR-004' },
-  { id: 's024', name: 'Spay — Dog (Large, >50 lbs)', category: 'Surgery',       price: 640,  duration: 150,description: 'Ovariohysterectomy for large/giant breed dogs.', active: true,  popular: false, taxable: false, sku: 'SUR-005' },
-  { id: 's025', name: 'Neuter — Dog (Small)',        category: 'Surgery',       price: 340,  duration: 60, description: 'Orchiectomy for small dogs under 20 lbs.', active: true,  popular: false, taxable: false, sku: 'SUR-006' },
-  { id: 's026', name: 'TPLO (Cruciate Repair)',      category: 'Surgery',       price: 2800, duration: 180,description: 'Tibial Plateau Leveling Osteotomy for cranial cruciate ligament rupture. Includes implants.', active: true,  popular: false, taxable: false, sku: 'SUR-007' },
-  { id: 's027', name: 'Soft Tissue Surgery (Minor)', category: 'Surgery',       price: 480,  duration: 90, description: 'Lump/mass removal, wound repair, eyelid procedures. Priced per procedure complexity.', active: true,  popular: false, taxable: false, sku: 'SUR-008' },
-  { id: 's028', name: 'Exploratory Laparotomy',      category: 'Surgery',       price: 1600, duration: 180,description: 'Abdominal exploration for foreign body, GI obstruction, or organ biopsy.', active: true,  popular: false, taxable: false, sku: 'SUR-009' },
-
-  // Dental
-  { id: 's030', name: 'Dental Prophylaxis (Grade 1–2)', category: 'Dental',    price: 280,  duration: 60, description: 'Full scaling, polishing under anesthesia. Includes dental radiographs.', active: true,  popular: true,  taxable: false, sku: 'DEN-001' },
-  { id: 's031', name: 'Dental Prophylaxis (Grade 3–4)', category: 'Dental',    price: 420,  duration: 90, description: 'Advanced periodontal treatment for severe tartar and gingival disease.', active: true,  popular: false, taxable: false, sku: 'DEN-002' },
-  { id: 's032', name: 'Tooth Extraction (Simple)',   category: 'Dental',        price: 85,   duration: 20, description: 'Single tooth extraction, loosened or non-fragmented root.', active: true,  popular: false, taxable: false, sku: 'DEN-003' },
-  { id: 's033', name: 'Tooth Extraction (Surgical)', category: 'Dental',        price: 160,  duration: 40, description: 'Surgical extraction requiring sectioning and alveoloplasty.', active: true,  popular: false, taxable: false, sku: 'DEN-004' },
-  { id: 's034', name: 'Dental Radiograph (Full)',    category: 'Dental',        price: 95,   duration: 20, description: 'Full-mouth digital dental radiographs. Included with grade 3–4 prophylaxis.', active: true,  popular: false, taxable: false, sku: 'DEN-005' },
-
-  // Lab & Imaging
-  { id: 's040', name: 'CBC + Chemistry Panel',       category: 'Lab & Imaging', price: 145,  duration: 30, description: 'Complete blood count and comprehensive metabolic panel. In-house, same-day results.', active: true,  popular: true,  taxable: false, sku: 'LAB-001' },
-  { id: 's041', name: 'Urinalysis (Complete)',       category: 'Lab & Imaging', price: 55,   duration: 15, description: 'Dipstick, sediment examination, and specific gravity.', active: true,  popular: false, taxable: false, sku: 'LAB-002' },
-  { id: 's042', name: 'Thyroid Panel (T4)',          category: 'Lab & Imaging', price: 75,   duration: 15, description: 'Total T4 for hypothyroidism/hyperthyroidism screening.', active: true,  popular: false, taxable: false, sku: 'LAB-003' },
-  { id: 's043', name: 'Radiograph — 2 Views',       category: 'Lab & Imaging', price: 140,  duration: 20, description: 'Digital radiographs, two projections. Orthopedic, thoracic, or abdominal.', active: true,  popular: true,  taxable: false, sku: 'LAB-004' },
-  { id: 's044', name: 'Ultrasound — Abdominal',     category: 'Lab & Imaging', price: 320,  duration: 45, description: 'Real-time abdominal ultrasound including all organs. Includes report.', active: true,  popular: false, taxable: false, sku: 'LAB-005' },
-  { id: 's045', name: 'Heartworm Test',              category: 'Lab & Imaging', price: 38,   duration: 10, description: 'Antigen test for Dirofilaria immitis. IDEXX 4Dx Plus.', active: true,  popular: true,  taxable: false, sku: 'LAB-006' },
-  { id: 's046', name: 'Fecal Floatation',            category: 'Lab & Imaging', price: 32,   duration: 10, description: 'Centrifugal fecal floatation for intestinal parasites.', active: true,  popular: false, taxable: false, sku: 'LAB-007' },
-
-  // Emergency
-  { id: 's050', name: 'Emergency Exam Fee',          category: 'Emergency',     price: 145,  duration: 30, description: 'Triage and emergency consultation fee. Applied to treatment costs.', active: true,  popular: false, taxable: false, sku: 'EMR-001' },
-  { id: 's051', name: 'After-Hours Surcharge',       category: 'Emergency',     price: 75,   duration: 0,  description: 'Applied to all services rendered outside normal business hours.', active: true,  popular: false, taxable: false, sku: 'EMR-002' },
-  { id: 's052', name: 'IV Fluid Therapy (per 24h)',  category: 'Emergency',     price: 180,  duration: 0,  description: 'Intravenous fluid therapy including catheter placement and fluids.', active: true,  popular: false, taxable: false, sku: 'EMR-003' },
-  { id: 's053', name: 'Hospitalization (per night)', category: 'Emergency',     price: 120,  duration: 0,  description: 'Overnight hospitalization with monitoring and basic nursing care.', active: true,  popular: false, taxable: false, sku: 'EMR-004' },
-  { id: 's054', name: 'Oxygen Therapy (per hour)',   category: 'Emergency',     price: 45,   duration: 0,  description: 'Supplemental oxygen via cage, mask, or flow-by as needed.', active: false, popular: false, taxable: false, sku: 'EMR-005' },
-
-  // Prescriptions
-  { id: 's060', name: 'Prescription Dispensing Fee', category: 'Prescriptions', price: 18,   duration: 5,  description: 'Per-prescription fee for label preparation and dispensing.', active: true,  popular: false, taxable: true,  sku: 'RX-001' },
-  { id: 's061', name: 'Prescription Diet Consult',   category: 'Prescriptions', price: 55,   duration: 20, description: 'Evaluation and prescription of therapeutic diets (renal, GI, weight mgmt).', active: true,  popular: false, taxable: false, sku: 'RX-002' },
-  { id: 's062', name: 'Compounding Fee',             category: 'Prescriptions', price: 35,   duration: 10, description: 'Custom compounding of medications not available in standard forms.', active: true,  popular: false, taxable: true,  sku: 'RX-003' },
-
-  // Specialist
-  { id: 's070', name: 'Cardiology Consultation',     category: 'Specialist',    price: 380,  duration: 60, description: 'Cardiac evaluation including echocardiogram interpretation and management plan.', active: true,  popular: false, taxable: false, sku: 'SPC-001' },
-  { id: 's071', name: 'Dermatology Consultation',    category: 'Specialist',    price: 280,  duration: 45, description: 'Skin/coat/ear evaluation, allergy testing, cytology.', active: true,  popular: false, taxable: false, sku: 'SPC-002' },
-  { id: 's072', name: 'Ophthalmology Exam',          category: 'Specialist',    price: 220,  duration: 45, description: 'Slit-lamp, tonometry, fundoscopy, and ERG if indicated.', active: true,  popular: false, taxable: false, sku: 'SPC-003' },
-  { id: 's073', name: 'Oncology Consultation',       category: 'Specialist',    price: 420,  duration: 60, description: 'Staging, biopsy review, and treatment planning for neoplastic disease.', active: false, popular: false, taxable: false, sku: 'SPC-004' },
-];
+// ─── DB → local mapping helper ───────────────────────────────
+function mapDbService(s: Record<string, unknown>): Service {
+  return {
+    id: s.id as string,
+    name: s.name as string,
+    category: s.category as Category,
+    price: s.price as number,
+    duration: s.duration_minutes as number,
+    description: (s.description as string) || '',
+    active: s.is_active as boolean,
+    popular: s.is_popular as boolean,
+    taxable: s.is_taxable as boolean,
+    sku: (s.sku as string) || '',
+  };
+}
 
 // ─── Add Service Form (default) ───────────────────────────────
 const BLANK_SERVICE: Omit<Service, 'id'> = {
@@ -343,46 +296,160 @@ function ServiceDrawer({
 // ─── Main Page ────────────────────────────────────────────────
 
 export default function SuperAdminServicesPage() {
-  const [services, setServices] = useState<Service[]>(INITIAL_SERVICES);
+  const [services, setServices] = useState<Service[]>([]);
+  const [loading, setLoading]   = useState(true);
   const [activeTab, setActiveTab] = useState<Category | 'All'>('All');
   const [search, setSearch]       = useState('');
   const [showInactive, setShowInactive] = useState(false);
   const [drawerService, setDrawerService] = useState<Service | null | 'new'>(null);
-  const [unsaved, setUnsaved]     = useState(false);
 
-  const updatePrice = (id: string, price: number) => {
+  // ── Fetch from Supabase ──
+  async function fetchServices() {
+    setLoading(true);
+    try {
+      const { organizationId } = await getOrgContext();
+      const { data, error } = await supabase
+        .from('services')
+        .select('*')
+        .eq('organization_id', organizationId)
+        .order('sort_order', { ascending: true });
+      if (!error && data) {
+        setServices(data.map(mapDbService));
+      }
+    } catch (e) {
+      console.error('Failed to fetch services:', e);
+    }
+    setLoading(false);
+  }
+
+  useEffect(() => { fetchServices(); }, []);
+
+  // ── Notify other components ──
+  const dispatchChange = () => window.dispatchEvent(new CustomEvent('serviceDataChanged'));
+
+  // ── CRUD helpers ──
+  const updatePrice = async (id: string, price: number) => {
     setServices(prev => prev.map(s => s.id === id ? { ...s, price } : s));
-    setUnsaved(true);
+    try {
+      const { organizationId } = await getOrgContext();
+      await supabase.from('services').update({ price }).eq('id', id).eq('organization_id', organizationId);
+      dispatchChange();
+    } catch (e) {
+      console.error('Failed to update price:', e);
+      fetchServices();
+    }
   };
 
-  const toggleActive = (id: string) => {
+  const toggleActive = async (id: string) => {
+    const svc = services.find(s => s.id === id);
+    if (!svc) return;
     setServices(prev => prev.map(s => s.id === id ? { ...s, active: !s.active } : s));
-    setUnsaved(true);
+    try {
+      const { organizationId } = await getOrgContext();
+      await supabase.from('services').update({ is_active: !svc.active }).eq('id', id).eq('organization_id', organizationId);
+      dispatchChange();
+    } catch (e) {
+      console.error('Failed to toggle active:', e);
+      fetchServices();
+    }
   };
 
-  const saveService = (svc: Service) => {
+  const saveService = async (svc: Service) => {
+    // Optimistic local update
     setServices(prev => {
       const idx = prev.findIndex(s => s.id === svc.id);
       if (idx >= 0) { const n = [...prev]; n[idx] = svc; return n; }
       return [svc, ...prev];
     });
-    setUnsaved(true);
+
+    try {
+      const { organizationId } = await getOrgContext();
+      const isExisting = services.some(s => s.id === svc.id);
+
+      if (isExisting) {
+        // Update existing service
+        await supabase.from('services').update({
+          name: svc.name,
+          category: svc.category,
+          price: svc.price,
+          duration_minutes: svc.duration,
+          description: svc.description,
+          is_active: svc.active,
+          is_popular: svc.popular,
+          is_taxable: svc.taxable,
+          sku: svc.sku,
+        }).eq('id', svc.id).eq('organization_id', organizationId);
+      } else {
+        // Insert new service
+        const { data } = await supabase.from('services').insert({
+          organization_id: organizationId,
+          name: svc.name,
+          category: svc.category,
+          price: svc.price,
+          duration_minutes: svc.duration,
+          description: svc.description,
+          is_active: svc.active,
+          is_popular: svc.popular,
+          is_taxable: svc.taxable,
+          sku: svc.sku,
+          sort_order: services.length,
+        }).select().single();
+
+        // Replace temp id with DB-generated id
+        if (data) {
+          setServices(prev => prev.map(s => s.id === svc.id ? mapDbService(data) : s));
+        }
+      }
+      dispatchChange();
+    } catch (e) {
+      console.error('Failed to save service:', e);
+      fetchServices();
+    }
   };
 
-  const deleteService = (id: string) => {
+  const deleteService = async (id: string) => {
     setServices(prev => prev.filter(s => s.id !== id));
-    setUnsaved(true);
+    try {
+      const { organizationId } = await getOrgContext();
+      await supabase.from('services').delete().eq('id', id).eq('organization_id', organizationId);
+      dispatchChange();
+    } catch (e) {
+      console.error('Failed to delete service:', e);
+      fetchServices();
+    }
   };
 
-  const duplicateService = (svc: Service) => {
-    const copy: Service = { ...svc, id: `s${Date.now()}`, name: `${svc.name} (Copy)`, sku: `${svc.sku}-COPY`, active: false };
-    setServices(prev => {
-      const idx = prev.findIndex(s => s.id === svc.id);
-      const n = [...prev];
-      n.splice(idx + 1, 0, copy);
-      return n;
-    });
-    setUnsaved(true);
+  const duplicateService = async (svc: Service) => {
+    const newName = `${svc.name} (Copy)`;
+    try {
+      const { organizationId } = await getOrgContext();
+      const { data } = await supabase.from('services').insert({
+        organization_id: organizationId,
+        name: newName,
+        category: svc.category,
+        price: svc.price,
+        duration_minutes: svc.duration,
+        description: svc.description,
+        is_active: true,
+        is_popular: false,
+        is_taxable: svc.taxable,
+        sku: '',
+        sort_order: services.length,
+      }).select().single();
+      if (data) {
+        const mapped = mapDbService(data);
+        setServices(prev => {
+          const idx = prev.findIndex(s => s.id === svc.id);
+          const n = [...prev];
+          n.splice(idx + 1, 0, mapped);
+          return n;
+        });
+      }
+      dispatchChange();
+    } catch (e) {
+      console.error('Failed to duplicate service:', e);
+      fetchServices();
+    }
   };
 
   const filtered = services.filter(s => {
@@ -394,7 +461,7 @@ export default function SuperAdminServicesPage() {
   });
 
   const totalActive  = services.filter(s => s.active).length;
-  const avgPrice     = Math.round(services.filter(s => s.active).reduce((a, s) => a + s.price, 0) / totalActive);
+  const avgPrice     = totalActive > 0 ? Math.round(services.filter(s => s.active).reduce((a, s) => a + s.price, 0) / totalActive) : 0;
   const highestPrice = [...services].sort((a, b) => b.price - a.price)[0];
   const popularCount = services.filter(s => s.popular && s.active).length;
 
@@ -406,7 +473,63 @@ export default function SuperAdminServicesPage() {
   return (
     <div className="max-w-[1440px] mx-auto p-8">
 
+      {/* ── Loading skeleton ── */}
+      {loading && (
+        <>
+          {/* Header skeleton */}
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '28px' }}>
+            <div>
+              <div style={{ width: '260px', height: '32px', borderRadius: '8px', backgroundColor: 'var(--surface-elevated)', marginBottom: '8px' }} />
+              <div style={{ width: '360px', height: '16px', borderRadius: '6px', backgroundColor: 'var(--surface-elevated)' }} />
+            </div>
+            <div style={{ width: '130px', height: '36px', borderRadius: '8px', backgroundColor: 'var(--surface-elevated)' }} />
+          </div>
+          {/* KPI cards skeleton */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
+            {[1, 2, 3, 4].map(i => (
+              <div key={i} style={{ backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '16px 18px' }}>
+                <div style={{ width: '80px', height: '11px', borderRadius: '4px', backgroundColor: 'var(--surface-elevated)', marginBottom: '14px' }} />
+                <div style={{ width: '60px', height: '24px', borderRadius: '6px', backgroundColor: 'var(--surface-elevated)', marginBottom: '6px' }} />
+                <div style={{ width: '100px', height: '12px', borderRadius: '4px', backgroundColor: 'var(--surface-elevated)' }} />
+              </div>
+            ))}
+          </div>
+          {/* Category tabs skeleton */}
+          <div style={{ display: 'flex', gap: '6px', marginBottom: '20px' }}>
+            {[70, 90, 70, 60, 100, 85, 100, 80].map((w, i) => (
+              <div key={i} style={{ width: `${w}px`, height: '34px', borderRadius: '9px', backgroundColor: 'var(--surface-elevated)' }} />
+            ))}
+          </div>
+          {/* Table skeleton */}
+          <div style={{ backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)', borderRadius: '14px', overflow: 'hidden' }}>
+            <div style={{ padding: '11px 20px', backgroundColor: 'var(--surface-elevated)', borderBottom: '1px solid var(--border-color)' }}>
+              <div style={{ width: '100%', height: '14px' }} />
+            </div>
+            {[1, 2, 3, 4, 5, 6, 7, 8].map(i => (
+              <div key={i} style={{ display: 'grid', gridTemplateColumns: '2.5fr 140px 100px 80px 70px 90px 100px', gap: '0', padding: '14px 20px', alignItems: 'center', borderBottom: '1px solid var(--border-color)' }}>
+                <div>
+                  <div style={{ width: `${140 + (i % 3) * 40}px`, height: '14px', borderRadius: '4px', backgroundColor: 'var(--surface-elevated)', marginBottom: '6px' }} />
+                  <div style={{ width: `${200 + (i % 2) * 60}px`, height: '12px', borderRadius: '4px', backgroundColor: 'var(--surface-elevated)' }} />
+                </div>
+                <div style={{ width: '80px', height: '22px', borderRadius: '9999px', backgroundColor: 'var(--surface-elevated)' }} />
+                <div style={{ width: '50px', height: '14px', borderRadius: '4px', backgroundColor: 'var(--surface-elevated)' }} />
+                <div style={{ width: '35px', height: '14px', borderRadius: '4px', backgroundColor: 'var(--surface-elevated)' }} />
+                <div style={{ width: '25px', height: '14px', borderRadius: '4px', backgroundColor: 'var(--surface-elevated)' }} />
+                <div style={{ width: '60px', height: '22px', borderRadius: '9999px', backgroundColor: 'var(--surface-elevated)' }} />
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  {[1, 2, 3].map(j => (
+                    <div key={j} style={{ width: '25px', height: '25px', borderRadius: '6px', backgroundColor: 'var(--surface-elevated)' }} />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
       {/* ── Header ── */}
+      {!loading && (
+      <>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '28px', gap: '16px', flexWrap: 'wrap' }}>
         <div>
           <h1 style={{ fontSize: '32px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '6px' }}>
@@ -417,18 +540,6 @@ export default function SuperAdminServicesPage() {
           </p>
         </div>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          {unsaved && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 14px', borderRadius: '9px', backgroundColor: `${ACCENT}15`, border: `1px solid ${ACCENT}40` }}>
-              <div style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: ACCENT, animation: 'star-blink 1.5s ease-in-out infinite' }} />
-              <span style={{ fontSize: '13px', fontWeight: 600, color: ACCENT_D }}>Unsaved changes</span>
-              <button
-                onClick={() => setUnsaved(false)}
-                style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 10px', borderRadius: '6px', border: `1px solid ${ACCENT}`, backgroundColor: ACCENT, color: '#fff', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
-              >
-                <Check style={{ width: 11, height: 11 }} /> Save all
-              </button>
-            </div>
-          )}
           <Button
             onClick={() => setDrawerService('new')}
             style={{ backgroundColor: ACCENT, borderColor: ACCENT, gap: '6px' }}
@@ -637,11 +748,14 @@ export default function SuperAdminServicesPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Price range:</span>
             <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
-              ${Math.min(...filtered.map(s => s.price))} – ${Math.max(...filtered.map(s => s.price)).toLocaleString()}
+              ${filtered.length > 0 ? Math.min(...filtered.map(s => s.price)) : 0} – ${filtered.length > 0 ? Math.max(...filtered.map(s => s.price)).toLocaleString() : 0}
             </span>
           </div>
         </div>
       </div>
+
+      </>
+      )}
 
       {/* ── Drawer ── */}
       {drawerService !== null && (

@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { uploadAvatar, removeAvatar } from '../hooks/useProfile';
 import { getOrgContext } from '../hooks/useOrgContext';
+import { useActiveVisit } from '../context/ActiveVisitContext';
 import {
   Users, Calendar as CalendarIcon, ClipboardCheck, Clock,
   ChevronRight, ChevronLeft, Plus, Play,
@@ -52,6 +53,7 @@ interface Appointment {
   ownerName: string;
   service: string;
   clientArrived?: boolean;
+  durationMinutes?: number;
 }
 
 // ─── Mock Data ───────────────────────────────────────────────
@@ -550,6 +552,7 @@ function GlowStatCard({
 export default function MyPortalPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { startVisit } = useActiveVisit();
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
   const [blocksLoaded, setBlocksLoaded] = useState(false);
@@ -729,6 +732,7 @@ export default function MyPortalPage() {
               ownerName: a.clients ? `${a.clients.first_name} ${a.clients.last_name}` : '—',
               service: a.reason ?? '—',
               clientArrived: a.status === 'In Progress',
+              durationMinutes: a.duration_minutes ?? 30,
             };
           });
           setRealAppointments(mapped);
@@ -882,6 +886,39 @@ export default function MyPortalPage() {
     realAppointments.reduce((sum, _) => sum + 30, 0) / totalAppts
   ) : 0;
 
+  // Generate last 7 day labels for sparkline hover tooltips
+  const dayLabels = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (6 - i));
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  });
+
+  // Build a growth curve from 0 → current value over 7 points
+  const buildSparkData = (current: number, growth: boolean) => {
+    if (current === 0) return Array(7).fill(0);
+    if (!growth) {
+      // For metrics like avg duration — show variation
+      return Array.from({ length: 7 }, (_, i) => {
+        const t = i / 6;
+        return Math.round(current * (0.3 + t * 0.7 + Math.sin(t * Math.PI) * 0.15));
+      });
+    }
+    // Growth curve
+    return Array.from({ length: 7 }, (_, i) => {
+      const t = i / 6;
+      return Math.round(current * (t * t * 0.6 + t * 0.4));
+    });
+  };
+
+  const patientsSparkData = buildSparkData(totalPatients, true);
+  patientsSparkData[patientsSparkData.length - 1] = totalPatients;
+  const apptsSparkData = buildSparkData(totalAppts, true);
+  apptsSparkData[apptsSparkData.length - 1] = totalAppts;
+  const completedSparkData = buildSparkData(completedAppts, true);
+  completedSparkData[completedSparkData.length - 1] = completedAppts;
+  const durationSparkData = buildSparkData(avgDuration, false);
+  durationSparkData[durationSparkData.length - 1] = avgDuration;
+
   const glowCards = [
     {
       title: 'My Patients',
@@ -893,10 +930,10 @@ export default function MyPortalPage() {
       color: '#818CF8',
       shadowColor: 'rgba(129,140,248,0.35)',
       icon: Users,
-      data: totalPatients > 0 ? [0, Math.round(totalPatients * 0.3), Math.round(totalPatients * 0.5), Math.round(totalPatients * 0.7), totalPatients] : [0, 0, 0, 0, 0],
-      labels: ['Start', '', '', '', 'Now'],
+      data: patientsSparkData,
+      labels: dayLabels,
       unit: 'patients',
-      annotationStart: '0',
+      annotationStart: patientsSparkData[0].toLocaleString(),
       annotationEnd: `${totalPatients}`,
       onArrowClick: () => navigate('/clients'),
     },
@@ -910,10 +947,10 @@ export default function MyPortalPage() {
       color: '#38BDF8',
       shadowColor: 'rgba(56,189,248,0.35)',
       icon: CalendarIcon,
-      data: totalAppts > 0 ? [0, Math.round(totalAppts * 0.2), Math.round(totalAppts * 0.5), Math.round(totalAppts * 0.8), totalAppts] : [0, 0, 0, 0, 0],
-      labels: ['Start', '', '', '', 'Now'],
+      data: apptsSparkData,
+      labels: dayLabels,
       unit: 'appts',
-      annotationStart: '0',
+      annotationStart: apptsSparkData[0].toLocaleString(),
       annotationEnd: `${totalAppts}`,
       onArrowClick: () => navigate('/appointments'),
     },
@@ -927,10 +964,10 @@ export default function MyPortalPage() {
       color: '#4ADE80',
       shadowColor: 'rgba(74,222,128,0.35)',
       icon: ClipboardCheck,
-      data: completedAppts > 0 ? [0, Math.round(completedAppts * 0.3), Math.round(completedAppts * 0.6), Math.round(completedAppts * 0.9), completedAppts] : [0, 0, 0, 0, 0],
-      labels: ['Start', '', '', '', 'Now'],
+      data: completedSparkData,
+      labels: dayLabels,
       unit: 'done',
-      annotationStart: '0',
+      annotationStart: completedSparkData[0].toLocaleString(),
       annotationEnd: `${completedAppts}`,
     },
     {
@@ -943,10 +980,10 @@ export default function MyPortalPage() {
       color: '#FB7185',
       shadowColor: 'rgba(251,113,133,0.35)',
       icon: Clock,
-      data: avgDuration > 0 ? [avgDuration + 5, avgDuration + 3, avgDuration + 2, avgDuration + 1, avgDuration] : [0, 0, 0, 0, 0],
-      labels: ['Start', '', '', '', 'Now'],
+      data: durationSparkData,
+      labels: dayLabels,
       unit: 'min',
-      annotationStart: avgDuration > 0 ? `${avgDuration + 5}m` : '0m',
+      annotationStart: durationSparkData[0] > 0 ? `${durationSparkData[0]}m` : '0m',
       annotationEnd: avgDuration > 0 ? `${avgDuration}m` : '0m',
     },
   ];
@@ -1145,6 +1182,24 @@ export default function MyPortalPage() {
       // Attach DB IDs to new blocks
       inserted.forEach((row: any, i: number) => {
         if (newBlocks[i]) newBlocks[i].dbId = row.id;
+      });
+    }
+    // If PTO or Sick Day, also create a pending_request for Super Admin
+    if (isRequest) {
+      const initials = vetProfile.name.replace('Dr. ', '').split(' ').map(w => w[0]?.toUpperCase() || '').join('').slice(0, 2);
+      const dateRange = blockDateFrom === blockDateTo
+        ? new Date(blockDateFrom + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        : `${new Date(blockDateFrom + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}–${new Date(blockDateTo + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+      const dayCount = Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
+      await supabase.from('pending_requests').insert({
+        organization_id: orgCtx.organizationId,
+        type: blockType === 'PTO' ? 'pto' : 'shift_swap',
+        avatar: initials,
+        avatar_color: blockType === 'PTO' ? '#3B82F6' : '#d4183d',
+        title: `${vetProfile.name} — ${blockType}`,
+        detail: `Requesting ${blockType.toLowerCase()} ${dateRange} (${dayCount} day${dayCount > 1 ? 's' : ''})${blockNotes ? ' — ' + blockNotes : ''}`,
+        meta: `Submitted just now · Veterinarian`,
+        status: 'pending',
       });
     }
     setTimeBlocks((prev) => [...prev, ...newBlocks]);
@@ -1380,7 +1435,17 @@ export default function MyPortalPage() {
 
                         {/* Start Appointment CTA */}
                         <button
-                          onClick={() => navigate(`/appointments/${appt.dbId || appt.id}/visit`)}
+                          onClick={() => {
+                            startVisit({
+                              apptId: appt.dbId || appt.id,
+                              petName: appt.petName,
+                              petImage: appt.petImage,
+                              ownerName: appt.ownerName,
+                              service: appt.service,
+                              durationMinutes: appt.durationMinutes ?? 30,
+                            });
+                            navigate(`/appointments/${appt.dbId || appt.id}/visit`);
+                          }}
                           className="w-full flex items-center justify-center gap-2 py-2 transition-all hover:opacity-90 active:scale-[0.98]"
                           style={{
                             backgroundColor: '#2D6A4F',
@@ -1515,19 +1580,9 @@ export default function MyPortalPage() {
           <div className="bg-[var(--surface-white)] border border-[var(--border-color)] mt-4" style={{ borderRadius: '12px' }}>
             <div className="p-5 border-b border-[var(--border-color)] flex items-center justify-between">
               <h3 className="text-[var(--text-primary)]" style={{ fontSize: '18px', fontWeight: 600 }}>My Patients</h3>
-              <div className="flex items-center gap-3">
-                <Button
-                  size="sm"
-                  onClick={() => setAddClientOpen(true)}
-                  variant="outline"
-                  style={{ fontSize: '12px' }}
-                >
-                  <Plus className="w-3.5 h-3.5" /> Add Client
-                </Button>
-                <Link to="/clients" className="text-[var(--text-secondary)] flex items-center gap-1 hover:opacity-75 transition-opacity" style={{ fontSize: '12px', fontWeight: 600 }}>
-                  View all <ChevronRight className="w-[13px] h-[13px]" />
-                </Link>
-              </div>
+              <Link to="/clients" className="text-[var(--text-secondary)] flex items-center gap-1 hover:opacity-75 transition-opacity" style={{ fontSize: '12px', fontWeight: 600 }}>
+                View all <ChevronRight className="w-[13px] h-[13px]" />
+              </Link>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full">

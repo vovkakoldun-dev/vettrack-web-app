@@ -425,6 +425,7 @@ export default function AdminBookingsPage() {
     ...Array.from({ length: daysInMvMonth }, (_, i) => i + 1),
   ];
   const apptsByDate = appointments.reduce<Record<string, typeof appointments>>((acc, appt) => {
+    if (selectedVetFilter !== 'all' && (appt as any).vetId !== selectedVetFilter) return acc;
     (acc[appt.date] = acc[appt.date] || []).push(appt);
     return acc;
   }, {});
@@ -996,6 +997,19 @@ export default function AdminBookingsPage() {
                     {totalToday} booking{totalToday !== 1 ? 's' : ''}
                   </span>
                 )}
+                {/* Doctor Filter – always visible */}
+                <Select value={selectedVetFilter} onValueChange={setSelectedVetFilter}>
+                  <SelectTrigger className="w-[180px] h-9">
+                    <Stethoscope className="w-4 h-4 text-[var(--text-secondary)] mr-1" />
+                    <SelectValue placeholder="All Doctors" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Doctors</SelectItem>
+                    {staffList.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <div className="flex gap-1 p-1 bg-[var(--surface-elevated)]" style={{ borderRadius: '8px' }}>
                   <button
                     onClick={() => setViewMode('list')}
@@ -1062,20 +1076,6 @@ export default function AdminBookingsPage() {
                     </button>
                   ))}
                 </div>
-
-                {/* Doctor Filter */}
-                <Select value={selectedVetFilter} onValueChange={setSelectedVetFilter}>
-                  <SelectTrigger className="w-[200px] h-9">
-                    <Stethoscope className="w-4 h-4 text-[var(--text-secondary)] mr-1" />
-                    <SelectValue placeholder="All Doctors" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Doctors</SelectItem>
-                    {staffList.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
 
                 {/* Search */}
                 <div className="relative flex-1">

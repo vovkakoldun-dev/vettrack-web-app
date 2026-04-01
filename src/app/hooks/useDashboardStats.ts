@@ -41,10 +41,9 @@ export function useDashboardStats(): DashboardStats {
           .not('status', 'eq', 'Cancelled'),
         supabase
           .from('vaccinations')
-          .select('id', { count: 'exact', head: true })
-          .eq('organization_id', organizationId)
-          .lte('next_due_date', weekEnd)
-          .gte('next_due_date', today),
+          .select('id, pets!inner(organization_id)', { count: 'exact', head: true })
+          .eq('pets.organization_id', organizationId)
+          .lte('next_due_date', weekEnd),
         supabase
           .from('pets')
           .select('id', { count: 'exact', head: true })

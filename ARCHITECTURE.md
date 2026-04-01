@@ -226,6 +226,16 @@ const ADMIN_ROLES  = ['front_desk_manager', 'receptionist', 'clinic_manager', 's
 | `audit_logs` | Compliance trail | `id`, `organization_id`, `action`, `entity_type`, `entity_id`, `performed_by`, `details` |
 | `profiles` | Supabase Auth link | `id` (= auth.uid), `role`, `organization_id` |
 
+### User Settings Tables
+
+| Table | Purpose | Key Columns |
+|-------|---------|-------------|
+| `user_sessions` | Active device sessions | `id`, `user_id` (FK auth.users), `device`, `browser`, `location`, `ip_address`, `is_current`, `session_token` (unique), `last_active_at`, `created_at` |
+| `login_activity` | Login audit log | `id`, `user_id` (FK auth.users), `device`, `browser`, `location`, `ip_address`, `status` (success/failed), `created_at` |
+| `notification_preferences` | Per-user in-app notification toggles | `id`, `user_id` (FK auth.users, unique), `appt_new`, `appt_cancel`, `appt_reminder`, `appt_reschedule`, `lab_ready`, `lab_critical`, `invoice_gen`, `payment_recv`, `plan_expiry`, `system_updates`, `updated_at` |
+
+> All three tables use RLS scoped to `auth.uid() = user_id`. No `organization_id` needed — these are per-user settings, not tenant data.
+
 ### Database Views
 
 | View | Purpose |
@@ -734,4 +744,4 @@ src/
 
 ---
 
-*Last updated: 2026-03-24*
+*Last updated: 2026-03-29*

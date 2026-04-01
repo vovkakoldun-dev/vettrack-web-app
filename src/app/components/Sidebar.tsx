@@ -6,8 +6,8 @@ import { useProfile } from '../hooks/useProfile';
 import { getOrgContext } from '../hooks/useOrgContext';
 import { showToast } from './ToastNotification';
 import {
-  Home, Users, Calendar, FileText, Settings, PawPrint,
-  UserCircle, Bell, FlaskConical, Sun, Moon, Syringe,
+  Home, Users, Calendar, FileText, Settings,
+  UserCircle, Bell, FlaskConical, Sun, Moon, Syringe, Clock,
   ChevronLeft, ChevronRight, LogOut, ChevronUp, MessageSquare,
 } from 'lucide-react';
 
@@ -33,6 +33,7 @@ const INITIAL_SECTIONS: NavSection[] = [
     items: [
       { name: 'Dashboard',     icon: Home,          path: '/' },
       { name: 'My Portal',     icon: UserCircle,    path: '/my-portal' },
+      { name: 'Shifts',        icon: Clock,         path: '/shifts' },
       { name: 'Team Chat',     icon: MessageSquare, path: '/chat' },
       { name: 'Notifications', icon: Bell,          path: '/notifications', badge: UNREAD_NOTIFICATION_COUNT },
     ],
@@ -51,7 +52,6 @@ const INITIAL_SECTIONS: NavSection[] = [
     items: [
       { name: 'Records',  icon: FileText,     path: '/records' },
       { name: 'Vaccines', icon: Syringe,      path: '/vaccines' },
-      { name: 'Pets',     icon: PawPrint,     path: '/pets' },
       { name: 'Lab',      icon: FlaskConical, path: '/lab' },
     ],
   },
@@ -466,7 +466,7 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
                             width: '4px',
                             borderRadius: '3px',
                             backgroundColor: 'var(--brand-green-text)',
-                            boxShadow: '0 0 12px 3px var(--brand-green-text)',
+                            boxShadow: isDark ? '0 0 12px 3px var(--brand-green-text)' : 'none',
                             zIndex: 2,
                           }} />
                           <span style={{
@@ -475,8 +475,8 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
                             top: 0,
                             bottom: 0,
                             width: '40%',
-                            background: 'radial-gradient(ellipse at -5% 50%, var(--brand-green-text) 0%, transparent 65%)',
-                            opacity: 0.15,
+                            background: isDark ? 'radial-gradient(ellipse at -5% 50%, var(--brand-green-text) 0%, transparent 65%)' : 'none',
+                            opacity: isDark ? 0.15 : 0,
                             pointerEvents: 'none',
                             borderRadius: '8px 0 0 8px',
                             zIndex: 1,

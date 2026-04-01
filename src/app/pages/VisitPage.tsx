@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router';
 import { useActiveVisit } from '../context/ActiveVisitContext';
 import {
   ArrowLeft, ClipboardList, ChevronRight,
   Scale, Thermometer, Heart, Activity, AlertCircle,
   Plus, X, Timer, ExternalLink,
-  CheckSquare, Phone, Pill, FlaskConical, Bell, Calendar, FileText,
+  CheckSquare, Phone, Pill, FlaskConical, Bell, Calendar, FileText, Syringe, Shield, Ban,
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -18,6 +18,7 @@ import { MOCK_APPOINTMENTS, LAB_TESTS } from '../data/mockAppointments';
 import type { Appointment as MockAppt } from '../data/mockAppointments';
 import { supabase } from '../../lib/supabase';
 import { getOrgContext } from '../hooks/useOrgContext';
+import { useAuth } from '../context/AuthContext';
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -128,7 +129,8 @@ function SectionCard({ icon, title, children }: { icon: React.ReactNode; title: 
 export default function VisitPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { advanceToCheckout } = useActiveVisit();
+  const { advanceToCheckout, clearVisit } = useActiveVisit();
+  const { user } = useAuth();
 
   const mockAppt = MOCK_APPOINTMENTS.find((a) => String(a.id) === id);
   const [realAppt, setRealAppt] = useState<MockAppt | null>(null);
@@ -186,49 +188,164 @@ export default function VisitPage() {
 
   const appt = mockAppt || realAppt;
 
-  // ── Form state ───────────────────────────────────────────────
-  const [chiefComplaint, setChiefComplaint] = useState('');
+  // ── Saved form draft (sessionStorage) ────────────────────────
+  const draftKey = `visit_draft_${id}`;
+  const savedDraft = useRef<Record<string, any> | null>(null);
+  if (savedDraft.current === null) {
+    try {
+      const raw = sessionStorage.getItem(draftKey);
+      savedDraft.current = raw ? JSON.parse(raw) : {};
+    } catch { savedDraft.current = {}; }
+  }
+  const draft = savedDraft.current!;
+
+  // ── Form state (restored from draft if available) ──────────
+  const [chiefComplaint, setChiefComplaint] = useState(draft.chiefComplaint ?? '');
 
   // Vitals
-  const [weight, setWeight] = useState('');
-  const [temp, setTemp] = useState('');
-  const [heartRate, setHeartRate] = useState('');
-  const [respRate, setRespRate] = useState('');
-  const [painScore, setPainScore] = useState('');
-  const [bcs, setBcs] = useState('');
+  const [weight, setWeight] = useState(draft.weight ?? '');
+  const [temp, setTemp] = useState(draft.temp ?? '');
+  const [heartRate, setHeartRate] = useState(draft.heartRate ?? '');
+  const [respRate, setRespRate] = useState(draft.respRate ?? '');
+  const [painScore, setPainScore] = useState(draft.painScore ?? '');
+  const [bcs, setBcs] = useState(draft.bcs ?? '');
 
   // Physical exam
-  const [examNotes, setExamNotes] = useState('');
+  const [examNotes, setExamNotes] = useState(draft.examNotes ?? '');
   const [systemsWnl, setSystemsWnl] = useState<Record<string, boolean>>(
-    Object.fromEntries(BODY_SYSTEMS.map((s) => [s, true]))
+    draft.systemsWnl ?? Object.fromEntries(BODY_SYSTEMS.map((s) => [s, true]))
   );
 
   // Diagnosis
-  const [primaryDx, setPrimaryDx] = useState('');
-  const [secondaryDx, setSecondaryDx] = useState('');
-  const [dxNotes, setDxNotes] = useState('');
-  const [icdCode, setIcdCode] = useState('');
+  const [primaryDx, setPrimaryDx] = useState(draft.primaryDx ?? '');
+  const [secondaryDx, setSecondaryDx] = useState(draft.secondaryDx ?? '');
+  const [dxNotes, setDxNotes] = useState(draft.dxNotes ?? '');
+  const [icdCode, setIcdCode] = useState(draft.icdCode ?? '');
+  const [dxSuggestions, setDxSuggestions] = useState<string[]>([]);
+  const [dxFocusField, setDxFocusField] = useState<'primary' | 'secondary' | null>(null);
 
   // Lab tests
-  const [selectedTests, setSelectedTests] = useState<Set<string>>(new Set());
-  const [testNotes, setTestNotes] = useState<Record<string, string>>({});
+  const [selectedTests, setSelectedTests] = useState<Set<string>>(new Set(draft.selectedTests ?? []));
+  const [testNotes, setTestNotes] = useState<Record<string, string>>(draft.testNotes ?? {});
 
   // Medications
-  const [meds, setMeds] = useState<MedRow[]>([]);
-  const [nextMedId, setNextMedId] = useState(1);
+  const [meds, setMeds] = useState<MedRow[]>(draft.meds ?? []);
+  const [nextMedId, setNextMedId] = useState(draft.nextMedId ?? 1);
 
   // Treatment
-  const [procedures, setProcedures] = useState('');
-  const [ownerInstructions, setOwnerInstructions] = useState('');
+  const [procedures, setProcedures] = useState(draft.procedures ?? '');
+  const [ownerInstructions, setOwnerInstructions] = useState(draft.ownerInstructions ?? '');
 
   // Follow-up
-  const [followUpDate, setFollowUpDate] = useState('');
-  const [followUpReason, setFollowUpReason] = useState('');
-  const [followUpNotes, setFollowUpNotes] = useState('');
+  const [followUpDate, setFollowUpDate] = useState(draft.followUpDate ?? '');
+  const [followUpReason, setFollowUpReason] = useState(draft.followUpReason ?? '');
+  const [followUpNotes, setFollowUpNotes] = useState(draft.followUpNotes ?? '');
+
+  // Vaccination fields (only for Vaccination appointments)
+  const [vaccineName, setVaccineName] = useState(draft.vaccineName ?? '');
+  const [vaccineManufacturer, setVaccineManufacturer] = useState(draft.vaccineManufacturer ?? '');
+  const [vaccineLotNumber, setVaccineLotNumber] = useState(draft.vaccineLotNumber ?? '');
+  const [vaccineSerialNumber, setVaccineSerialNumber] = useState(draft.vaccineSerialNumber ?? '');
+  const [vaccineExpiryDate, setVaccineExpiryDate] = useState(draft.vaccineExpiryDate ?? '');
+  const [vaccineNextDueDate, setVaccineNextDueDate] = useState(draft.vaccineNextDueDate ?? '');
+  const [vaccineInjectionSite, setVaccineInjectionSite] = useState(draft.vaccineInjectionSite ?? '');
+  const [vaccineNotes, setVaccineNotes] = useState(draft.vaccineNotes ?? '');
 
   // Front Desk Tasks
-  const [frontDeskTasks, setFrontDeskTasks] = useState<FrontDeskTask[]>([]);
-  const [nextTaskId, setNextTaskId] = useState(1);
+  const [frontDeskTasks, setFrontDeskTasks] = useState<FrontDeskTask[]>(draft.frontDeskTasks ?? []);
+  const [nextTaskId, setNextTaskId] = useState(draft.nextTaskId ?? 1);
+
+  // ── Auto-save draft to sessionStorage ──────────────────────
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      try {
+        sessionStorage.setItem(draftKey, JSON.stringify({
+          chiefComplaint, weight, temp, heartRate, respRate, painScore, bcs,
+          examNotes, systemsWnl,
+          primaryDx, secondaryDx, dxNotes, icdCode,
+          selectedTests: Array.from(selectedTests), testNotes,
+          meds, nextMedId,
+          procedures, ownerInstructions,
+          followUpDate, followUpReason, followUpNotes,
+          vaccineName, vaccineManufacturer, vaccineLotNumber, vaccineSerialNumber,
+          vaccineExpiryDate, vaccineNextDueDate, vaccineInjectionSite, vaccineNotes,
+          frontDeskTasks, nextTaskId,
+        }));
+      } catch {}
+    }, 500);
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
+  }, [
+    draftKey, chiefComplaint, weight, temp, heartRate, respRate, painScore, bcs,
+    examNotes, systemsWnl,
+    primaryDx, secondaryDx, dxNotes, icdCode,
+    selectedTests, testNotes,
+    meds, nextMedId,
+    procedures, ownerInstructions,
+    followUpDate, followUpReason, followUpNotes,
+    vaccineName, vaccineManufacturer, vaccineLotNumber, vaccineSerialNumber,
+    vaccineExpiryDate, vaccineNextDueDate, vaccineInjectionSite, vaccineNotes,
+    frontDeskTasks, nextTaskId,
+  ]);
+
+  // ── Cancel appointment ──────────────────────────────────────
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelling, setCancelling] = useState(false);
+
+  const CANCEL_REASONS = [
+    'Owner requested cancellation',
+    'Pet no-show',
+    'Emergency rescheduled',
+    'Doctor unavailable',
+    'Duplicate booking',
+    'Pet condition improved',
+    'Other',
+  ];
+
+  const handleCancelAppointment = async () => {
+    if (!cancelReason.trim()) return;
+    setCancelling(true);
+    try {
+      const { organizationId } = await getOrgContext();
+      // Update appointment status + add cancellation note
+      if (id && id.includes('-')) {
+        await supabase.from('appointments')
+          .update({ status: 'Cancelled', notes: `Cancelled: ${cancelReason}` })
+          .eq('id', id)
+          .eq('organization_id', organizationId);
+      }
+      // Clear visit draft and active visit widget
+      try { sessionStorage.removeItem(draftKey); } catch {}
+      clearVisit();
+      navigate('/appointments');
+    } catch (e) {
+      console.error('Cancel appointment error:', e);
+    }
+    setCancelling(false);
+    setShowCancelDialog(false);
+  };
+
+  // ── VeNom diagnosis autocomplete ──
+  const dxTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const searchDiagnoses = useCallback(async (query: string) => {
+    if (query.length < 2) { setDxSuggestions([]); return; }
+    const { data } = await supabase
+      .from('vet_conditions_reference')
+      .select('name')
+      .eq('type', 'diagnosis')
+      .ilike('name', `%${query}%`)
+      .limit(15);
+    if (data) setDxSuggestions(data.map((r: any) => r.name));
+  }, []);
+
+  const handleDxInput = (val: string, setter: (v: string) => void, field: 'primary' | 'secondary') => {
+    setter(val);
+    setDxFocusField(field);
+    if (dxTimerRef.current) clearTimeout(dxTimerRef.current);
+    dxTimerRef.current = setTimeout(() => searchDiagnoses(val), 250);
+  };
 
   // ── Elapsed timer — starts counting from 0 when page mounts ──
   const [elapsedSec, setElapsedSec] = useState(0);
@@ -265,7 +382,27 @@ export default function VisitPage() {
   }
 
   const durationMin = getDurationMin(appt.timeStart, appt.timeEnd);
-  const svcColor = serviceColors[appt.service] || serviceColors.Other;
+  const svcColor = serviceColors[appt.service] || (() => {
+    // For combo services like "Annual Checkup + Vaccination", use the first service's color
+    const parts = appt.service.split(' + ');
+    for (const p of parts) { if (serviceColors[p.trim()]) return serviceColors[p.trim()]; }
+    return serviceColors.Other;
+  })();
+  const hasVaccination = appt.service.includes('Vaccination');
+  const isVaccinationOnly = appt.service === 'Vaccination';
+  const isComboVaccination = hasVaccination && !isVaccinationOnly;
+
+  const COMMON_VACCINES = [
+    'Rabies (1-year)', 'Rabies (3-year)', 'DHPP (Distemper combo)',
+    'Bordetella', 'Leptospirosis', 'Canine Influenza (H3N2/H3N8)',
+    'Lyme Disease', 'FVRCP (Feline Distemper)', 'FeLV (Feline Leukemia)',
+    'FIV (Feline Immunodeficiency)',
+  ];
+
+  const INJECTION_SITES = [
+    'Right Front Leg', 'Left Front Leg', 'Right Rear Leg', 'Left Rear Leg',
+    'Right Shoulder', 'Left Shoulder', 'Intranasal', 'Subcutaneous (Scruff)',
+  ];
 
   const toggleTest = (testId: string) => {
     setSelectedTests((prev) => {
@@ -510,6 +647,149 @@ export default function VisitPage() {
           </div>
         </SectionCard>
 
+        {/* ── Vaccination-specific form ── */}
+        {hasVaccination && (
+          <SectionCard icon={<Syringe className="w-4 h-4" />} title="Vaccination Details">
+            <div className="space-y-5">
+              {/* Vaccine Name */}
+              <div>
+                <label className="text-[var(--text-primary)] mb-1.5 block" style={{ fontSize: '13px', fontWeight: 600 }}>
+                  Vaccine Name <span style={{ color: '#d4183d' }}>*</span>
+                </label>
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {COMMON_VACCINES.map(v => (
+                    <button
+                      key={v}
+                      onClick={() => setVaccineName(v)}
+                      className="px-3 py-1.5 transition-all"
+                      style={{
+                        borderRadius: '9999px',
+                        border: `1.5px solid ${vaccineName === v ? '#3B82F6' : 'var(--border-color)'}`,
+                        backgroundColor: vaccineName === v ? '#3B82F618' : 'transparent',
+                        color: vaccineName === v ? '#3B82F6' : 'var(--text-secondary)',
+                        fontSize: '13px', fontWeight: vaccineName === v ? 600 : 400,
+                      }}
+                    >
+                      {v}
+                    </button>
+                  ))}
+                </div>
+                <Input
+                  placeholder="Or type a custom vaccine name…"
+                  value={vaccineName}
+                  onChange={e => setVaccineName(e.target.value)}
+                  style={{ borderRadius: '8px', maxWidth: '400px' }}
+                />
+              </div>
+
+              {/* Manufacturer + Lot + Serial */}
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="text-[var(--text-secondary)] mb-1.5 block" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    Manufacturer
+                  </label>
+                  <Input
+                    placeholder="e.g. Zoetis, Merck, Boehringer"
+                    value={vaccineManufacturer}
+                    onChange={e => setVaccineManufacturer(e.target.value)}
+                    style={{ borderRadius: '8px' }}
+                  />
+                </div>
+                <div>
+                  <label className="text-[var(--text-secondary)] mb-1.5 block" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    Lot Number
+                  </label>
+                  <Input
+                    placeholder="e.g. A1234B"
+                    value={vaccineLotNumber}
+                    onChange={e => setVaccineLotNumber(e.target.value)}
+                    style={{ borderRadius: '8px' }}
+                  />
+                </div>
+                <div>
+                  <label className="text-[var(--text-secondary)] mb-1.5 block" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    Serial Number
+                  </label>
+                  <Input
+                    placeholder="e.g. SN-98765"
+                    value={vaccineSerialNumber}
+                    onChange={e => setVaccineSerialNumber(e.target.value)}
+                    style={{ borderRadius: '8px' }}
+                  />
+                </div>
+              </div>
+
+              {/* Injection Site */}
+              <div>
+                <label className="text-[var(--text-primary)] mb-1.5 block" style={{ fontSize: '13px', fontWeight: 600 }}>
+                  Injection Site
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {INJECTION_SITES.map(site => (
+                    <button
+                      key={site}
+                      onClick={() => setVaccineInjectionSite(site)}
+                      className="px-3 py-1.5 transition-all"
+                      style={{
+                        borderRadius: '9999px',
+                        border: `1.5px solid ${vaccineInjectionSite === site ? '#3B82F6' : 'var(--border-color)'}`,
+                        backgroundColor: vaccineInjectionSite === site ? '#3B82F618' : 'transparent',
+                        color: vaccineInjectionSite === site ? '#3B82F6' : 'var(--text-secondary)',
+                        fontSize: '13px', fontWeight: vaccineInjectionSite === site ? 600 : 400,
+                      }}
+                    >
+                      {site}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Expiry + Next Due */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[var(--text-secondary)] mb-1.5 block" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    <Shield className="w-3.5 h-3.5 inline mr-1" style={{ color: '#F59E0B' }} />
+                    Vaccine Expiry Date
+                  </label>
+                  <Input
+                    type="date"
+                    value={vaccineExpiryDate}
+                    onChange={e => setVaccineExpiryDate(e.target.value)}
+                    style={{ borderRadius: '8px' }}
+                  />
+                </div>
+                <div>
+                  <label className="text-[var(--text-secondary)] mb-1.5 block" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    <Calendar className="w-3.5 h-3.5 inline mr-1" style={{ color: '#2D6A4F' }} />
+                    Next Due Date
+                  </label>
+                  <Input
+                    type="date"
+                    value={vaccineNextDueDate}
+                    onChange={e => setVaccineNextDueDate(e.target.value)}
+                    style={{ borderRadius: '8px' }}
+                  />
+                  <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: '11px' }}>When should the pet receive the next booster?</p>
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div>
+                <label className="text-[var(--text-primary)] mb-1.5 block" style={{ fontSize: '13px', fontWeight: 600 }}>
+                  Notes
+                </label>
+                <Textarea
+                  placeholder="Adverse reactions, observations, special instructions…"
+                  value={vaccineNotes}
+                  onChange={e => setVaccineNotes(e.target.value)}
+                  style={{ minHeight: '80px', resize: 'vertical' }}
+                />
+              </div>
+            </div>
+          </SectionCard>
+        )}
+
+        {!isVaccinationOnly && (<>
         {/* ── Section 3: Physical Examination ── */}
         <SectionCard icon={<Activity className="w-4 h-4" />} title="Physical Examination">
           <Textarea
@@ -574,27 +854,55 @@ export default function VisitPage() {
         {/* ── Section 4: Diagnosis ── */}
         <SectionCard icon={<ClipboardList className="w-4 h-4" />} title="Diagnosis">
           <div className="grid grid-cols-2 gap-4 mb-4">
-            <div>
+            <div style={{ position: 'relative' }}>
               <label className="text-[var(--text-primary)] mb-1.5 block" style={{ fontSize: '13px', fontWeight: 600 }}>
                 Primary Diagnosis
               </label>
               <Input
-                placeholder="e.g. Otitis externa"
+                placeholder="Start typing to search VeNom codes…"
                 value={primaryDx}
-                onChange={(e) => setPrimaryDx(e.target.value)}
+                onChange={(e) => handleDxInput(e.target.value, setPrimaryDx, 'primary')}
+                onFocus={() => { setDxFocusField('primary'); if (primaryDx.length >= 2) searchDiagnoses(primaryDx); }}
+                onBlur={() => setTimeout(() => setDxFocusField(null), 200)}
                 style={{ borderRadius: '8px' }}
+                autoComplete="off"
               />
+              {dxFocusField === 'primary' && dxSuggestions.length > 0 && (
+                <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50, maxHeight: 220, overflowY: 'auto', backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)', borderRadius: 8, marginTop: 4, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+                  {dxSuggestions.map((s) => (
+                    <button key={s} type="button" onMouseDown={() => { setPrimaryDx(s); setDxSuggestions([]); setDxFocusField(null); }}
+                      style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px', fontSize: 13, color: 'var(--text-primary)', border: 'none', background: 'none', cursor: 'pointer' }}
+                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--surface-elevated)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                    >{s}</button>
+                  ))}
+                </div>
+              )}
             </div>
-            <div>
+            <div style={{ position: 'relative' }}>
               <label className="text-[var(--text-primary)] mb-1.5 block" style={{ fontSize: '13px', fontWeight: 600 }}>
                 Secondary Diagnosis
               </label>
               <Input
-                placeholder="e.g. Allergic dermatitis"
+                placeholder="Start typing to search VeNom codes…"
                 value={secondaryDx}
-                onChange={(e) => setSecondaryDx(e.target.value)}
+                onChange={(e) => handleDxInput(e.target.value, setSecondaryDx, 'secondary')}
+                onFocus={() => { setDxFocusField('secondary'); if (secondaryDx.length >= 2) searchDiagnoses(secondaryDx); }}
+                onBlur={() => setTimeout(() => setDxFocusField(null), 200)}
                 style={{ borderRadius: '8px' }}
+                autoComplete="off"
               />
+              {dxFocusField === 'secondary' && dxSuggestions.length > 0 && (
+                <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50, maxHeight: 220, overflowY: 'auto', backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)', borderRadius: 8, marginTop: 4, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+                  {dxSuggestions.map((s) => (
+                    <button key={s} type="button" onMouseDown={() => { setSecondaryDx(s); setDxSuggestions([]); setDxFocusField(null); }}
+                      style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px', fontSize: 13, color: 'var(--text-primary)', border: 'none', background: 'none', cursor: 'pointer' }}
+                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--surface-elevated)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                    >{s}</button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
           <div className="mb-4">
@@ -776,6 +1084,7 @@ export default function VisitPage() {
             </div>
           )}
         </SectionCard>
+        </>)}
 
         {/* ── Section 7: Treatment Notes ── */}
         <SectionCard icon={<ClipboardList className="w-4 h-4" />} title="Treatment Notes">
@@ -1011,17 +1320,34 @@ export default function VisitPage() {
         style={{ padding: '14px 32px', zIndex: 20 }}
       >
         <div className="max-w-[960px] mx-auto flex items-center justify-between">
-          <Button variant="outline" onClick={() => navigate('/appointments')}>
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back to Appointments
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => navigate('/appointments')}>
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back to Appointments
+            </Button>
+            <button
+              onClick={() => setShowCancelDialog(true)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium transition-all hover:opacity-90"
+              style={{
+                backgroundColor: 'transparent',
+                color: '#EF4444',
+                border: '1px solid #EF4444',
+                borderRadius: '6px',
+                cursor: 'pointer',
+              }}
+            >
+              <Ban style={{ width: '14px', height: '14px' }} />
+              Cancel Appointment
+            </button>
+          </div>
           <Button
             onClick={async () => {
+              const today = new Date().toISOString().split('T')[0];
+              const { organizationId } = await getOrgContext();
+
               // Persist front-desk tasks to Supabase so AdminTasksPage can show them
               if (frontDeskTasks.length > 0 && appt) {
                 try {
-                  const today = new Date().toISOString().split('T')[0];
-                  const { organizationId } = await getOrgContext();
                   const taskRows = frontDeskTasks.map(t => ({
                     type: t.type,
                     priority: t.priority,
@@ -1042,6 +1368,223 @@ export default function VisitPage() {
                   window.dispatchEvent(new Event('notifCountChanged'));
                 } catch {}
               }
+
+              // Save medical record + relational child rows (single source of truth)
+              if (apptIds.petId) {
+                try {
+                  const recNum = `VT-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 999999)).padStart(6, '0')}`;
+                  const summary = [primaryDx, secondaryDx].filter(Boolean).join(', ') || chiefComplaint || appt?.service || '—';
+                  const clinicalNoteFull = [
+                    chiefComplaint && `Chief Complaint: ${chiefComplaint}`,
+                    examNotes && `Exam Notes: ${examNotes}`,
+                    dxNotes && `Clinical Notes: ${dxNotes}`,
+                  ].filter(Boolean).join('\n\n');
+
+                  // Look up clinic_id for this organization
+                  const { data: clinicRow } = await supabase
+                    .from('clinics')
+                    .select('id')
+                    .eq('organization_id', organizationId)
+                    .limit(1)
+                    .single();
+
+                  const { data: mrRow } = await supabase.from('medical_records').insert({
+                    organization_id: organizationId,
+                    record_number: recNum,
+                    appointment_id: id || null,
+                    pet_id: apptIds.petId,
+                    client_id: apptIds.clientId || null,
+                    clinic_id: clinicRow?.id || null,
+                    vet_id: apptIds.staffId || null,
+                    record_type: isVaccinationOnly ? 'Vaccination' : 'Visit',
+                    status: 'Final',
+                    visit_date: today,
+                    visit_time: (() => {
+                      if (!appt?.timeStart) return null;
+                      const [tp, ap] = appt.timeStart.split(' ');
+                      let [h, m] = tp.split(':').map(Number);
+                      if (ap === 'PM' && h !== 12) h += 12;
+                      if (ap === 'AM' && h === 12) h = 0;
+                      return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+                    })(),
+                    reason: summary,
+                    clinical_notes: clinicalNoteFull || null,
+                    duration_minutes: appt ? getDurationMin(appt.timeStart, appt.timeEnd) : null,
+                    follow_up_date: followUpDate || null,
+                    follow_up_reason: followUpReason || null,
+                    follow_up_notes: followUpNotes || null,
+                    created_by: apptIds.staffId || null,
+                  }).select('id').single();
+
+                  const recordId = mrRow?.id;
+
+                  if (recordId) {
+                    // ── record_vitals (1:1) ──
+                    const hasVitals = weight || temp || heartRate || respRate || painScore || bcs;
+                    if (hasVitals) {
+                      await supabase.from('record_vitals').insert({
+                        record_id: recordId,
+                        weight_kg: weight ? parseFloat(weight) : null,
+                        temperature_c: temp ? parseFloat(((parseFloat(temp) - 32) * 5 / 9).toFixed(1)) : null,
+                        heart_rate_bpm: heartRate ? parseFloat(heartRate) : null,
+                        respiratory_rate_bpm: respRate ? parseFloat(respRate) : null,
+                        pain_score: painScore ? parseFloat(painScore) : null,
+                        body_condition_score: bcs ? parseFloat(bcs) : null,
+                      });
+                    }
+
+                    // ── record_diagnoses (1:N) ──
+                    const dxRows: { record_id: string; type: string; description: string }[] = [];
+                    if (primaryDx) dxRows.push({ record_id: recordId, type: 'primary', description: primaryDx });
+                    if (secondaryDx) dxRows.push({ record_id: recordId, type: 'secondary', description: secondaryDx });
+                    if (dxRows.length > 0) {
+                      await supabase.from('record_diagnoses').insert(dxRows);
+                    }
+
+                    // ── record_treatments (1:N) ──
+                    if (procedures || ownerInstructions) {
+                      await supabase.from('record_treatments').insert({
+                        record_id: recordId,
+                        procedure_name: procedures || 'General Visit',
+                        post_visit_instructions: ownerInstructions || null,
+                      });
+                    }
+
+                    // ── medications (1:N) ──
+                    if (meds.length > 0) {
+                      const medRows = meds.filter(m => m.name).map(m => ({
+                        pet_id: apptIds.petId!,
+                        record_id: recordId,
+                        organization_id: organizationId,
+                        name: m.name,
+                        dosage: m.dosage || '—',
+                        frequency: m.freq || '—',
+                        route: (m.route || 'Oral') as any,
+                        start_date: today,
+                        is_active: true,
+                      }));
+                      if (medRows.length > 0) {
+                        await supabase.from('medications').insert(medRows);
+                      }
+                    }
+                  }
+                } catch {}
+              }
+
+              // Save clinical notes as a pet note (linked to Notes tab in profile)
+              if (apptIds.petId && user && (dxNotes || procedures)) {
+                try {
+                  const noteContent = [
+                    primaryDx && `Diagnosis: ${primaryDx}${secondaryDx ? `, ${secondaryDx}` : ''}`,
+                    dxNotes && `Clinical Notes: ${dxNotes}`,
+                    procedures && `Procedures: ${procedures}`,
+                  ].filter(Boolean).join('\n\n');
+                  if (noteContent) {
+                    await supabase.from('pet_notes').insert({
+                      pet_id: apptIds.petId,
+                      organization_id: organizationId,
+                      author_id: user.id,
+                      type: 'vet',
+                      content: noteContent,
+                    });
+                  }
+                } catch {}
+              }
+
+              // Save owner instructions as a client-visible note
+              if (apptIds.petId && user && ownerInstructions) {
+                try {
+                  await supabase.from('pet_notes').insert({
+                    pet_id: apptIds.petId,
+                    organization_id: organizationId,
+                    author_id: user.id,
+                    type: 'client',
+                    content: ownerInstructions,
+                  });
+                } catch {}
+              }
+
+              // Insert selected lab tests into lab_results (pending — no result yet)
+              if (apptIds.petId && selectedTests.size > 0) {
+                try {
+                  // Look up clinic_id
+                  const { data: clinicForLab } = await supabase
+                    .from('clinics')
+                    .select('id')
+                    .eq('organization_id', organizationId)
+                    .limit(1)
+                    .single();
+
+                  // Get the medical_record id we just created (latest for this pet)
+                  const { data: latestRec } = await supabase
+                    .from('medical_records')
+                    .select('id')
+                    .eq('pet_id', apptIds.petId)
+                    .order('created_at', { ascending: false })
+                    .limit(1)
+                    .single();
+
+                  // Map specific test IDs to precise lab panels
+                  const testIdToPanel: Record<string, string> = {
+                    cbc: 'Hematology', coag: 'Hematology',
+                    chem: 'Chemistry', thyroid: 'Thyroid',
+                    ua: 'Urinalysis', uc: 'Urinalysis',
+                    fecal: 'Parasitology', fecal_pcr: 'Parasitology', giardia: 'Parasitology',
+                    heartworm: 'Parasitology', tick_panel: 'Parasitology',
+                    skin_scrape: 'Microbiology', cytology: 'Microbiology',
+                    ear_swab: 'Microbiology', culture: 'Microbiology',
+                    xray: 'Imaging', ultrasound: 'Imaging',
+                  };
+
+                  const labRows = Array.from(selectedTests).map((testId) => {
+                    const testDef = LAB_TESTS.find((t) => t.id === testId);
+                    return {
+                      test_name: testDef?.label || testId,
+                      test_panel: testIdToPanel[testId] || 'General',
+                      pet_id: apptIds.petId!,
+                      record_id: latestRec?.id || null,
+                      ordered_by: apptIds.staffId || null,
+                      clinic_id: clinicForLab?.id || null,
+                      flag: 'normal' as const,
+                      result_value: null,
+                      reference_range: null,
+                      unit: null,
+                      notes: testNotes[testId] || null,
+                      tested_at: new Date().toISOString(),
+                    };
+                  });
+
+                  if (labRows.length > 0) {
+                    const { error: labErr } = await supabase.from('lab_results').insert(labRows);
+                    if (labErr) console.error('Lab insert error:', labErr);
+                  }
+                } catch (e) { console.error('Lab insert exception:', e); }
+              }
+
+              // Insert vaccination record if this is a vaccination visit
+              if (hasVaccination && apptIds.petId && vaccineName) {
+                try {
+                  const { data: clinicForVax } = await supabase
+                    .from('clinics').select('id').eq('organization_id', organizationId).limit(1).single();
+                  await supabase.from('vaccinations').insert({
+                    pet_id: apptIds.petId,
+                    clinic_id: clinicForVax?.id || null,
+                    administered_by: apptIds.staffId || null,
+                    vaccine_name: vaccineName,
+                    manufacturer: vaccineManufacturer || null,
+                    lot_number: vaccineLotNumber || null,
+                    serial_number: vaccineSerialNumber || null,
+                    administered_date: new Date().toISOString().split('T')[0],
+                    expiry_date: vaccineExpiryDate || null,
+                    next_due_date: vaccineNextDueDate || null,
+                    injection_site: vaccineInjectionSite || null,
+                    notes: vaccineNotes || null,
+                  });
+                } catch (e) { console.error('Vaccination insert error:', e); }
+              }
+
+              // Clear saved draft since we're moving forward
+              try { sessionStorage.removeItem(draftKey); } catch {}
               advanceToCheckout(id!); navigate(`/appointments/${id}/checkout`);
             }}
             style={{ backgroundColor: '#2D6A4F', color: '#fff', border: 'none' }}
@@ -1052,6 +1595,88 @@ export default function VisitPage() {
           </Button>
         </div>
       </div>
+
+      {/* Cancel Appointment Dialog */}
+      {showCancelDialog && (
+        <div className="fixed inset-0 flex items-center justify-center" style={{ zIndex: 9999, backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6" style={{ borderRadius: '14px', maxWidth: '480px', width: '90%', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+            <div className="flex items-center gap-3 mb-5">
+              <div className="flex items-center justify-center" style={{ width: '40px', height: '40px', borderRadius: '10px', backgroundColor: '#FEE2E2' }}>
+                <Ban style={{ width: '20px', height: '20px', color: '#EF4444' }} />
+              </div>
+              <div>
+                <h3 className="text-[var(--text-primary)]" style={{ fontSize: '18px', fontWeight: 700 }}>Cancel Appointment</h3>
+                <p className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>
+                  {appt?.petName} — {appt?.service}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-[var(--text-secondary)] mb-4" style={{ fontSize: '14px' }}>
+              Select or enter a reason for cancellation. This will be saved as a note on the appointment.
+            </p>
+
+            {/* Quick reason buttons */}
+            <div className="flex flex-wrap gap-2 mb-4">
+              {CANCEL_REASONS.map((reason) => (
+                <button
+                  key={reason}
+                  onClick={() => setCancelReason(reason === 'Other' ? '' : reason)}
+                  className="transition-all"
+                  style={{
+                    padding: '5px 12px',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    border: cancelReason === reason ? '1.5px solid #EF4444' : '1px solid var(--border-color)',
+                    backgroundColor: cancelReason === reason ? '#FEE2E2' : 'transparent',
+                    color: cancelReason === reason ? '#EF4444' : 'var(--text-secondary)',
+                  }}
+                >
+                  {reason}
+                </button>
+              ))}
+            </div>
+
+            {/* Custom reason textarea */}
+            <Textarea
+              placeholder="Add details or a custom reason..."
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              rows={3}
+              style={{ fontSize: '14px', marginBottom: '20px' }}
+            />
+
+            <div className="flex items-center justify-end gap-3">
+              <button
+                onClick={() => { setShowCancelDialog(false); setCancelReason(''); }}
+                disabled={cancelling}
+                className="px-4 py-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+                style={{ background: 'none', border: '1px solid var(--border-color)', borderRadius: '8px', fontSize: '14px', fontWeight: 500, cursor: 'pointer' }}
+              >
+                Go Back
+              </button>
+              <button
+                onClick={handleCancelAppointment}
+                disabled={cancelling || !cancelReason.trim()}
+                className="px-4 py-2 text-white hover:opacity-90 transition-opacity"
+                style={{
+                  backgroundColor: '#EF4444',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  cursor: cancelReason.trim() ? 'pointer' : 'not-allowed',
+                  opacity: cancelling || !cancelReason.trim() ? 0.5 : 1,
+                }}
+              >
+                {cancelling ? 'Cancelling...' : 'Cancel Appointment'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

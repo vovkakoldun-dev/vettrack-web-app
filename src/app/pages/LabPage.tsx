@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Search, FlaskConical, TrendingUp, TrendingDown, AlertTriangle, CheckCircle2, ChevronRight, Download, Upload } from 'lucide-react';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
@@ -6,7 +6,8 @@ import { Avatar, AvatarImage, AvatarFallback } from '../components/ui/avatar';
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '../components/ui/select';
-import { useNavigate } from 'react-router';
+import { useNavigate, useLocation } from 'react-router';
+import { supabase } from '../../lib/supabase';
 
 // ─── Types ─────────────────────────────────────────────────────
 
@@ -15,6 +16,7 @@ type LabCategory = 'Hematology' | 'Chemistry' | 'Urinalysis' | 'Cardiac' | 'Thyr
 
 interface LabResult {
   id: number;
+  dbId?: string;
   testName: string;
   category: LabCategory;
   petName: string;
@@ -26,13 +28,23 @@ interface LabResult {
   referenceRange: string;
   flag: LabFlag;
   vet: string;
-  recordId: number;
+  recordId: string;
   notes?: string;
 }
 
-// ─── Mock Data ─────────────────────────────────────────────────
+// ─── Panel → Category mapping ────────────────────────────────────
 
-const LAB_RESULTS: LabResult[] = []
+const panelToCategory: Record<string, LabCategory> = {
+  Hematology: 'Hematology',
+  Chemistry: 'Chemistry',
+  Urinalysis: 'Urinalysis',
+  Cardiac: 'Cardiac',
+  Thyroid: 'Thyroid',
+  Microbiology: 'Microbiology',
+  Parasitology: 'Parasitology',
+  General: 'Hematology',
+  Imaging: 'Hematology',
+};
 
 // ─── Helpers ───────────────────────────────────────────────────
 
@@ -56,7 +68,11 @@ const categoryColors: Record<LabCategory, string> = {
 const CATEGORIES: LabCategory[] = ['Hematology', 'Chemistry', 'Urinalysis', 'Cardiac', 'Thyroid', 'Microbiology', 'Parasitology'];
 
 function formatDate(d: string) {
-  return new Date(d + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  if (!d) return '—';
+  // Handle both "2026-03-29" and full ISO "2026-03-29T..." formats
+  const date = d.includes('T') ? new Date(d) : new Date(d + 'T12:00:00');
+  if (isNaN(date.getTime())) return '—';
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 // ─── Stat Card ────────────────────────────────────────────────
@@ -75,22 +91,57 @@ function StatCard({ label, value, color, sub }: { label: string; value: number; 
 
 export default function LabPage() {
   const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const basePath = pathname.startsWith('/admin') ? '/admin/records' : '/records';
   const [search, setSearch] = useState('');
   const [filterFlag, setFilterFlag] = useState<string>('all');
   const [filterCategory, setFilterCategory] = useState<string>('all');
   const [filterPet, setFilterPet] = useState<string>('all');
+  const [labResults, setLabResults] = useState<LabResult[]>([]);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from('lab_results')
+        .select('id, test_name, test_panel, result_value, reference_range, unit, flag, notes, tested_at, reported_at, pets!left(id, name, species, photo_url), medical_records!left(id, clients!left(first_name, last_name)), staff!lab_results_ordered_by_fkey!left(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
+        .order('tested_at', { ascending: false });
+      if (data) {
+        const mapped: LabResult[] = data.map((r: any, i: number) => {
+          const flagMap: Record<string, LabFlag> = { normal: 'Normal', high: 'High', low: 'Low', critical: 'Critical' };
+          return {
+            id: i + 1,
+            dbId: r.id,
+            testName: r.test_name || '—',
+            category: (panelToCategory[r.test_panel] || 'Hematology') as LabCategory,
+            petName: r.pets?.name ?? '—',
+            petImage: r.pets?.photo_url || '',
+            ownerName: r.medical_records?.clients ? `${r.medical_records.clients.first_name} ${r.medical_records.clients.last_name}` : '—',
+            date: r.tested_at || '',
+            result: r.result_value || 'Pending',
+            unit: r.unit || '',
+            referenceRange: r.reference_range || '',
+            flag: flagMap[r.flag] || 'Normal',
+            vet: r.staff?.profiles ? `Dr. ${r.staff.profiles.first_name} ${r.staff.profiles.last_name}` : '—',
+            recordId: r.medical_records?.id || '',
+            notes: r.notes || undefined,
+          };
+        });
+        setLabResults(mapped);
+      }
+    })();
+  }, []);
 
   // Derived stats
-  const total = 0;
-  const normal = [].filter((r) => r.flag === 'Normal').length;
-  const abnormal = [].filter((r) => r.flag === 'High' || r.flag === 'Low').length;
-  const critical = [].filter((r) => r.flag === 'Critical').length;
+  const total = labResults.length;
+  const normal = labResults.filter((r) => r.flag === 'Normal').length;
+  const abnormal = labResults.filter((r) => r.flag === 'High' || r.flag === 'Low').length;
+  const critical = labResults.filter((r) => r.flag === 'Critical').length;
 
   // Unique pets for filter
-  const uniquePets = Array.from(new Set([].map((r) => r.petName))).sort();
+  const uniquePets = Array.from(new Set(labResults.map((r) => r.petName))).sort();
 
   // Filtered results
-  const filtered = [].filter((r) => {
+  const filtered = labResults.filter((r) => {
     const q = search.toLowerCase();
     if (q && !(
       r.testName.toLowerCase().includes(q) ||
@@ -136,7 +187,7 @@ export default function LabPage() {
       {/* ─── Stat Cards ─── */}
       <div className="grid grid-cols-4 gap-4 mb-6">
         <StatCard label="Total Results" value={total} color="var(--text-primary)" sub="All time" />
-        <StatCard label="Normal" value={normal} color="var(--brand-green-text)" sub={`${Math.round((normal / total) * 100)}% of results`} />
+        <StatCard label="Normal" value={normal} color="var(--brand-green-text)" sub={total > 0 ? `${Math.round((normal / total) * 100)}% of results` : '0% of results'} />
         <StatCard label="Abnormal" value={abnormal} color="#D97706" sub="High or Low flags" />
         <StatCard label="Critical" value={critical} color="#d4183d" sub="Immediate attention" />
       </div>
@@ -240,7 +291,7 @@ export default function LabPage() {
                 key={r.id}
                 className={`grid items-center px-5 py-3.5 cursor-pointer hover:bg-[var(--surface-elevated)] transition-colors ${!isLast ? 'border-b border-[var(--border-color)]' : ''}`}
                 style={{ gridTemplateColumns: '2fr 1.5fr 120px 130px 150px 100px 90px 32px' }}
-                onClick={() => navigate(`/records/${r.recordId}`)}
+                onClick={() => r.recordId ? navigate(`${basePath}/${r.recordId}`) : undefined}
               >
                 {/* Test name + category */}
                 <div>

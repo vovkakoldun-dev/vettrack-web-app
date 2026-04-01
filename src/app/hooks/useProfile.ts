@@ -39,7 +39,7 @@ const EMPTY_PROFILE: Profile = {
 function buildProfile(data: any, portal: PortalType): Profile {
   const firstName = data.first_name || '';
   const lastName = data.last_name || '';
-  const isDoctor = portal === 'doctor';
+  const isDoctor = (data.role === 'doctor' || data.role === 'veterinarian');
   const fullName = isDoctor
     ? `Dr. ${firstName} ${lastName}`.trim()
     : `${firstName} ${lastName}`.trim();
@@ -133,10 +133,10 @@ export function useProfile(portal: PortalType) {
           lastName: d.lastName ?? prev.lastName,
           email: d.email ?? prev.email,
           phone: d.phone ?? prev.phone,
-          fullName: portal === 'doctor'
+          fullName: (prev.role === 'doctor' || prev.role === 'veterinarian')
             ? `Dr. ${d.firstName ?? prev.firstName} ${d.lastName ?? prev.lastName}`.trim()
             : `${d.firstName ?? prev.firstName} ${d.lastName ?? prev.lastName}`.trim(),
-          displayName: portal === 'doctor'
+          displayName: (prev.role === 'doctor' || prev.role === 'veterinarian')
             ? `Dr. ${d.lastName ?? prev.lastName}`.trim()
             : `${d.firstName ?? prev.firstName} ${d.lastName ?? prev.lastName}`.trim(),
           initials: [d.firstName ?? prev.firstName, d.lastName ?? prev.lastName]

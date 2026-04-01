@@ -968,7 +968,7 @@ export default function SuperAdminStaffPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ backgroundColor: 'var(--surface-elevated)' }}>
-                  {['Staff Member', 'Role', 'Clinic', 'Status', 'Schedule', 'Start Date', 'Rating', ''].map(h => (
+                  {['Staff Member', 'Role', 'Clinic', 'Status', 'Schedule', 'Start Date', ''].map(h => (
                     <th key={h} style={{
                       padding: h === '' ? '12px 16px' : '12px 16px',
                       textAlign: 'left', fontSize: 11, fontWeight: 700, letterSpacing: '0.06em',
@@ -983,7 +983,7 @@ export default function SuperAdminStaffPage() {
               <tbody>
                 {loading && (
                   <tr>
-                    <td colSpan={8} style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: 14 }}>
+                    <td colSpan={7} style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: 14 }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
                         <Loader2 style={{ width: 18, height: 18, animation: 'spin 1s linear infinite' }} />
                         Loading staff…
@@ -993,7 +993,7 @@ export default function SuperAdminStaffPage() {
                 )}
                 {!loading && filtered.length === 0 && (
                   <tr>
-                    <td colSpan={8} style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: 14 }}>
+                    <td colSpan={7} style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: 14 }}>
                       No staff members match your filters.
                     </td>
                   </tr>
@@ -1046,11 +1046,6 @@ export default function SuperAdminStaffPage() {
                     <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
                       <p style={{ fontSize: 13, color: 'var(--text-primary)', margin: '0 0 1px' }}>{fmtDate(s.startDate)}</p>
                       <p style={{ fontSize: 11, color: 'var(--text-secondary)', margin: 0 }}>{tenure(s.startDate)} tenure</p>
-                    </td>
-
-                    {/* Rating */}
-                    <td style={{ padding: '14px 16px' }}>
-                      {s.rating != null ? <StarRating rating={s.rating} /> : <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>—</span>}
                     </td>
 
                     {/* Actions */}

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import {
   User, Building2, Bell, Palette, Shield, CreditCard,
@@ -10,6 +10,7 @@ import {
   Copy, RotateCcw, Webhook, Zap, FlaskConical,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { hashSessionToken } from '../../lib/hashToken';
 import { updateProfile, uploadAvatar, removeAvatar } from '../hooks/useProfile';
 import { getOrgContext } from '../hooks/useOrgContext';
 import { Button } from '../components/ui/button';
@@ -46,15 +47,20 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { id: 'profile',       label: 'Profile',       icon: User },
-  { id: 'clinic',        label: 'Clinic',         icon: Building2 },
   { id: 'notifications', label: 'Notifications',  icon: Bell },
   { id: 'appearance',    label: 'Appearance',     icon: Palette },
   { id: 'security',      label: 'Security',       icon: Shield },
-  { id: 'billing',       label: 'Billing',        icon: CreditCard },
-  { id: 'integrations',  label: 'Integrations',   icon: Plug },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// Map frontend notification keys to DB column names
+const NOTIF_DB_MAP: Record<string, string> = {
+  apptNew: 'appt_new', apptCancel: 'appt_cancel', apptReminder: 'appt_reminder', apptReschedule: 'appt_reschedule',
+  labReady: 'lab_ready', labCritical: 'lab_critical',
+  invoiceGen: 'invoice_gen', paymentRecv: 'payment_recv', planExpiry: 'plan_expiry',
+  systemUpdates: 'system_updates',
+};
 
 function SectionCard({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return (
@@ -737,6 +743,16 @@ export default function SettingsPage() {
       setSaving(false);
     }
 
+    if (section === 'notifications' && user) {
+      setSaving(true);
+      const dbRow: Record<string, any> = { user_id: user.id, updated_at: new Date().toISOString() };
+      for (const [key, col] of Object.entries(NOTIF_DB_MAP)) {
+        dbRow[col] = notifs[key as keyof typeof notifs];
+      }
+      await supabase.from('notification_preferences').upsert(dbRow, { onConflict: 'user_id' });
+      setSaving(false);
+    }
+
     setSavedSection(section);
     setTimeout(() => setSavedSection(null), 3000);
   };
@@ -808,24 +824,48 @@ export default function SettingsPage() {
 
   // ── Notification state ─────────────────────────────────────────────────────
   const [notifs, setNotifs] = useState({
-    apptNew:        { email: true,  sms: true,  inApp: true  },
-    apptCancel:     { email: true,  sms: false, inApp: true  },
-    apptReminder:   { email: true,  sms: true,  inApp: true  },
-    apptReschedule: { email: false, sms: false, inApp: true  },
-    labReady:       { email: true,  sms: false, inApp: true  },
-    labCritical:    { email: true,  sms: true,  inApp: true  },
-    invoiceGen:     { email: true,  sms: false, inApp: false },
-    paymentRecv:    { email: true,  sms: false, inApp: true  },
-    planExpiry:     { email: true,  sms: true,  inApp: true  },
-    systemUpdates:  { email: false, sms: false, inApp: true  },
+    apptNew:        true,
+    apptCancel:     true,
+    apptReminder:   true,
+    apptReschedule: true,
+    labReady:       true,
+    labCritical:    true,
+    invoiceGen:     false,
+    paymentRecv:    true,
+    planExpiry:     true,
+    systemUpdates:  true,
   });
 
-  const toggleNotif = (key: keyof typeof notifs, channel: 'email' | 'sms' | 'inApp') => {
-    setNotifs((prev) => ({
-      ...prev,
-      [key]: { ...prev[key], [channel]: !prev[key][channel] },
-    }));
+
+  const toggleNotif = (key: keyof typeof notifs) => {
+    setNotifs((prev) => ({ ...prev, [key]: !prev[key] }));
   };
+
+  // Load notification preferences from Supabase
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      const { data } = await supabase
+        .from('notification_preferences')
+        .select('*')
+        .eq('user_id', user.id)
+        .single();
+      if (data) {
+        setNotifs({
+          apptNew: data.appt_new,
+          apptCancel: data.appt_cancel,
+          apptReminder: data.appt_reminder,
+          apptReschedule: data.appt_reschedule,
+          labReady: data.lab_ready,
+          labCritical: data.lab_critical,
+          invoiceGen: data.invoice_gen,
+          paymentRecv: data.payment_recv,
+          planExpiry: data.plan_expiry,
+          systemUpdates: data.system_updates,
+        });
+      }
+    })();
+  }, [user]);
 
   // ── Appearance state ───────────────────────────────────────────────────────
   const [themeMode, setThemeMode] = useState<'light' | 'dark' | 'system'>(() => {
@@ -867,20 +907,138 @@ export default function SettingsPage() {
     })();
   }, []);
 
-  const sessions = [
-    { id: 1, device: 'MacBook Pro 14"',   browser: 'Chrome 122',  location: 'Austin, TX', lastActive: 'Now',           current: true  },
-    { id: 2, device: 'iPhone 15 Pro',      browser: 'Safari 17',   location: 'Austin, TX', lastActive: '2 hours ago',   current: false },
-    { id: 3, device: 'iPad Air (5th gen)', browser: 'Safari 17',   location: 'Austin, TX', lastActive: 'Yesterday',     current: false },
-    { id: 4, device: 'Windows PC',         browser: 'Edge 121',    location: 'Houston, TX',lastActive: '5 days ago',    current: false },
-  ];
+  // ── Sessions & Login Activity (real Supabase data) ───────────────────────
+  interface SessionRow { id: string; device: string; browser: string; location: string; is_current: boolean; last_active_at: string; }
+  interface ActivityRow { id: string; device: string; browser: string; location: string; status: string; created_at: string; }
+  const [sessions, setSessions] = useState<SessionRow[]>([]);
+  const [loginActivity, setLoginActivity] = useState<ActivityRow[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
 
-  const loginActivity = [
-    { date: 'Mar 14, 2026 — 9:02 AM',  device: 'MacBook Pro 14"',   location: 'Austin, TX',  status: 'success' },
-    { date: 'Mar 13, 2026 — 8:45 AM',  device: 'iPhone 15 Pro',      location: 'Austin, TX',  status: 'success' },
-    { date: 'Mar 12, 2026 — 10:18 AM', device: 'MacBook Pro 14"',    location: 'Austin, TX',  status: 'success' },
-    { date: 'Mar 11, 2026 — 7:55 AM',  device: 'Windows PC',         location: 'Houston, TX', status: 'success' },
-    { date: 'Mar 10, 2026 — 6:30 PM',  device: 'Unknown Device',     location: 'New York, NY',status: 'failed'  },
-  ];
+  // Parse user-agent into device + browser
+  const parseUserAgent = useCallback(() => {
+    const ua = navigator.userAgent;
+    let device = 'Unknown Device';
+    let browser = 'Unknown Browser';
+    // Device
+    if (/Macintosh|MacIntel/.test(ua)) device = 'Mac';
+    else if (/Windows/.test(ua)) device = 'Windows PC';
+    else if (/iPad/.test(ua)) device = 'iPad';
+    else if (/iPhone/.test(ua)) device = 'iPhone';
+    else if (/Android/.test(ua) && /Mobile/.test(ua)) device = 'Android Phone';
+    else if (/Android/.test(ua)) device = 'Android Tablet';
+    else if (/Linux/.test(ua)) device = 'Linux PC';
+    // Browser
+    if (/Edg\/(\d+)/.test(ua)) browser = `Edge ${RegExp.$1}`;
+    else if (/Chrome\/(\d+)/.test(ua)) browser = `Chrome ${RegExp.$1}`;
+    else if (/Firefox\/(\d+)/.test(ua)) browser = `Firefox ${RegExp.$1}`;
+    else if (/Version\/(\d+).*Safari/.test(ua)) browser = `Safari ${RegExp.$1}`;
+    return { device, browser };
+  }, []);
+
+  // Format relative time
+  const formatRelativeTime = (dateStr: string) => {
+    const now = new Date();
+    const d = new Date(dateStr);
+    const diffMs = now.getTime() - d.getTime();
+    const diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 1) return 'Now';
+    if (diffMin < 60) return `${diffMin} min ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `${diffHr} hour${diffHr > 1 ? 's' : ''} ago`;
+    const diffDays = Math.floor(diffHr / 24);
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 30) return `${diffDays} days ago`;
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  // Register current session + fetch all sessions & activity
+  const loadSessions = useCallback(async () => {
+    if (!user) return;
+    setSessionsLoading(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const rawToken = sessionData?.session?.access_token?.slice(-16) || 'current';
+      const tokenHash = await hashSessionToken(rawToken);
+      const { device, browser } = parseUserAgent();
+
+      // Upsert current session (only the hash is stored, never the raw token)
+      await supabase.from('user_sessions').upsert(
+        {
+          user_id: user.id,
+          session_token_hash: tokenHash,
+          device,
+          browser,
+          location: 'Current Location',
+          is_current: true,
+          last_active_at: new Date().toISOString(),
+        },
+        { onConflict: 'session_token_hash' }
+      );
+
+      // Mark all other sessions as not current
+      await supabase
+        .from('user_sessions')
+        .update({ is_current: false })
+        .eq('user_id', user.id)
+        .neq('session_token_hash', tokenHash);
+
+      // Fetch all sessions
+      const { data: allSessions } = await supabase
+        .from('user_sessions')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('last_active_at', { ascending: false });
+
+      setSessions(allSessions || []);
+
+      // Log this login in activity (only if no recent entry in last 5 min)
+      const fiveMinAgo = new Date(Date.now() - 5 * 60000).toISOString();
+      const { data: recentLog } = await supabase
+        .from('login_activity')
+        .select('id')
+        .eq('user_id', user.id)
+        .gte('created_at', fiveMinAgo)
+        .limit(1);
+
+      if (!recentLog || recentLog.length === 0) {
+        await supabase.from('login_activity').insert({
+          user_id: user.id,
+          device,
+          browser,
+          location: 'Current Location',
+          status: 'success',
+        });
+      }
+
+      // Fetch recent login activity
+      const { data: activity } = await supabase
+        .from('login_activity')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      setLoginActivity(activity || []);
+    } catch (e) {
+      console.error('Error loading sessions:', e);
+    }
+    setSessionsLoading(false);
+  }, [user, parseUserAgent]);
+
+  useEffect(() => { loadSessions(); }, [loadSessions]);
+
+  // Revoke a single session
+  const revokeSession = async (sessionId: string) => {
+    await supabase.from('user_sessions').delete().eq('id', sessionId);
+    setSessions(prev => prev.filter(s => s.id !== sessionId));
+  };
+
+  // Sign out all sessions
+  const signOutAll = async () => {
+    if (!user) return;
+    await supabase.from('user_sessions').delete().eq('user_id', user.id);
+    await supabase.auth.signOut({ scope: 'global' });
+  };
 
   return (
     <div className="max-w-[1440px] mx-auto p-8">
@@ -1222,8 +1380,8 @@ export default function SettingsPage() {
                 <div className="flex items-start gap-3">
                   <Info className="w-5 h-5 text-[#3B82F6] flex-shrink-0 mt-0.5" />
                   <p className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>
-                    Choose how you receive notifications. SMS messages may incur carrier charges.
-                    In-app notifications appear in the bell icon in the sidebar.
+                    Choose which in-app notifications you'd like to receive.
+                    Notifications appear in the bell icon in the sidebar.
                   </p>
                 </div>
               </SectionCard>
@@ -1268,26 +1426,22 @@ export default function SettingsPage() {
                   <Separator className="mb-4" />
 
                   {/* Column headers */}
-                  <div className="grid grid-cols-[1fr_80px_80px_80px] gap-4 pb-2 border-b border-[var(--border-color)]">
+                  <div className="grid grid-cols-[1fr_80px] gap-4 pb-2 border-b border-[var(--border-color)]">
                     <span />
-                    {['Email', 'SMS', 'In-app'].map((ch) => (
-                      <span key={ch} className="text-center text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600 }}>
-                        {ch}
-                      </span>
-                    ))}
+                    <span className="text-center text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600 }}>
+                      In-app
+                    </span>
                   </div>
 
                   {group.rows.map(({ key, label, desc }) => (
-                    <div key={key} className="grid grid-cols-[1fr_80px_80px_80px] gap-4 items-center py-3.5 border-b border-[var(--border-color)] last:border-0">
+                    <div key={key} className="grid grid-cols-[1fr_80px] gap-4 items-center py-3.5 border-b border-[var(--border-color)] last:border-0">
                       <div>
                         <p className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 600 }}>{label}</p>
                         <p className="text-[var(--text-secondary)]" style={{ fontSize: '12px' }}>{desc}</p>
                       </div>
-                      {(['email', 'sms', 'inApp'] as const).map((ch) => (
-                        <div key={ch} className="flex justify-center">
-                          <Switch checked={notifs[key][ch]} onCheckedChange={() => toggleNotif(key, ch)} />
-                        </div>
-                      ))}
+                      <div className="flex justify-center">
+                        <Switch checked={notifs[key]} onCheckedChange={() => toggleNotif(key)} />
+                      </div>
                     </div>
                   ))}
                 </SectionCard>
@@ -1614,7 +1768,7 @@ export default function SettingsPage() {
               <SectionCard>
                 <div className="flex items-center justify-between mb-1">
                   <h3 className="text-[var(--text-primary)]">Active sessions</h3>
-                  <Button variant="outline" size="sm" className="text-[#d4183d] border-[#d4183d] hover:bg-[#d4183d10] hover:text-[#d4183d]">
+                  <Button variant="outline" size="sm" className="text-[#d4183d] border-[#d4183d] hover:bg-[#d4183d10] hover:text-[#d4183d]" onClick={signOutAll}>
                     <LogOut className="w-4 h-4" />
                     Sign out all
                   </Button>
@@ -1624,7 +1778,11 @@ export default function SettingsPage() {
                 </p>
 
                 <div className="space-y-3">
-                  {sessions.map((s) => (
+                  {sessionsLoading ? (
+                    <p className="text-[var(--text-secondary)] text-center py-6" style={{ fontSize: '14px' }}>Loading sessions...</p>
+                  ) : sessions.length === 0 ? (
+                    <p className="text-[var(--text-secondary)] text-center py-6" style={{ fontSize: '14px' }}>No active sessions found.</p>
+                  ) : sessions.map((s) => (
                     <div
                       key={s.id}
                       className="flex items-center justify-between p-4 border border-[var(--border-color)] bg-[var(--surface-elevated)]"
@@ -1642,19 +1800,19 @@ export default function SettingsPage() {
                             <p className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 600 }}>
                               {s.device}
                             </p>
-                            {s.current && (
+                            {s.is_current && (
                               <Badge variant="outline" className="border-[#2D6A4F] text-[var(--brand-green-text)]" style={{ fontSize: '11px' }}>
                                 Current
                               </Badge>
                             )}
                           </div>
                           <p className="text-[var(--text-secondary)]" style={{ fontSize: '12px' }}>
-                            {s.browser} · {s.location} · {s.lastActive}
+                            {s.browser} · {s.location} · {formatRelativeTime(s.last_active_at)}
                           </p>
                         </div>
                       </div>
-                      {!s.current && (
-                        <Button variant="ghost" size="sm" className="text-[#d4183d] hover:text-[#d4183d]">
+                      {!s.is_current && (
+                        <Button variant="ghost" size="sm" className="text-[#d4183d] hover:text-[#d4183d]" onClick={() => revokeSession(s.id)}>
                           Revoke
                         </Button>
                       )}
@@ -1681,9 +1839,15 @@ export default function SettingsPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {loginActivity.map((row, i) => (
-                        <tr key={i} className="border-b border-[var(--border-color)] last:border-0">
-                          <td className="px-4 py-3 text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{row.date}</td>
+                      {loginActivity.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="px-4 py-6 text-center text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>No login activity recorded yet.</td>
+                        </tr>
+                      ) : loginActivity.map((row) => (
+                        <tr key={row.id} className="border-b border-[var(--border-color)] last:border-0">
+                          <td className="px-4 py-3 text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>
+                            {new Date(row.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} — {new Date(row.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                          </td>
                           <td className="px-4 py-3 text-[var(--text-primary)]" style={{ fontSize: '13px' }}>{row.device}</td>
                           <td className="px-4 py-3 text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{row.location}</td>
                           <td className="px-4 py-3">

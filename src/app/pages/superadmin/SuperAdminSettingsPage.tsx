@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
+import { getOrgContext } from '../../hooks/useOrgContext';
 import { uploadAvatar, removeAvatar } from '../../hooks/useProfile';
 import {
   User, Building2, Bell, Palette, Shield, CreditCard,
@@ -160,6 +161,26 @@ export default function SuperAdminSettingsPage() {
 
   const save = (s: Section) => { setSavedSection(s); setTimeout(() => setSavedSection(null), 3000); };
   const saved = (s: Section) => savedSection === s;
+
+  // ── Audit log (real data from Supabase) ──
+  interface AuditEntry { action: string; actor_name: string; resource_type: string; resource_label: string; created_at: string; }
+  const [auditLogs, setAuditLogs] = useState<AuditEntry[]>([]);
+  const [auditLoading, setAuditLoading] = useState(true);
+  useEffect(() => {
+    (async () => {
+      try {
+        const { organizationId } = await getOrgContext();
+        const { data } = await supabase
+          .from('audit_logs')
+          .select('action, actor_name, resource_type, resource_label, created_at')
+          .eq('organization_id', organizationId)
+          .order('created_at', { ascending: false })
+          .limit(15);
+        if (data) setAuditLogs(data);
+      } catch (e) { console.error('Failed to load audit logs:', e); }
+      setAuditLoading(false);
+    })();
+  }, []);
 
   const saveSecurity = async () => {
     if (!currentPw || !newPw || newPw !== confirmPw || newPw.length < 12) return;
@@ -838,24 +859,60 @@ export default function SuperAdminSettingsPage() {
                   <Button size="sm" variant="outline"><Download className="w-3.5 h-3.5" /> Export</Button>
                 </div>
                 <Separator className="mb-4 mt-2" />
-                {[
-                  { time: 'Today 09:14 AM', action: 'Signed in',                   meta: 'MacBook Pro · Austin, TX',     icon: CheckCircle2, color: '#22C55E' },
-                  { time: 'Today 09:16 AM', action: 'Updated role permissions',    meta: 'Front Desk → billing access',  icon: Users,        color: ACCENT   },
-                  { time: 'Today 08:50 AM', action: 'Approved PTO request',        meta: 'Emma Thompson · Mar 18–22',    icon: CheckCircle2, color: '#3B82F6' },
-                  { time: 'Mar 14 6:30 PM', action: 'Failed login blocked',        meta: 'Unknown · New York, NY',       icon: AlertCircle,  color: '#EF4444' },
-                  { time: 'Mar 14 2:10 PM', action: 'Exported analytics report',   meta: 'Revenue · Jan–Mar 2026',       icon: FileText,     color: '#8B5CF6' },
-                ].map((e, i) => {
-                  const Icon = e.icon;
+                {auditLoading ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '8px 0' }}>
+                    {[1,2,3,4,5].map(i => (
+                      <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                        <div style={{ width: 30, height: 30, borderRadius: 8, backgroundColor: 'var(--surface-elevated)', animation: 'pulse 1.5s infinite' }} />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ width: '60%', height: 14, borderRadius: 4, backgroundColor: 'var(--surface-elevated)', animation: 'pulse 1.5s infinite', marginBottom: 4 }} />
+                          <div style={{ width: '40%', height: 10, borderRadius: 4, backgroundColor: 'var(--surface-elevated)', animation: 'pulse 1.5s infinite' }} />
+                        </div>
+                        <div style={{ width: 80, height: 12, borderRadius: 4, backgroundColor: 'var(--surface-elevated)', animation: 'pulse 1.5s infinite' }} />
+                      </div>
+                    ))}
+                  </div>
+                ) : auditLogs.length === 0 ? (
+                  <p style={{ padding: '24px 0', textAlign: 'center', color: 'var(--text-secondary)', fontSize: 13 }}>No audit log entries yet.</p>
+                ) : auditLogs.map((entry, i) => {
+                  const ACTION_META: Record<string, { label: string; icon: typeof CheckCircle2; color: string }> = {
+                    login:  { label: 'Signed in',  icon: CheckCircle2, color: '#22C55E' },
+                    logout: { label: 'Signed out', icon: AlertCircle,  color: '#6B7280' },
+                    create: { label: 'Created',    icon: Plus,         color: '#3B82F6' },
+                    update: { label: 'Updated',    icon: RefreshCw,    color: ACCENT },
+                    delete: { label: 'Deleted',    icon: Trash2,       color: '#EF4444' },
+                    export: { label: 'Exported',   icon: FileText,     color: '#8B5CF6' },
+                    reminder_sent:       { label: 'Reminder sent',      icon: Bell,         color: '#F59E0B' },
+                    account_deactivated: { label: 'Account deactivated', icon: AlertCircle, color: '#EF4444' },
+                  };
+                  const meta = ACTION_META[entry.action] || { label: entry.action, icon: Activity, color: '#6B7280' };
+                  const Icon = meta.icon;
+                  const actionLabel = entry.action === 'login' || entry.action === 'logout'
+                    ? meta.label
+                    : `${meta.label} ${entry.resource_type}`;
+                  const detail = entry.resource_label || entry.actor_name;
+                  // Format time
+                  const d = new Date(entry.created_at);
+                  const now = new Date();
+                  const diffMs = now.getTime() - d.getTime();
+                  const diffMin = Math.floor(diffMs / 60000);
+                  const diffHr = Math.floor(diffMs / 3600000);
+                  let timeStr: string;
+                  if (diffMin < 1) timeStr = 'Just now';
+                  else if (diffMin < 60) timeStr = `${diffMin}m ago`;
+                  else if (diffHr < 24 && d.getDate() === now.getDate()) timeStr = `Today ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+                  else if (diffHr < 48) timeStr = `Yesterday ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+                  else timeStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
                   return (
                     <div key={i} className="flex items-start gap-3 py-3 border-b border-[var(--border-color)] last:border-0">
-                      <div style={{ width: 30, height: 30, borderRadius: '8px', backgroundColor: `${e.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                        <Icon style={{ width: 14, height: 14, color: e.color }} />
+                      <div style={{ width: 30, height: 30, borderRadius: '8px', backgroundColor: `${meta.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <Icon style={{ width: 14, height: 14, color: meta.color }} />
                       </div>
                       <div style={{ flex: 1 }}>
-                        <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{e.action}</p>
-                        <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{e.meta}</p>
+                        <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{actionLabel}</p>
+                        <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{detail} · {entry.actor_name}</p>
                       </div>
-                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)', flexShrink: 0 }}>{e.time}</span>
+                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)', flexShrink: 0, whiteSpace: 'nowrap' }}>{timeStr}</span>
                     </div>
                   );
                 })}

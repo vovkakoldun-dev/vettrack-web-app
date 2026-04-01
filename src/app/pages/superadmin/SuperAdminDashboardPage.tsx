@@ -1,10 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router';
+import { supabase } from '../../../lib/supabase';
+import { getOrgContext } from '../../hooks/useOrgContext';
+import { ConnectionStatusBadge } from '../../components/ConnectionStatusBadge';
 import {
   Crown, PawPrint, Calendar, DollarSign, Users,
   AlertTriangle, MoreHorizontal, Plus, FileText, Settings, BarChart2,
   CheckCircle2, ClipboardList, BookOpen, Lock, UserPlus, RefreshCw,
-  ArrowUpRight, Bell, Umbrella, AlertCircle, X, Check, ChevronRight,
+  ArrowUpRight, Bell, Umbrella, AlertCircle, X, Check, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 
 // ─── Sparkline helpers ────────────────────────────────────────
@@ -40,7 +43,7 @@ function useDarkMode(): boolean {
 type NotifStatus = 'pending' | 'approved' | 'declined';
 
 interface Notification {
-  id: number;
+  id: string;
   type: 'pto' | 'shift_swap' | 'overdue' | 'reassign';
   avatar: string;
   avatarColor: string;
@@ -50,37 +53,6 @@ interface Notification {
   status: NotifStatus;
 }
 
-const INITIAL_NOTIFS: Notification[] = [
-  {
-    id: 1, type: 'pto', avatar: 'SP', avatarColor: '#8B5CF6',
-    title: 'Priya Sharma — PTO Request',
-    detail: 'Requesting time off Mar 20–22 (3 days)',
-    meta: 'Submitted 2h ago · Front Desk',
-    status: 'pending',
-  },
-  {
-    id: 2, type: 'shift_swap', avatar: 'JW', avatarColor: '#3B82F6',
-    title: 'James Wilson — Shift Swap',
-    detail: 'Swap Saturday Mar 22 with Emma Thompson',
-    meta: 'Submitted 4h ago · Front Desk',
-    status: 'pending',
-  },
-  {
-    id: 3, type: 'reassign', avatar: 'LG', avatarColor: '#F4A261',
-    title: 'Dr. Garcia — Leave Coverage Needed',
-    detail: '14 appointments Mar 18–22 need reassignment',
-    meta: 'Leave approved · Veterinarian',
-    status: 'pending',
-  },
-  {
-    id: 4, type: 'overdue', avatar: '!', avatarColor: '#EF4444',
-    title: '3 Invoices Overdue',
-    detail: 'Michael Brown $250 · Lisa Martinez $250 · Karen Harris $130',
-    meta: '$840 total · Oldest: Mar 8',
-    status: 'pending',
-  },
-];
-
 const NOTIF_TYPE_CFG = {
   pto:        { icon: Umbrella,     color: '#8B5CF6', bg: '#8B5CF615', label: 'PTO Request' },
   shift_swap: { icon: RefreshCw,    color: '#3B82F6', bg: '#3B82F615', label: 'Shift Swap' },
@@ -89,20 +61,142 @@ const NOTIF_TYPE_CFG = {
 };
 
 function NotificationsPanel() {
-  const [notifs, setNotifs] = useState<Notification[]>(INITIAL_NOTIFS);
+  const navigate = useNavigate();
+  const [notifs, setNotifs] = useState<Notification[]>([]);
+  const [loading, setLoading] = useState(true);
   const pending = notifs.filter(n => n.status === 'pending');
 
-  function approve(id: number) {
+  // Build notifications from REAL data sources + manual pending_requests
+  useEffect(() => {
+    (async () => {
+      try {
+        const { organizationId } = await getOrgContext();
+        const built: Notification[] = [];
+
+        // 1. Manual pending requests (PTO, shift swaps, etc.)
+        const { data: manualReqs } = await supabase
+          .from('pending_requests')
+          .select('*')
+          .eq('organization_id', organizationId)
+          .eq('status', 'pending')
+          .order('created_at', { ascending: false });
+        if (manualReqs) {
+          manualReqs.forEach((r: any) => built.push({
+            id: r.id,
+            type: r.type as Notification['type'],
+            avatar: r.avatar || '?',
+            avatarColor: r.avatar_color || '#6B7280',
+            title: r.title,
+            detail: r.detail || '',
+            meta: r.meta || '',
+            status: 'pending',
+          }));
+        }
+
+        // 2. Overdue invoices → Finance Alert
+        const { data: overdueInv } = await supabase
+          .from('invoices')
+          .select('id, total, due_date, clients(first_name, last_name)')
+          .eq('organization_id', organizationId)
+          .eq('status', 'Overdue')
+          .order('due_date');
+        if (overdueInv && overdueInv.length > 0) {
+          const names = overdueInv.map((inv: any) => {
+            const c = inv.clients;
+            return `${c?.first_name || ''} ${c?.last_name || ''}`.trim() + ` $${Number(inv.total).toFixed(0)}`;
+          }).join(' · ');
+          const totalAmt = overdueInv.reduce((s: number, inv: any) => s + Number(inv.total), 0);
+          const oldest = overdueInv[0]?.due_date ? new Date(overdueInv[0].due_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+          built.push({
+            id: `overdue-invoices`,
+            type: 'overdue',
+            avatar: '!',
+            avatarColor: '#EF4444',
+            title: `${overdueInv.length} Invoice${overdueInv.length > 1 ? 's' : ''} Overdue`,
+            detail: names,
+            meta: `$${totalAmt.toLocaleString()} total${oldest ? ` · Oldest: ${oldest}` : ''}`,
+            status: 'pending',
+          });
+        }
+
+        // 3. Unpaid/Sent invoices → reminder
+        const { data: sentInv } = await supabase
+          .from('invoices')
+          .select('id, total, due_date, clients(first_name, last_name)')
+          .eq('organization_id', organizationId)
+          .eq('status', 'Sent')
+          .order('due_date');
+        if (sentInv && sentInv.length > 0) {
+          const totalAmt = sentInv.reduce((s: number, inv: any) => s + Number(inv.total), 0);
+          built.push({
+            id: `sent-invoices`,
+            type: 'overdue',
+            avatar: '$',
+            avatarColor: '#F4A261',
+            title: `${sentInv.length} Unpaid Invoice${sentInv.length > 1 ? 's' : ''}`,
+            detail: sentInv.map((inv: any) => {
+              const c = inv.clients;
+              return `${c?.first_name || ''} ${c?.last_name || ''}`.trim();
+            }).join(', '),
+            meta: `$${totalAmt.toLocaleString()} awaiting payment`,
+            status: 'pending',
+          });
+        }
+
+        // 4. Urgent pending tasks → action needed
+        const { data: urgentTasks } = await supabase
+          .from('tasks')
+          .select('id, type, priority, due_date, pet:pets!tasks_pet_id_fkey(name), assignedByStaff:staff!tasks_assigned_by_id_fkey(profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
+          .eq('organization_id', organizationId)
+          .eq('status', 'Pending')
+          .eq('priority', 'Urgent')
+          .order('due_date');
+        if (urgentTasks && urgentTasks.length > 0) {
+          urgentTasks.forEach((t: any) => {
+            const byProfile = t.assignedByStaff?.profiles;
+            const byName = byProfile ? `Dr. ${byProfile.last_name}` : 'Unknown';
+            const initials = byProfile ? `${(byProfile.first_name?.[0] || '').toUpperCase()}${(byProfile.last_name?.[0] || '').toUpperCase()}` : '??';
+            built.push({
+              id: `task-${t.id}`,
+              type: 'reassign',
+              avatar: initials,
+              avatarColor: '#d4183d',
+              title: `${t.type} — ${t.pet?.name || 'Unknown'}`,
+              detail: `Urgent task assigned by ${byName}`,
+              meta: `Due ${new Date(t.due_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
+              status: 'pending',
+            });
+          });
+        }
+
+        setNotifs(built);
+      } catch {} finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  async function approve(id: string) {
     setNotifs(prev => prev.map(n => n.id === id ? { ...n, status: 'approved' } : n));
+    // Only persist for real pending_requests rows (UUIDs)
+    if (!id.includes('-invoices') && !id.startsWith('task-')) {
+      await supabase.from('pending_requests').update({ status: 'approved', resolved_at: new Date().toISOString() }).eq('id', id);
+    }
   }
-  function decline(id: number) {
+  async function decline(id: string) {
     setNotifs(prev => prev.map(n => n.id === id ? { ...n, status: 'declined' } : n));
+    if (!id.includes('-invoices') && !id.startsWith('task-')) {
+      await supabase.from('pending_requests').update({ status: 'declined', resolved_at: new Date().toISOString() }).eq('id', id);
+    }
   }
-  function dismiss(id: number) {
+  async function dismiss(id: string) {
     setNotifs(prev => prev.filter(n => n.id !== id));
+    if (!id.includes('-invoices') && !id.startsWith('task-')) {
+      await supabase.from('pending_requests').delete().eq('id', id);
+    }
   }
 
-  if (notifs.length === 0) return null;
+  if (loading || notifs.length === 0) return null;
 
   return (
     <div style={{
@@ -318,7 +412,7 @@ const GLOW_CARDS = [
   },
   {
     title: 'Monthly Revenue',
-    subtitle: 'March 2026',
+    subtitle: '',
     metricLabel: 'Revenue Growth',
     value: '$48,920',
     trendLabel: '+8% vs last month',
@@ -357,8 +451,8 @@ const GLOW_CARDS = [
 function GlowStatCard({
   title, subtitle, metricLabel, value, trendLabel, trendPositive,
   color, shadowColor, icon: Icon, data, labels, unit,
-  annotationStart, annotationEnd, path,
-}: (typeof GLOW_CARDS)[0]) {
+  annotationStart, annotationEnd, path, onPrev, onNext,
+}: (typeof GLOW_CARDS)[0] & { onPrev?: () => void; onNext?: () => void }) {
   const dark = useDarkMode();
   const navigate = useNavigate();
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
@@ -455,9 +549,27 @@ function GlowStatCard({
               <Icon style={{ width: '19px', height: '19px', color }} />
             </div>
             <div>
-              <p style={{ fontSize: '10px', color: subtitleColor, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' as const, marginBottom: '3px' }}>
-                {subtitle}
-              </p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '3px' }}>
+                {onPrev && (
+                  <button onClick={e => { e.stopPropagation(); onPrev(); }} style={{
+                    background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                    display: 'flex', alignItems: 'center', color: subtitleColor,
+                  }}>
+                    <ChevronLeft style={{ width: '12px', height: '12px' }} />
+                  </button>
+                )}
+                <p style={{ fontSize: '10px', color: subtitleColor, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' as const, margin: 0 }}>
+                  {subtitle}
+                </p>
+                {onNext && (
+                  <button onClick={e => { e.stopPropagation(); onNext(); }} style={{
+                    background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                    display: 'flex', alignItems: 'center', color: subtitleColor,
+                  }}>
+                    <ChevronRight style={{ width: '12px', height: '12px' }} />
+                  </button>
+                )}
+              </div>
               <p style={{ fontSize: '14px', color: titleColor, fontWeight: 700, lineHeight: 1 }}>
                 {title}
               </p>
@@ -628,54 +740,445 @@ function GlowStatCard({
 
 // ─── Staff rows ───────────────────────────────────────────────
 
-type StaffStatus = 'On Duty' | 'On Leave' | 'Active' | 'Off Today';
+type StaffDisplayStatus = 'On Duty' | 'On Leave' | 'Active' | 'Off Today' | 'Inactive' | 'Probation';
 
-const STAFF_ROWS: {
+interface StaffRow {
+  id: string;
   name: string;
   role: string;
   appts: string;
-  status: StaffStatus;
+  status: StaffDisplayStatus;
   lastActive: string;
-}[] = [
-  { name: 'Dr. Sarah Chen',  role: 'Veterinarian', appts: '12', status: 'On Duty',  lastActive: 'Now' },
-  { name: 'Dr. Raj Patel',   role: 'Veterinarian', appts: '9',  status: 'On Duty',  lastActive: '5m ago' },
-  { name: 'Dr. Luis Garcia', role: 'Veterinarian', appts: '0',  status: 'On Leave', lastActive: 'Mar 12' },
-  { name: 'Emma Thompson',   role: 'Front Desk',   appts: '—',  status: 'Active',   lastActive: 'Now' },
-  { name: 'James Wilson',    role: 'Front Desk',   appts: '—',  status: 'Active',   lastActive: '2m ago' },
-  { name: 'Priya Sharma',    role: 'Front Desk',   appts: '—',  status: 'Off Today', lastActive: 'Yesterday' },
-];
+}
 
-const STATUS_DOT: Record<StaffStatus, { dot: string; bg: string; color: string }> = {
-  'On Duty':  { dot: '#22C55E', bg: '#22C55E18', color: '#15803D' },
-  'On Leave': { dot: '#F59E0B', bg: '#F59E0B18', color: '#92400E' },
-  'Active':   { dot: '#22C55E', bg: '#22C55E18', color: '#15803D' },
-  'Off Today':{ dot: '#EF4444', bg: '#EF444418', color: '#B91C1C' },
+const DB_ROLE_DISPLAY: Record<string, string> = {
+  veterinarian: 'Veterinarian',
+  senior_veterinarian: 'Sr. Veterinarian',
+  specialist: 'Specialist',
+  vet_technician: 'Vet Tech',
+  lead_vet_tech: 'Lead Vet Tech',
+  receptionist: 'Receptionist',
+  front_desk_manager: 'Front Desk',
+  clinic_manager: 'Clinic Manager',
+  groomer: 'Groomer',
+  lab_technician: 'Lab Tech',
+  superadmin: 'Super Admin',
+  owner: 'Owner',
 };
 
-// ─── Activity feed ────────────────────────────────────────────
+const VET_ROLES = ['veterinarian', 'senior_veterinarian', 'specialist'];
 
-const ACTIVITY_FEED = [
-  { icon: CheckCircle2, iconColor: '#22C55E', text: 'Payment received — John Smith $145', time: '9:42 AM' },
-  { icon: ClipboardList, iconColor: '#3B82F6', text: 'Record finalized — Max (Dr. Chen)', time: '9:30 AM' },
-  { icon: BookOpen,     iconColor: '#8B5CF6', text: 'New booking — Hugo · Dental Cleaning', time: '9:15 AM' },
-  { icon: Lock,         iconColor: '#F4A261', text: 'Portal request approved — Max checkup', time: '8:50 AM' },
-  { icon: AlertTriangle,iconColor: '#EF4444', text: 'Invoice overdue — Michael Brown $250', time: '8:30 AM' },
-  { icon: UserPlus,     iconColor: '#6B7280', text: 'New patient registered — Luna (Emily J.)', time: '8:00 AM' },
-];
+function formatLastActive(dateStr: string | null): string {
+  if (!dateStr) return '—';
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'Now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+const STATUS_DOT: Record<StaffDisplayStatus, { dot: string; bg: string; color: string }> = {
+  'On Duty':   { dot: '#22C55E', bg: '#22C55E18', color: '#15803D' },
+  'On Leave':  { dot: '#F59E0B', bg: '#F59E0B18', color: '#92400E' },
+  'Active':    { dot: '#22C55E', bg: '#22C55E18', color: '#15803D' },
+  'Off Today': { dot: '#EF4444', bg: '#EF444418', color: '#B91C1C' },
+  'Inactive':  { dot: '#6B7280', bg: '#6B728018', color: '#4B5563' },
+  'Probation': { dot: '#8B5CF6', bg: '#8B5CF618', color: '#6D28D9' },
+};
+
+// ─── Activity feed types ──────────────────────────────────────
+
+interface ActivityItem {
+  icon: typeof CheckCircle2;
+  iconColor: string;
+  text: string;
+  time: string;
+  sortKey: number; // timestamp for sorting
+}
 
 // ─── Quick actions ────────────────────────────────────────────
 
 const QUICK_ACTIONS = [
-  { icon: Plus,      label: 'Add Staff Member', primary: true },
-  { icon: FileText,  label: 'Create Invoice',   primary: false },
-  { icon: Settings,  label: 'System Settings',  primary: false },
-  { icon: BarChart2, label: 'Generate Report',  primary: false },
+  { icon: Plus,      label: 'Add Staff Member', primary: true,  path: '/superadmin/staff' },
+  { icon: FileText,  label: 'Create Invoice',   primary: false, path: '/superadmin/invoices' },
+  { icon: Settings,  label: 'System Settings',  primary: false, path: '/superadmin/settings' },
+  { icon: BarChart2, label: 'Generate Report',  primary: false, path: '/superadmin/analytics' },
 ];
 
 // ─── Component ────────────────────────────────────────────────
 
 export default function SuperAdminDashboardPage() {
   const navigate = useNavigate();
+  const [staffRows, setStaffRows] = useState<StaffRow[]>([]);
+  const [staffLoading, setStaffLoading] = useState(true);
+  const [kpiPatients, setKpiPatients] = useState('0');
+  const [kpiPatientsTrend, setKpiPatientsTrend] = useState('+0 this week');
+  const [kpiApptsToday, setKpiApptsToday] = useState('0');
+  const [kpiApptsTrend, setKpiApptsTrend] = useState('0 in progress');
+  const [kpiRevenue, setKpiRevenue] = useState('$0');
+  const [kpiRevenueTrend, setKpiRevenueTrend] = useState('+0% vs last month');
+  const [kpiRevenueTrendPositive, setKpiRevenueTrendPositive] = useState(true);
+  const [kpiStaffCount, setKpiStaffCount] = useState('0');
+  const [kpiStaffTrend, setKpiStaffTrend] = useState('0 doctors, 0 admin');
+  const [revenueMonth, setRevenueMonth] = useState(() => {
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() }; // 0-indexed month
+  });
+  const [finSnap, setFinSnap] = useState({ thisMonth: 0, lastMonth: 0, paid: 0, pending: 0, overdue: 0 });
+  const [activityFeed, setActivityFeed] = useState<ActivityItem[]>([]);
+
+  // ── Fetch Today's Activity Feed ──
+  useEffect(() => {
+    (async () => {
+      try {
+        const { organizationId } = await getOrgContext();
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const todayStart = `${todayStr}T00:00:00`;
+        const items: ActivityItem[] = [];
+        const fmtTime = (ts: string) => new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+
+        // 1. Payments received today
+        const { data: payments } = await supabase
+          .from('payments')
+          .select('amount, created_at, invoices(clients(first_name, last_name))')
+          .eq('organization_id', organizationId)
+          .gte('created_at', todayStart)
+          .order('created_at', { ascending: false })
+          .limit(5);
+        (payments || []).forEach((p: any) => {
+          const c = p.invoices?.clients;
+          const name = c ? `${c.first_name || ''} ${c.last_name || ''}`.trim() : 'Unknown';
+          items.push({
+            icon: CheckCircle2, iconColor: '#22C55E',
+            text: `Payment received — ${name} $${Number(p.amount).toLocaleString()}`,
+            time: fmtTime(p.created_at), sortKey: new Date(p.created_at).getTime(),
+          });
+        });
+
+        // 2. Appointments booked today
+        const { data: newAppts } = await supabase
+          .from('appointments')
+          .select('created_at, pets(name), services(name)')
+          .eq('organization_id', organizationId)
+          .gte('created_at', todayStart)
+          .order('created_at', { ascending: false })
+          .limit(5);
+        (newAppts || []).forEach((a: any) => {
+          const petName = (a.pets as any)?.name || 'Unknown';
+          const svcName = (a.services as any)?.name || 'Appointment';
+          items.push({
+            icon: BookOpen, iconColor: '#8B5CF6',
+            text: `New booking — ${petName} · ${svcName}`,
+            time: fmtTime(a.created_at), sortKey: new Date(a.created_at).getTime(),
+          });
+        });
+
+        // 3. Medical records created today
+        const { data: newRecords } = await supabase
+          .from('medical_records')
+          .select('created_at, pets(name), staff:staff!medical_records_vet_id_fkey(profiles:profiles!staff_profile_id_fkey(last_name))')
+          .eq('organization_id', organizationId)
+          .gte('created_at', todayStart)
+          .order('created_at', { ascending: false })
+          .limit(5);
+        (newRecords || []).forEach((r: any) => {
+          const petName = (r.pets as any)?.name || 'Unknown';
+          const vetName = r.staff?.profiles?.last_name ? `Dr. ${r.staff.profiles.last_name}` : '';
+          items.push({
+            icon: ClipboardList, iconColor: '#3B82F6',
+            text: `Record created — ${petName}${vetName ? ` (${vetName})` : ''}`,
+            time: fmtTime(r.created_at), sortKey: new Date(r.created_at).getTime(),
+          });
+        });
+
+        // 4. Overdue invoices (any time — important alerts)
+        const { data: overdueInv } = await supabase
+          .from('invoices')
+          .select('total, updated_at, clients(first_name, last_name)')
+          .eq('organization_id', organizationId)
+          .eq('status', 'Overdue')
+          .order('updated_at', { ascending: false })
+          .limit(3);
+        (overdueInv || []).forEach((inv: any) => {
+          const c = inv.clients;
+          const name = c ? `${c.first_name || ''} ${c.last_name || ''}`.trim() : 'Unknown';
+          items.push({
+            icon: AlertTriangle, iconColor: '#EF4444',
+            text: `Invoice overdue — ${name} $${Number(inv.total).toLocaleString()}`,
+            time: fmtTime(inv.updated_at), sortKey: new Date(inv.updated_at).getTime(),
+          });
+        });
+
+        // 5. New pets registered today
+        const { data: newPets } = await supabase
+          .from('pets')
+          .select('name, created_at, clients(first_name, last_name)')
+          .eq('organization_id', organizationId)
+          .gte('created_at', todayStart)
+          .order('created_at', { ascending: false })
+          .limit(3);
+        (newPets || []).forEach((pet: any) => {
+          const c = pet.clients;
+          const ownerName = c ? `${c.first_name?.[0] || ''}. ${c.last_name || ''}`.trim() : '';
+          items.push({
+            icon: UserPlus, iconColor: '#6B7280',
+            text: `New patient registered — ${pet.name}${ownerName ? ` (${ownerName})` : ''}`,
+            time: fmtTime(pet.created_at), sortKey: new Date(pet.created_at).getTime(),
+          });
+        });
+
+        // Sort by most recent first, limit to 8
+        items.sort((a, b) => b.sortKey - a.sortKey);
+        setActivityFeed(items.slice(0, 8));
+      } catch {}
+    })();
+  }, []);
+
+  // ── Fetch Financial Snapshot ──
+  useEffect(() => {
+    (async () => {
+      try {
+        const { organizationId } = await getOrgContext();
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59).toISOString();
+        const prevStart = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
+        const prevEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59).toISOString();
+
+        // This month invoices by status
+        const { data: thisMonthInv } = await supabase
+          .from('invoices')
+          .select('total, status')
+          .eq('organization_id', organizationId)
+          .gte('created_at', startOfMonth)
+          .lte('created_at', endOfMonth);
+
+        const thisMonthTotal = (thisMonthInv || []).reduce((s: number, i: any) => s + (Number(i.total) || 0), 0);
+        const paid = (thisMonthInv || []).filter((i: any) => i.status === 'Paid').reduce((s: number, i: any) => s + (Number(i.total) || 0), 0);
+        const pending = (thisMonthInv || []).filter((i: any) => i.status === 'Sent' || i.status === 'Draft').reduce((s: number, i: any) => s + (Number(i.total) || 0), 0);
+        const overdue = (thisMonthInv || []).filter((i: any) => i.status === 'Overdue').reduce((s: number, i: any) => s + (Number(i.total) || 0), 0);
+
+        // Last month total
+        const { data: lastMonthInv } = await supabase
+          .from('invoices')
+          .select('total')
+          .eq('organization_id', organizationId)
+          .gte('created_at', prevStart)
+          .lte('created_at', prevEnd);
+
+        const lastMonthTotal = (lastMonthInv || []).reduce((s: number, i: any) => s + (Number(i.total) || 0), 0);
+
+        setFinSnap({ thisMonth: thisMonthTotal, lastMonth: lastMonthTotal, paid, pending, overdue });
+      } catch {}
+    })();
+  }, []);
+
+  // ── Fetch staff overview data ──
+  useEffect(() => {
+    (async () => {
+      try {
+        const { organizationId } = await getOrgContext();
+
+        // 1. Fetch all non-inactive staff with profile names
+        const { data: staffData } = await supabase
+          .from('staff')
+          .select('id, role, status, profiles:profiles!staff_profile_id_fkey(first_name, last_name)')
+          .eq('organization_id', organizationId)
+          .neq('status', 'Inactive')
+          .order('role');
+
+        if (!staffData || staffData.length === 0) {
+          setStaffRows([]);
+          setStaffLoading(false);
+          return;
+        }
+
+        // 2. Count today's appointments per vet
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const { data: todayAppts } = await supabase
+          .from('appointments')
+          .select('vet_id')
+          .eq('organization_id', organizationId)
+          .gte('scheduled_at', `${todayStr}T00:00:00`)
+          .lt('scheduled_at', `${todayStr}T23:59:59`);
+
+        const apptCounts: Record<string, number> = {};
+        (todayAppts || []).forEach((a: any) => {
+          if (a.vet_id) apptCounts[a.vet_id] = (apptCounts[a.vet_id] || 0) + 1;
+        });
+
+        // 3. Get last active time per staff member from user_sessions
+        const staffIds = staffData.map((s: any) => s.id);
+        const { data: sessions } = await supabase
+          .from('user_sessions')
+          .select('user_id, last_active_at')
+          .in('user_id', staffIds)
+          .order('last_active_at', { ascending: false });
+
+        const lastLoginMap: Record<string, string> = {};
+        (sessions || []).forEach((s: any) => {
+          if (!lastLoginMap[s.user_id] && s.last_active_at) lastLoginMap[s.user_id] = s.last_active_at;
+        });
+
+        // 4. Check today's shifts to determine On Duty vs Off Today
+        const { data: todayShifts } = await supabase
+          .from('shifts')
+          .select('staff_id')
+          .eq('organization_id', organizationId)
+          .eq('date', todayStr)
+          .in('status', ['Active', 'Swap Pending']);
+
+        const onDutySet = new Set((todayShifts || []).map((s: any) => s.staff_id));
+
+        // 5. Build rows
+        const rows: StaffRow[] = staffData.map((s: any) => {
+          const profile = s.profiles as { first_name: string; last_name: string } | null;
+          const firstName = profile?.first_name || '';
+          const lastName = profile?.last_name || '';
+          const isVet = VET_ROLES.includes(s.role);
+          const displayName = isVet ? `Dr. ${firstName} ${lastName}`.trim() : `${firstName} ${lastName}`.trim();
+
+          let displayStatus: StaffDisplayStatus;
+          if (s.status === 'On Leave') {
+            displayStatus = 'On Leave';
+          } else if (s.status === 'Probation') {
+            displayStatus = 'Probation';
+          } else if (isVet) {
+            displayStatus = onDutySet.has(s.id) ? 'On Duty' : 'Off Today';
+          } else {
+            displayStatus = onDutySet.has(s.id) ? 'Active' : 'Off Today';
+          }
+
+          return {
+            id: s.id,
+            name: displayName || 'Unknown',
+            role: DB_ROLE_DISPLAY[s.role] || s.role,
+            appts: isVet ? String(apptCounts[s.id] || 0) : '—',
+            status: displayStatus,
+            lastActive: formatLastActive(lastLoginMap[s.id] || null),
+          };
+        });
+
+        // Sort: On Duty/Active first, then On Leave, then Off Today
+        const statusOrder: Record<StaffDisplayStatus, number> = {
+          'On Duty': 0, 'Active': 0, 'Probation': 1, 'On Leave': 2, 'Off Today': 3, 'Inactive': 4,
+        };
+        rows.sort((a, b) => (statusOrder[a.status] ?? 9) - (statusOrder[b.status] ?? 9));
+
+        setStaffRows(rows);
+        setKpiStaffCount(String(rows.length));
+      } catch (err) {
+        console.error('Failed to load staff overview:', err);
+      } finally {
+        setStaffLoading(false);
+      }
+    })();
+  }, []);
+
+  // ── KPI: All card metrics ──
+  useEffect(() => {
+    (async () => {
+      try {
+        const { organizationId } = await getOrgContext();
+        const todayStr = new Date().toISOString().slice(0, 10);
+
+        // ── Total Patients ──
+        const { count: petCount } = await supabase
+          .from('pets')
+          .select('id', { count: 'exact', head: true })
+          .eq('organization_id', organizationId);
+        if (petCount !== null) setKpiPatients(petCount.toLocaleString());
+
+        // Pets added this week
+        const weekAgo = new Date();
+        weekAgo.setDate(weekAgo.getDate() - 7);
+        const { count: newPets } = await supabase
+          .from('pets')
+          .select('id', { count: 'exact', head: true })
+          .eq('organization_id', organizationId)
+          .gte('created_at', weekAgo.toISOString());
+        setKpiPatientsTrend(`+${newPets || 0} this week`);
+
+        // ── Appointments Today ──
+        const { count: apptCount } = await supabase
+          .from('appointments')
+          .select('id', { count: 'exact', head: true })
+          .eq('organization_id', organizationId)
+          .gte('scheduled_at', `${todayStr}T00:00:00`)
+          .lt('scheduled_at', `${todayStr}T23:59:59`);
+        if (apptCount !== null) setKpiApptsToday(String(apptCount));
+
+        // In-progress appointments
+        const { count: inProgress } = await supabase
+          .from('appointments')
+          .select('id', { count: 'exact', head: true })
+          .eq('organization_id', organizationId)
+          .eq('status', 'In Progress');
+        setKpiApptsTrend(`${inProgress || 0} in progress`);
+
+        // ── Staff breakdown ──
+        const { data: staffBreakdown } = await supabase
+          .from('staff')
+          .select('role')
+          .eq('organization_id', organizationId)
+          .neq('status', 'Inactive');
+        if (staffBreakdown) {
+          const vetRoles = ['veterinarian', 'senior_veterinarian', 'specialist'];
+          const docs = staffBreakdown.filter((s: any) => vetRoles.includes(s.role)).length;
+          const admin = staffBreakdown.length - docs;
+          setKpiStaffTrend(`${docs} doctor${docs !== 1 ? 's' : ''}, ${admin} admin`);
+        }
+      } catch {}
+    })();
+  }, []);
+
+  // ── KPI: Monthly Revenue (re-fetches on month change) ──
+  useEffect(() => {
+    (async () => {
+      try {
+        const { organizationId } = await getOrgContext();
+        const { year, month } = revenueMonth;
+        const startOfMonth = new Date(year, month, 1).toISOString();
+        const endOfMonth = new Date(year, month + 1, 0, 23, 59, 59).toISOString();
+
+        // Current month revenue
+        const { data: monthInvoices } = await supabase
+          .from('invoices')
+          .select('total')
+          .eq('organization_id', organizationId)
+          .gte('created_at', startOfMonth)
+          .lte('created_at', endOfMonth)
+          .in('status', ['Paid', 'Sent', 'Overdue']);
+
+        const currentTotal = (monthInvoices || []).reduce((sum: number, inv: any) => sum + (Number(inv.total) || 0), 0);
+        setKpiRevenue(`$${currentTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}`);
+
+        // Previous month revenue for comparison
+        const prevStart = new Date(year, month - 1, 1).toISOString();
+        const prevEnd = new Date(year, month, 0, 23, 59, 59).toISOString();
+        const { data: prevInvoices } = await supabase
+          .from('invoices')
+          .select('total')
+          .eq('organization_id', organizationId)
+          .gte('created_at', prevStart)
+          .lte('created_at', prevEnd)
+          .in('status', ['Paid', 'Sent', 'Overdue']);
+
+        const prevTotal = (prevInvoices || []).reduce((sum: number, inv: any) => sum + (Number(inv.total) || 0), 0);
+        if (prevTotal > 0) {
+          const pctChange = ((currentTotal - prevTotal) / prevTotal * 100).toFixed(0);
+          const positive = currentTotal >= prevTotal;
+          setKpiRevenueTrend(`${positive ? '+' : ''}${pctChange}% vs last month`);
+          setKpiRevenueTrendPositive(positive);
+        } else {
+          setKpiRevenueTrend(currentTotal > 0 ? 'New revenue' : 'No data');
+          setKpiRevenueTrendPositive(currentTotal > 0);
+        }
+      } catch {}
+    })();
+  }, [revenueMonth]);
 
   return (
     <div className="max-w-[1440px] mx-auto p-8">
@@ -714,18 +1217,7 @@ export default function SuperAdminDashboardPage() {
         </div>
 
         <div className="flex items-center gap-3">
-          <div
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: '6px',
-              padding: '6px 12px', borderRadius: '8px',
-              backgroundColor: 'var(--surface-elevated)',
-              border: '1px solid var(--border-color)',
-              fontSize: '13px', color: 'var(--text-secondary)',
-            }}
-          >
-            <RefreshCw style={{ width: '12px', height: '12px' }} />
-            Last sync: just now
-          </div>
+          <ConnectionStatusBadge />
           <button
             style={{
               display: 'inline-flex', alignItems: 'center', gap: '6px',
@@ -752,9 +1244,54 @@ export default function SuperAdminDashboardPage() {
           marginBottom: '28px',
         }}
       >
-        {GLOW_CARDS.map(card => (
-          <GlowStatCard key={card.title} {...card} />
-        ))}
+        {GLOW_CARDS.map(card => {
+          let dynamicValue = card.value;
+          let dynamicTrend = card.trendLabel;
+          let dynamicTrendPositive = card.trendPositive;
+          let dynamicSubtitle = card.subtitle;
+          if (card.title === 'Total Patients') {
+            dynamicValue = kpiPatients;
+            dynamicTrend = kpiPatientsTrend;
+          } else if (card.title === 'Appointments') {
+            dynamicValue = kpiApptsToday;
+            dynamicTrend = kpiApptsTrend;
+          } else if (card.title === 'Monthly Revenue') {
+            dynamicValue = kpiRevenue;
+            dynamicTrend = kpiRevenueTrend;
+            dynamicTrendPositive = kpiRevenueTrendPositive;
+            const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+            dynamicSubtitle = `${monthNames[revenueMonth.month]} ${revenueMonth.year}`;
+          } else if (card.title === 'Active Staff') {
+            dynamicValue = kpiStaffCount;
+            dynamicTrend = kpiStaffTrend;
+          }
+          const isRevenue = card.title === 'Monthly Revenue';
+          return (
+            <GlowStatCard
+              key={card.title}
+              {...card}
+              value={dynamicValue}
+              trendLabel={dynamicTrend}
+              trendPositive={dynamicTrendPositive}
+              subtitle={dynamicSubtitle}
+              onPrev={isRevenue ? () => setRevenueMonth(prev => {
+                const m = prev.month - 1;
+                return m < 0 ? { year: prev.year - 1, month: 11 } : { year: prev.year, month: m };
+              }) : undefined}
+              onNext={isRevenue ? () => {
+                const now = new Date();
+                const currentMonth = now.getFullYear() * 12 + now.getMonth();
+                const selectedMonth = revenueMonth.year * 12 + revenueMonth.month;
+                if (selectedMonth < currentMonth) {
+                  setRevenueMonth(prev => {
+                    const m = prev.month + 1;
+                    return m > 11 ? { year: prev.year + 1, month: 0 } : { year: prev.year, month: m };
+                  });
+                }
+              } : undefined}
+            />
+          );
+        })}
       </div>
 
       {/* ── Pending Requests ── */}
@@ -803,7 +1340,7 @@ export default function SuperAdminDashboardPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ backgroundColor: 'var(--surface-elevated)' }}>
-                  {['Name', 'Role', "Today's Appts", 'Status', 'Last Active', ''].map((col) => (
+                  {['Name', 'Role', "Today's Appts", 'Status', 'Last Active'].map((col) => (
                     <th
                       key={col}
                       style={{
@@ -823,59 +1360,62 @@ export default function SuperAdminDashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {STAFF_ROWS.map((row, i) => {
-                  const s = STATUS_DOT[row.status];
-                  return (
-                    <tr
-                      key={row.name}
-                      style={{
-                        borderTop: i === 0 ? 'none' : '1px solid var(--border-color)',
-                      }}
-                      onMouseEnter={e => (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--surface-elevated)'}
-                      onMouseLeave={e => (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'}
-                    >
-                      <td style={{ padding: '12px 16px', fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
-                        {row.name}
-                      </td>
-                      <td style={{ padding: '12px 16px', fontSize: '13px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-                        {row.role}
-                      </td>
-                      <td style={{ padding: '12px 16px', fontSize: '14px', color: 'var(--text-primary)', textAlign: 'center' }}>
-                        {row.appts}
-                      </td>
-                      <td style={{ padding: '12px 16px' }}>
-                        <span
-                          style={{
-                            display: 'inline-flex', alignItems: 'center', gap: '5px',
-                            padding: '3px 10px', borderRadius: '9999px',
-                            fontSize: '12px', fontWeight: 600,
-                            backgroundColor: s.bg, color: s.color,
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: s.dot, flexShrink: 0 }} />
-                          {row.status}
-                        </span>
-                      </td>
-                      <td style={{ padding: '12px 16px', fontSize: '13px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-                        {row.lastActive}
-                      </td>
-                      <td style={{ padding: '12px 16px' }}>
-                        <button
-                          style={{
-                            background: 'none', border: 'none', cursor: 'pointer',
-                            padding: '4px', borderRadius: '6px',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            color: 'var(--text-secondary)',
-                          }}
-                          className="hover:bg-[var(--surface-elevated)] transition-colors"
-                        >
-                          <MoreHorizontal style={{ width: '16px', height: '16px' }} />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {staffLoading ? (
+                  <tr>
+                    <td colSpan={5} style={{ padding: '32px 16px', textAlign: 'center', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                      Loading staff…
+                    </td>
+                  </tr>
+                ) : staffRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} style={{ padding: '32px 16px', textAlign: 'center', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                      No staff found
+                    </td>
+                  </tr>
+                ) : (
+                  staffRows.map((row, i) => {
+                    const s = STATUS_DOT[row.status];
+                    return (
+                      <tr
+                        key={row.id}
+                        style={{
+                          borderTop: i === 0 ? 'none' : '1px solid var(--border-color)',
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => navigate('/superadmin/staff')}
+                        onMouseEnter={e => (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--surface-elevated)'}
+                        onMouseLeave={e => (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'}
+                      >
+                        <td style={{ padding: '12px 16px', fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
+                          {row.name}
+                        </td>
+                        <td style={{ padding: '12px 16px', fontSize: '13px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                          {row.role}
+                        </td>
+                        <td style={{ padding: '12px 16px', fontSize: '14px', color: 'var(--text-primary)', textAlign: 'center' }}>
+                          {row.appts}
+                        </td>
+                        <td style={{ padding: '12px 16px' }}>
+                          <span
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: '5px',
+                              padding: '3px 10px', borderRadius: '9999px',
+                              fontSize: '12px', fontWeight: 600,
+                              backgroundColor: s.bg, color: s.color,
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: s.dot, flexShrink: 0 }} />
+                            {row.status}
+                          </span>
+                        </td>
+                        <td style={{ padding: '12px 16px', fontSize: '13px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                          {row.lastActive}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
@@ -898,65 +1438,68 @@ export default function SuperAdminDashboardPage() {
             </h2>
 
             {/* Bar rows */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '16px' }}>
-              {/* This month */}
-              <div>
-                <div className="flex items-center justify-between" style={{ marginBottom: '4px' }}>
-                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>This month</span>
-                  <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>$48,920</span>
-                </div>
-                <div style={{ height: '8px', backgroundColor: 'var(--surface-elevated)', borderRadius: '9999px', overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: '75%', backgroundColor: '#22C55E', borderRadius: '9999px' }} />
-                </div>
-              </div>
+            {(() => {
+              const maxVal = Math.max(finSnap.thisMonth, finSnap.lastMonth, 1);
+              const fmt = (n: number) => `$${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '16px' }}>
+                  {/* This month */}
+                  <div>
+                    <div className="flex items-center justify-between" style={{ marginBottom: '4px' }}>
+                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>This month</span>
+                      <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{fmt(finSnap.thisMonth)}</span>
+                    </div>
+                    <div style={{ height: '8px', backgroundColor: 'var(--surface-elevated)', borderRadius: '9999px', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${Math.min((finSnap.thisMonth / maxVal) * 100, 100)}%`, backgroundColor: '#22C55E', borderRadius: '9999px', transition: 'width 0.5s' }} />
+                    </div>
+                  </div>
 
-              {/* Last month */}
-              <div>
-                <div className="flex items-center justify-between" style={{ marginBottom: '4px' }}>
-                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>Last month</span>
-                  <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>$45,200</span>
+                  {/* Last month */}
+                  <div>
+                    <div className="flex items-center justify-between" style={{ marginBottom: '4px' }}>
+                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>Last month</span>
+                      <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{fmt(finSnap.lastMonth)}</span>
+                    </div>
+                    <div style={{ height: '8px', backgroundColor: 'var(--surface-elevated)', borderRadius: '9999px', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${Math.min((finSnap.lastMonth / maxVal) * 100, 100)}%`, backgroundColor: '#94A3B8', borderRadius: '9999px', transition: 'width 0.5s' }} />
+                    </div>
+                  </div>
                 </div>
-                <div style={{ height: '8px', backgroundColor: 'var(--surface-elevated)', borderRadius: '9999px', overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: '70%', backgroundColor: '#94A3B8', borderRadius: '9999px' }} />
-                </div>
-              </div>
-
-              {/* Target label */}
-              <div className="flex items-center justify-between">
-                <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>Target</span>
-                <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>$60,000</span>
-              </div>
-            </div>
+              );
+            })()}
 
             {/* Chips row */}
             <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
-              <span
-                style={{
+              {finSnap.paid > 0 && (
+                <span style={{
                   display: 'inline-flex', alignItems: 'center', gap: '4px',
                   padding: '4px 10px', borderRadius: '9999px', fontSize: '12px', fontWeight: 600,
                   backgroundColor: '#22C55E18', color: '#15803D',
-                }}
-              >
-                Paid $41,380
-              </span>
-              <span
-                style={{
+                }}>
+                  Paid ${finSnap.paid.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                </span>
+              )}
+              {finSnap.pending > 0 && (
+                <span style={{
                   display: 'inline-flex', alignItems: 'center', gap: '4px',
                   padding: '4px 10px', borderRadius: '9999px', fontSize: '12px', fontWeight: 600,
                   backgroundColor: '#F4A26118', color: '#C2671A',
-                }}
-              >
-                Pending $4,700
-              </span>
-              <span
-                style={{
+                }}>
+                  Pending ${finSnap.pending.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                </span>
+              )}
+              {finSnap.overdue > 0 && (
+                <span style={{
                   display: 'inline-flex', alignItems: 'center', gap: '4px',
                   padding: '4px 10px', borderRadius: '9999px', fontSize: '12px', fontWeight: 600,
                   backgroundColor: '#EF444418', color: '#B91C1C',
-                }}
-              >
-                Overdue $840
-              </span>
+                }}>
+                  Overdue ${finSnap.overdue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                </span>
+              )}
+              {finSnap.paid === 0 && finSnap.pending === 0 && finSnap.overdue === 0 && (
+                <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>No invoice data</span>
+              )}
             </div>
           </div>
 
@@ -975,7 +1518,11 @@ export default function SuperAdminDashboardPage() {
             </h2>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
-              {ACTIVITY_FEED.map((item, i) => {
+              {activityFeed.length === 0 ? (
+                <p style={{ fontSize: '13px', color: 'var(--text-secondary)', padding: '16px 0', textAlign: 'center' }}>
+                  No activity today
+                </p>
+              ) : activityFeed.map((item, i) => {
                 const Icon = item.icon;
                 return (
                   <div
@@ -983,7 +1530,7 @@ export default function SuperAdminDashboardPage() {
                     className="flex items-start gap-3"
                     style={{
                       padding: '10px 0',
-                      borderBottom: i < ACTIVITY_FEED.length - 1 ? '1px solid var(--border-color)' : 'none',
+                      borderBottom: i < activityFeed.length - 1 ? '1px solid var(--border-color)' : 'none',
                     }}
                   >
                     <div
@@ -1025,6 +1572,7 @@ export default function SuperAdminDashboardPage() {
           return (
             <button
               key={action.label}
+              onClick={() => navigate(action.path)}
               style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
                 padding: '14px 16px',

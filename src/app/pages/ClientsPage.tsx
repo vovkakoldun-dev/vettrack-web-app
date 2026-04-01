@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Search, Plus, Mail, Phone, ChevronDown, CheckCircle2, AlertCircle, AlertTriangle, Loader2, Users, Trash2, Filter, X, ArrowUpDown } from 'lucide-react';
 import { AddClientDialog } from '../components/AddClientDialog';
-import { useClients } from '../hooks/useClients';
+import { useClients, deletePetCascade } from '../hooks/useClients';
 import { supabase } from '../../lib/supabase';
 import { getOrgContext } from '../hooks/useOrgContext';
 import type { AddClientValues } from '../hooks/useClients';
@@ -58,6 +58,10 @@ export default function ClientsPage() {
   const [addClientOpen, setAddClientOpen] = useState(false);
   const { clients, loading, addClient, deleteClient, refetch } = useClients();
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [statusOverrides, setStatusOverrides] = useState<Record<string, Status>>({});
   const [vets, setVets] = useState<{ id: string; name: string }[]>([]);
   const [vetOverrides, setVetOverrides] = useState<Record<string, { id: string; name: string } | null>>({});
@@ -70,7 +74,7 @@ export default function ClientsPage() {
     (async () => {
       try {
         const { organizationId } = await getOrgContext();
-        const { data } = await supabase.from('staff').select('id, profiles:profiles!staff_profile_id_fkey(first_name, last_name)').eq('organization_id', organizationId);
+        const { data } = await supabase.from('staff').select('id, profiles:profiles!staff_profile_id_fkey(first_name, last_name)').eq('organization_id', organizationId).eq('role', 'veterinarian');
         if (data) setVets(data.map((v: any) => ({ id: v.id, name: `Dr. ${v.profiles?.first_name || ''} ${v.profiles?.last_name || ''}`.trim() })));
       } catch {}
     })();
@@ -87,6 +91,33 @@ export default function ClientsPage() {
     setStatusOverrides((prev) => ({ ...prev, [clientId]: newStatus }));
     await supabase.from('clients').update({ health_status: newStatus }).eq('id', clientId);
     window.dispatchEvent(new CustomEvent('clientDataChanged'));
+  };
+
+  const toggleSelectClient = (rowKey: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(rowKey)) next.delete(rowKey); else next.add(rowKey);
+      return next;
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    setBulkDeleting(true);
+    for (const rowKey of selectedIds) {
+      const row = filtered.find(c => c.rowKey === rowKey);
+      if (!row) continue;
+      if (row.petCount <= 1 || !row.petId) {
+        await deleteClient(row.id);
+      } else {
+        await deletePetCascade(row.petId);
+      }
+    }
+    refetch();
+    setSelectedIds(new Set());
+    setSelectMode(false);
+    setBulkDeleting(false);
+    setShowBulkDeleteConfirm(false);
   };
 
   // Map Supabase rows to display shape — one row per pet
@@ -112,7 +143,7 @@ export default function ClientsPage() {
       ownerPhone,
       ownerInitials: initials,
       assignedVetId: pet?.assigned_vet_id || null,
-      assignedVetName: pet?.assigned_vet ? `Dr. ${(pet.assigned_vet as any).first_name} ${(pet.assigned_vet as any).last_name}` : null,
+      assignedVetName: pet?.assigned_vet?.profiles ? `Dr. ${(pet.assigned_vet.profiles as any).first_name} ${(pet.assigned_vet.profiles as any).last_name}` : null,
       status,
       createdAt: c.created_at,
     }));
@@ -150,6 +181,14 @@ export default function ClientsPage() {
   });
 
   const hasActiveFilters = filterSpecies !== 'All' || filterStatus !== 'All' || filterVet !== 'All';
+
+  const toggleSelectAllClients = () => {
+    if (selectedIds.size === filtered.length && filtered.length > 0) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filtered.map(c => c.rowKey)));
+    }
+  };
 
   return (
     <>
@@ -300,11 +339,98 @@ export default function ClientsPage() {
         )}
       </div>
 
+      {/* Selection bar */}
+      {selectMode && (
+        <div className="flex items-center gap-3 mb-4 px-4 py-3 border border-[var(--border-color)] bg-[var(--surface-elevated)]" style={{ borderRadius: '10px' }}>
+          <span className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 600 }}>
+            {selectedIds.size > 0 ? `${selectedIds.size} client${selectedIds.size !== 1 ? 's' : ''} selected` : 'Select clients to delete'}
+          </span>
+          {selectedIds.size > 0 && (
+            <button
+              onClick={() => setShowBulkDeleteConfirm(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-white hover:opacity-90 transition-opacity"
+              style={{ backgroundColor: '#EF4444', borderRadius: '8px', fontSize: '13px', fontWeight: 600, border: 'none', cursor: 'pointer' }}
+            >
+              <Trash2 style={{ width: '14px', height: '14px' }} /> Delete
+            </button>
+          )}
+          <button
+            onClick={() => { setSelectedIds(new Set()); setSelectMode(false); }}
+            className="flex items-center gap-1 px-3 py-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 500 }}
+          >
+            <X style={{ width: '14px', height: '14px' }} /> Cancel
+          </button>
+        </div>
+      )}
+
+      {/* Bulk delete confirmation dialog */}
+      {showBulkDeleteConfirm && (
+        <div className="fixed inset-0 flex items-center justify-center" style={{ zIndex: 9999, backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6" style={{ borderRadius: '14px', maxWidth: '420px', width: '90%', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex items-center justify-center" style={{ width: '40px', height: '40px', borderRadius: '10px', backgroundColor: '#FEE2E2' }}>
+                <Trash2 style={{ width: '20px', height: '20px', color: '#EF4444' }} />
+              </div>
+              <h3 className="text-[var(--text-primary)]" style={{ fontSize: '18px', fontWeight: 700 }}>Delete Clients</h3>
+            </div>
+            <p className="text-[var(--text-secondary)] mb-6" style={{ fontSize: '14px', lineHeight: '1.5' }}>
+              Are you sure you want to delete <strong className="text-[var(--text-primary)]">{selectedIds.size} client{selectedIds.size !== 1 ? 's' : ''}</strong>? This will remove associated pets, records, and appointments. This action cannot be undone.
+            </p>
+            <div className="flex items-center justify-end gap-3">
+              <button
+                onClick={() => setShowBulkDeleteConfirm(false)}
+                disabled={bulkDeleting}
+                className="px-4 py-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+                style={{ background: 'none', border: '1px solid var(--border-color)', borderRadius: '8px', fontSize: '14px', fontWeight: 500, cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBulkDelete}
+                disabled={bulkDeleting}
+                className="px-4 py-2 text-white hover:opacity-90 transition-opacity"
+                style={{ backgroundColor: '#EF4444', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: 600, cursor: 'pointer', opacity: bulkDeleting ? 0.6 : 1 }}
+              >
+                {bulkDeleting ? 'Deleting...' : `Delete ${selectedIds.size} Client${selectedIds.size !== 1 ? 's' : ''}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Table */}
       <div className="bg-[var(--surface-white)] border border-[var(--border-color)]" style={{ borderRadius: '12px' }}>
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
+              <TableHead className="py-3 px-4" style={{ width: '44px' }}>
+                <div
+                  onClick={() => {
+                    if (!selectMode) { setSelectMode(true); }
+                    else { toggleSelectAllClients(); }
+                  }}
+                  style={{
+                    width: '18px', height: '18px', borderRadius: '4px', cursor: 'pointer',
+                    border: selectMode && selectedIds.size === filtered.length && filtered.length > 0
+                      ? '2px solid #2D6A4F'
+                      : '2px solid var(--text-secondary)',
+                    backgroundColor: selectMode && selectedIds.size === filtered.length && filtered.length > 0
+                      ? '#2D6A4F' : 'transparent',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    opacity: selectMode ? 1 : 0.5,
+                    transition: 'all 0.15s ease',
+                  }}
+                  title={selectMode ? 'Select all' : 'Enable selection mode'}
+                >
+                  {selectMode && selectedIds.size === filtered.length && filtered.length > 0 && (
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  )}
+                  {selectMode && selectedIds.size > 0 && selectedIds.size < filtered.length && (
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M3 6h6" stroke="var(--text-secondary)" strokeWidth="2" strokeLinecap="round"/></svg>
+                  )}
+                </div>
+              </TableHead>
               <TableHead className="py-3 px-4" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>
                 Pet
               </TableHead>
@@ -332,14 +458,14 @@ export default function ClientsPage() {
           <TableBody>
             {loading && (
               <TableRow>
-                <TableCell colSpan={8} className="py-16 text-center">
+                <TableCell colSpan={9} className="py-16 text-center">
                   <Loader2 className="w-6 h-6 mx-auto animate-spin" style={{ color: 'var(--text-secondary)' }} />
                 </TableCell>
               </TableRow>
             )}
             {!loading && filtered.length === 0 && (
               <TableRow>
-                <TableCell colSpan={8} className="py-16 text-center">
+                <TableCell colSpan={9} className="py-16 text-center">
                   <Users className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--border-color)' }} />
                   <p style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>No clients yet</p>
                   <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>Add your first client using the button above</p>
@@ -349,12 +475,33 @@ export default function ClientsPage() {
             {!loading && filtered.map((client) => {
               const opt = STATUS_OPTIONS.find((o) => o.value === client.status) ?? STATUS_OPTIONS[0];
               const StatusIcon = opt.icon;
+              const isSelected = selectedIds.has(client.rowKey);
               return (
                 <TableRow
                   key={client.rowKey}
                   className="hover:bg-[var(--surface-elevated)] cursor-pointer transition-colors"
+                  style={isSelected ? { backgroundColor: 'rgba(45,106,79,0.08)' } : undefined}
                   onClick={() => navigate(`/clients/${client.id}${client.petId ? `?petId=${client.petId}` : ''}`)}
                 >
+                  {/* Checkbox */}
+                  <TableCell className="py-4 px-4" style={{ width: '44px' }}>
+                    {selectMode && (
+                      <div
+                        onClick={(e) => { e.stopPropagation(); toggleSelectClient(client.rowKey); }}
+                        style={{
+                          width: '18px', height: '18px', borderRadius: '4px', cursor: 'pointer',
+                          border: isSelected ? '2px solid #2D6A4F' : '2px solid var(--text-secondary)',
+                          backgroundColor: isSelected ? '#2D6A4F' : 'transparent',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          transition: 'all 0.15s ease',
+                        }}
+                      >
+                        {isSelected && (
+                          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                        )}
+                      </div>
+                    )}
+                  </TableCell>
                   {/* Pet */}
                   <TableCell className="py-4 px-4">
                     <div className="flex items-center gap-3">
@@ -600,9 +747,8 @@ export default function ClientsPage() {
                               // Only 1 pet (or no pet) — delete the whole client profile
                               await deleteClient(client.id);
                             } else {
-                              // Multiple pets — only delete this pet
-                              const { organizationId } = await getOrgContext();
-                              await supabase.from('pets').delete().eq('id', client.petId).eq('organization_id', organizationId);
+                              // Multiple pets — only delete this pet (with full cascade)
+                              await deletePetCascade(client.petId);
                               refetch();
                             }
                             setDeletingId(null);

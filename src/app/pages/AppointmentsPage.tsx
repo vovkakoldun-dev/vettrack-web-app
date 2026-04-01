@@ -203,7 +203,7 @@ export default function AppointmentsPage() {
   const [newApptPet, setNewApptPet] = useState('');
   const [ownerSearch, setOwnerSearch] = useState('');
   const [ownerDropdownOpen, setOwnerDropdownOpen] = useState(false);
-  const [newApptService, setNewApptService] = useState('');
+  const [newApptServices, setNewApptServices] = useState<Set<string>>(new Set());
   const [newApptVetId, setNewApptVetId] = useState('');
   const [newApptVetName, setNewApptVetName] = useState('');
   const [newApptDuration, setNewApptDuration] = useState('30 min');
@@ -394,7 +394,7 @@ export default function AppointmentsPage() {
     setNewApptClientId('');
     setNewApptPetId('');
     setNewApptPet('');
-    setNewApptService('');
+    setNewApptServices(new Set());
     setNewApptNotes('');
     setNewApptVetId('');
     setNewApptVetName('');
@@ -442,6 +442,7 @@ export default function AppointmentsPage() {
       petImage: selectedAppt.petImage,
       ownerName: selectedAppt.ownerName,
       service: selectedAppt.service,
+      durationMinutes: parseInt(selectedAppt.duration) || 30,
     });
     setDetailOpen(false);
     navigate(`/appointments/${selectedAppt.id}/visit`);
@@ -1396,11 +1397,16 @@ export default function AppointmentsPage() {
                     { label: 'Consultation',     color: '#06B6D4', emoji: '💬' },
                     { label: 'Other',            color: '#6B7280', emoji: '📝' },
                   ].map(s => {
-                    const active = newApptService === s.label;
+                    const active = newApptServices.has(s.label);
                     return (
                       <button
                         key={s.label}
-                        onClick={() => setNewApptService(s.label)}
+                        onClick={() => setNewApptServices(prev => {
+                          const next = new Set(prev);
+                          if (next.has(s.label)) next.delete(s.label);
+                          else next.add(s.label);
+                          return next;
+                        })}
                         style={{
                           padding: '8px 6px', borderRadius: '9px',
                           fontSize: '11px', fontWeight: active ? 700 : 500,
@@ -1542,10 +1548,14 @@ export default function AppointmentsPage() {
                     <User style={{ width: '12px', height: '12px', color: 'var(--text-secondary)', flexShrink: 0 }} />
                     <span style={{ fontSize: '13px', color: newApptVetName ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{newApptVetName || 'No vet selected'}</span>
                   </div>
-                  {newApptService && (
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: serviceColors[newApptService] || '#6B7280' }} />
-                      <span style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{newApptService}</span>
+                  {newApptServices.size > 0 && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {Array.from(newApptServices).map(svc => (
+                        <span key={svc} className="inline-flex items-center gap-1.5" style={{ fontSize: '13px' }}>
+                          <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: serviceColors[svc] || '#6B7280' }} />
+                          <span style={{ color: 'var(--text-primary)' }}>{svc}</span>
+                        </span>
+                      ))}
                     </div>
                   )}
                   {newApptPet && (
@@ -1701,7 +1711,7 @@ export default function AppointmentsPage() {
                     vet_id: newApptVetId || undefined,
                     scheduled_at,
                     duration_minutes: durationMin,
-                    reason: newApptService || undefined,
+                    reason: newApptServices.size > 0 ? Array.from(newApptServices).join(' + ') : undefined,
                     notes: newApptNotes || undefined,
                     status: newApptStatus,
                   });
@@ -1722,7 +1732,7 @@ export default function AppointmentsPage() {
                           clientId: finalClientId,
                           vetId: newApptVetId,
                           vetName: newApptVetName,
-                          service: newApptService || 'Appointment',
+                          service: newApptServices.size > 0 ? Array.from(newApptServices).join(' + ') : 'Appointment',
                           date: newApptDate,
                           time: newApptTime,
                         },
@@ -1921,7 +1931,18 @@ export default function AppointmentsPage() {
                           </Button>
                         )}
                         {isActive && (
-                          <Button size="sm" onClick={() => { setDetailOpen(false); navigate(`/appointments/${selectedAppt.id}/visit`); }} style={{ background: '#2D6A4F', color: 'white', border: 'none' }} className="hover:opacity-90">
+                          <Button size="sm" onClick={() => {
+                            startVisit({
+                              apptId: selectedAppt.id,
+                              petName: selectedAppt.petName || selectedAppt.pet || '',
+                              petImage: selectedAppt.petImage,
+                              ownerName: selectedAppt.ownerName || selectedAppt.owner || '',
+                              service: selectedAppt.service || selectedAppt.type || '',
+                              durationMinutes: parseInt(selectedAppt.duration) || 30,
+                            });
+                            setDetailOpen(false);
+                            navigate(`/appointments/${selectedAppt.id}/visit`);
+                          }} style={{ background: '#2D6A4F', color: 'white', border: 'none' }} className="hover:opacity-90">
                             <ClipboardList className="w-3.5 h-3.5 mr-1.5" />Open Visit Form
                           </Button>
                         )}

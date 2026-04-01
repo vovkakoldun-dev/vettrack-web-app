@@ -6,7 +6,7 @@ import {
   Receipt, CreditCard, Banknote, Terminal, Plus, Trash2, Pencil, Lock, ChevronRight,
 } from 'lucide-react';
 import { useAppointmentStatus } from '../../context/AppointmentStatusContext';
-import { SERVICE_PRICE_LIST } from '../../data/mockAppointments';
+import { getOrgContext } from '../../hooks/useOrgContext';
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '../../components/ui/select';
@@ -15,17 +15,14 @@ import { useAppointments } from '../../hooks/useAppointments';
 import { useClients } from '../../hooks/useClients';
 import { supabase } from '../../../lib/supabase';
 import { useProfile } from '../../hooks/useProfile';
+import { ConnectionStatusBadge } from '../../components/ConnectionStatusBadge';
 
 // ─── Types ────────────────────────────────────────────────────
 
 type ApptStatus = 'Confirmed' | 'Patient Arrived' | 'Waiting for Doctor' | 'In Progress' | 'Ready for Billing' | 'Completed' | 'Cancelled' | 'Pending' | 'Late';
 type PaymentStatus = 'Paid' | 'Pending' | 'Overdue';
 
-// ─── Static fallbacks (payments & messages not yet backed by Supabase) ──
-
-const RECENT_PAYMENTS: { id: number; pet: string; owner: string; amount: string; method: string; status: PaymentStatus }[] = []
-
-const UNREAD_MESSAGES: { id: number; from: string; subject: string; preview: string; time: string }[] = []
+// (Recent payments & unread messages are fetched from Supabase inside the component)
 
 // ─── Status Badge ─────────────────────────────────────────────
 
@@ -415,7 +412,7 @@ export default function AdminDashboardPage() {
   const todayStr = useMemo(() => {
     const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   }, []);
-  const { appointments: supaApptsToday } = useAppointments(todayStr);
+  const { appointments: supaApptsToday, updateStatus } = useAppointments(todayStr);
   const { clients: supaClients } = useClients();
 
   // Map Supabase appointments → TODAY_SCHEDULE shape
@@ -429,6 +426,7 @@ export default function AdminDashboardPage() {
       const time = `${h12}:${String(m).padStart(2, '0')} ${ampm}`;
       return {
         id: idx + 1,
+        dbId: a.id,
         time,
         pet: a.pets?.name ?? '—',
         owner: a.clients ? `${a.clients.first_name} ${a.clients.last_name}` : '—',
@@ -447,9 +445,11 @@ export default function AdminDashboardPage() {
       const pet = c.pets?.[0];
       return {
         id: idx + 1,
+        clientId: c.id,
         name: `${c.first_name} ${c.last_name}`,
         pet: pet?.name ?? '—',
         petType: pet?.breed ?? pet?.species ?? '—',
+        petPhoto: pet?.photo_url || '',
         phone: c.phone ?? '—',
         balance: '$0',
       };
@@ -462,77 +462,110 @@ export default function AdminDashboardPage() {
     [TODAY_SCHEDULE],
   );
 
+  // Generate 7-day date labels for sparkline hover
+  const dayLabels = useMemo(() => Array.from({ length: 7 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (6 - i));
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }), []);
+
+  // Build growth curve from 0 → value over 7 points
+  const buildSparkData = (current: number, growth: boolean) => {
+    if (current === 0) return Array(7).fill(0);
+    if (!growth) {
+      return Array.from({ length: 7 }, (_, i) => {
+        const t = i / 6;
+        return Math.round(current * (0.3 + t * 0.7 + Math.sin(t * Math.PI) * 0.15));
+      });
+    }
+    return Array.from({ length: 7 }, (_, i) => {
+      const t = i / 6;
+      return Math.round(current * (t * t * 0.6 + t * 0.4));
+    });
+  };
+
   // Build dynamic glow cards
-  const glowCards = useMemo(() => [
-    {
-      title: "Today's Appts",
-      subtitle: 'Today',
-      metricLabel: 'Daily Volume',
-      value: String(dashStats.appointmentsToday),
-      trendLabel: `${dashStats.appointmentsToday} today`,
-      trendPositive: true,
-      color: '#4ADE80',
-      shadowColor: 'rgba(74,222,128,0.35)',
-      icon: CalendarDays,
-      data: [18, 21, 19, 23, 22, 20, 25, dashStats.appointmentsToday || 0],
-      labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Mon', 'Tue', 'Today'],
-      unit: 'appts',
-      annotationStart: '18',
-      annotationEnd: String(dashStats.appointmentsToday),
-      path: '/admin/bookings',
-    },
-    {
-      title: 'Total Clients',
-      subtitle: 'Clients',
-      metricLabel: 'Client Count',
-      value: String(dashStats.totalClients),
-      trendLabel: `${dashStats.totalClients} total`,
-      trendPositive: true,
-      color: '#38BDF8',
-      shadowColor: 'rgba(56,189,248,0.35)',
-      icon: CheckCircle2,
-      data: [0, 2, 3, 5, 6, 7, 8, dashStats.totalClients || 0],
-      labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Mon', 'Tue', 'Now'],
-      unit: 'clients',
-      annotationStart: '0',
-      annotationEnd: String(dashStats.totalClients),
-      path: '/admin/clients',
-    },
-    {
-      title: 'Active Pets',
-      subtitle: 'Pets',
-      metricLabel: 'Pet Count',
-      value: String(dashStats.activePets),
-      trendLabel: `${dashStats.activePets} active`,
-      trendPositive: true,
-      color: '#F4A261',
-      shadowColor: 'rgba(244,162,97,0.35)',
-      icon: DollarSign,
-      data: [3, 5, 7, 8, 9, 10, 11, dashStats.activePets || 0],
-      labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Mon', 'Tue', 'Today'],
-      unit: 'pets',
-      annotationStart: '3',
-      annotationEnd: String(dashStats.activePets),
-      path: '/admin/clients',
-    },
-    {
-      title: 'Vaccines Due',
-      subtitle: 'This Week',
-      metricLabel: 'Due This Week',
-      value: String(dashStats.vaccinesDueThisWeek),
-      trendLabel: `${dashStats.vaccinesDueThisWeek} due`,
-      trendPositive: false,
-      color: '#818CF8',
-      shadowColor: 'rgba(129,140,248,0.35)',
-      icon: MessageSquare,
-      data: [3, 7, 4, 8, 5, 6, 9, dashStats.vaccinesDueThisWeek || 0],
-      labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Mon', 'Tue', 'Today'],
-      unit: 'vaccines',
-      annotationStart: '3',
-      annotationEnd: String(dashStats.vaccinesDueThisWeek),
-      path: '/admin/bookings',
-    },
-  ], [dashStats]);
+  const glowCards = useMemo(() => {
+    const apptData = buildSparkData(dashStats.appointmentsToday, true);
+    apptData[apptData.length - 1] = dashStats.appointmentsToday;
+    const clientData = buildSparkData(dashStats.totalClients, true);
+    clientData[clientData.length - 1] = dashStats.totalClients;
+    const petData = buildSparkData(dashStats.activePets, true);
+    petData[petData.length - 1] = dashStats.activePets;
+    const vaccData = buildSparkData(dashStats.vaccinesDueThisWeek, false);
+    vaccData[vaccData.length - 1] = dashStats.vaccinesDueThisWeek;
+
+    return [
+      {
+        title: "Today's Appts",
+        subtitle: 'Today',
+        metricLabel: 'Daily Volume',
+        value: String(dashStats.appointmentsToday),
+        trendLabel: `${dashStats.appointmentsToday} today`,
+        trendPositive: true,
+        color: '#4ADE80',
+        shadowColor: 'rgba(74,222,128,0.35)',
+        icon: CalendarDays,
+        data: apptData,
+        labels: dayLabels,
+        unit: 'appts',
+        annotationStart: apptData[0].toLocaleString(),
+        annotationEnd: String(dashStats.appointmentsToday),
+        path: '/admin/bookings',
+      },
+      {
+        title: 'Total Clients',
+        subtitle: 'Clients',
+        metricLabel: 'Client Count',
+        value: String(dashStats.totalClients),
+        trendLabel: `${dashStats.totalClients} total`,
+        trendPositive: true,
+        color: '#38BDF8',
+        shadowColor: 'rgba(56,189,248,0.35)',
+        icon: CheckCircle2,
+        data: clientData,
+        labels: dayLabels,
+        unit: 'clients',
+        annotationStart: clientData[0].toLocaleString(),
+        annotationEnd: String(dashStats.totalClients),
+        path: '/admin/clients',
+      },
+      {
+        title: 'Active Pets',
+        subtitle: 'Pets',
+        metricLabel: 'Pet Count',
+        value: String(dashStats.activePets),
+        trendLabel: `${dashStats.activePets} active`,
+        trendPositive: true,
+        color: '#F4A261',
+        shadowColor: 'rgba(244,162,97,0.35)',
+        icon: DollarSign,
+        data: petData,
+        labels: dayLabels,
+        unit: 'pets',
+        annotationStart: petData[0].toLocaleString(),
+        annotationEnd: String(dashStats.activePets),
+        path: '/admin/clients',
+      },
+      {
+        title: 'Vaccines Due',
+        subtitle: 'This Week',
+        metricLabel: 'Due This Week',
+        value: String(dashStats.vaccinesDueThisWeek),
+        trendLabel: `${dashStats.vaccinesDueThisWeek} due`,
+        trendPositive: false,
+        color: '#818CF8',
+        shadowColor: 'rgba(129,140,248,0.35)',
+        icon: MessageSquare,
+        data: vaccData,
+        labels: dayLabels,
+        unit: 'vaccines',
+        annotationStart: vaccData[0].toLocaleString(),
+        annotationEnd: String(dashStats.vaccinesDueThisWeek),
+        path: '/admin/bookings',
+      },
+    ];
+  }, [dashStats, dayLabels]);
 
   const [checkedIn, setCheckedIn] = useState<Set<number>>(new Set());
   const [now, setNow] = useState(() => new Date());
@@ -546,7 +579,122 @@ export default function AdminDashboardPage() {
   const [invoiceItems, setInvoiceItems] = useState<{ id: number; label: string; desc: string; price: number }[]>([]);
   const [newItemLabel, setNewItemLabel] = useState('');
   const [newItemPrice, setNewItemPrice] = useState('');
+  const [serviceList, setServiceList] = useState<{ name: string; price: number }[]>([]);
   const [viewModal, setViewModal] = useState<(typeof TODAY_SCHEDULE)[0] | null>(null);
+
+  // ── Fetch services from Supabase (same pattern as CheckoutPage) ──
+  useEffect(() => {
+    const fetchServices = async () => {
+      try {
+        const { organizationId } = await getOrgContext();
+        const { data } = await supabase
+          .from('services')
+          .select('name, price')
+          .eq('organization_id', organizationId)
+          .eq('is_active', true)
+          .order('sort_order', { ascending: true });
+        if (data && data.length > 0) {
+          setServiceList(data);
+        }
+      } catch (e) {
+        console.error('Failed to load services:', e);
+      }
+    };
+    fetchServices();
+
+    const handler = () => { fetchServices(); };
+    window.addEventListener('serviceDataChanged', handler);
+    return () => window.removeEventListener('serviceDataChanged', handler);
+  }, []);
+
+  // ── Recent Payments (from Supabase) ──────────────────────────
+  interface RecentPayment { id: string; pet: string; petPhoto: string; owner: string; amount: string; method: string; status: PaymentStatus; clientId: string; }
+  const [recentPayments, setRecentPayments] = useState<RecentPayment[]>([]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('payments')
+          .select('id, amount, method, paid_at, invoices!inner(id, status, client_id, clients!inner(first_name, last_name, pets(name, photo_url)))')
+          .order('paid_at', { ascending: false })
+          .limit(5);
+        if (data) {
+          setRecentPayments(data.map((p: any) => {
+            const inv = p.invoices;
+            const client = inv?.clients;
+            const pet = client?.pets?.[0];
+            const petName = pet?.name ?? '—';
+            const petPhoto = pet?.photo_url || '';
+            const ownerName = client ? `${client.first_name} ${client.last_name}` : '—';
+            const status: PaymentStatus = inv?.status === 'Paid' ? 'Paid' : inv?.status === 'Overdue' ? 'Overdue' : 'Pending';
+            return {
+              id: p.id,
+              pet: petName,
+              petPhoto,
+              owner: ownerName,
+              amount: `$${Number(p.amount).toFixed(2)}`,
+              method: p.method || 'Card',
+              status,
+              clientId: inv?.client_id || '',
+            };
+          }));
+        }
+      } catch (e) {
+        console.error('Error loading payments:', e);
+      }
+    })();
+  }, []);
+
+  // ── Unread Messages (from Supabase chat) ─────────────────────
+  interface UnreadMsg { id: string; name: string; initials: string; preview: string; time: string; conversationId: string; }
+  const [unreadMessages, setUnreadMessages] = useState<UnreadMsg[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  useEffect(() => {
+    if (!adminProfile?.id) return;
+    (async () => {
+      try {
+        const { data: parts } = await supabase
+          .from('conversation_participants')
+          .select('conversation_id, last_read_at')
+          .eq('profile_id', adminProfile.id);
+        if (!parts || parts.length === 0) { setUnreadCount(0); return; }
+
+        let allUnread: UnreadMsg[] = [];
+        for (const part of parts) {
+          const lastRead = part.last_read_at || '1970-01-01T00:00:00Z';
+          const { data: msgs } = await supabase
+            .from('messages')
+            .select('id, content, created_at, sender_id, profiles:profiles!messages_sender_id_fkey(first_name, last_name)')
+            .eq('conversation_id', part.conversation_id)
+            .gt('created_at', lastRead)
+            .neq('sender_id', adminProfile.id)
+            .order('created_at', { ascending: false })
+            .limit(3);
+          if (msgs) {
+            for (const m of msgs) {
+              const sender = m.profiles as any;
+              const name = sender ? `${sender.first_name} ${sender.last_name}` : 'Unknown';
+              const initials = sender ? `${(sender.first_name?.[0] || '')}${(sender.last_name?.[0] || '')}` : '??';
+              const created = new Date(m.created_at);
+              const diffMin = Math.floor((Date.now() - created.getTime()) / 60000);
+              let time = '';
+              if (diffMin < 1) time = 'Just now';
+              else if (diffMin < 60) time = `${diffMin}m ago`;
+              else if (diffMin < 1440) time = `${Math.floor(diffMin / 60)}h ago`;
+              else time = created.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+              allUnread.push({ id: m.id, name, initials, preview: m.content || '', time, conversationId: part.conversation_id });
+            }
+          }
+        }
+        setUnreadMessages(allUnread.slice(0, 5));
+        setUnreadCount(allUnread.length);
+      } catch (e) {
+        console.error('Error loading unread messages:', e);
+      }
+    })();
+  }, [adminProfile?.id]);
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 60_000);
@@ -579,10 +727,13 @@ export default function AdminDashboardPage() {
     return nowMinutes > apptMinutes;
   }
 
-  function handleCheckIn(id: number) {
+  async function handleCheckIn(id: number) {
     const appt = TODAY_SCHEDULE.find(a => a.id === id);
+    if (!appt) return;
     setCheckedIn(prev => new Set([...prev, id]));
     setApptStatus(id, 'Waiting for Doctor');
+    // Persist to database (enum: 'In Progress' is the closest valid status for check-in)
+    await updateStatus(appt.dbId, 'In Progress');
     if (appt) {
       setArrivedToast({ pet: appt.pet, vet: appt.vet });
       setTimeout(() => setArrivedToast(null), 4000);
@@ -615,13 +766,16 @@ export default function AdminDashboardPage() {
     <div style={{ maxWidth: '1440px', margin: '0 auto', padding: '32px' }}>
 
       {/* Header */}
-      <div style={{ marginBottom: '28px' }}>
-        <h1 className="text-[var(--text-primary)]" style={{ marginBottom: '6px' }}>
-          Good morning, {adminProfile.firstName || 'Sarah'} 👋
-        </h1>
-        <p className="text-[var(--text-secondary)]" style={{ fontSize: '16px' }}>
-          Here's your clinic overview for today
-        </p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '28px' }}>
+        <div>
+          <h1 className="text-[var(--text-primary)]" style={{ marginBottom: '6px' }}>
+            {new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 17 ? 'Good afternoon' : 'Good evening'}, {adminProfile.firstName || 'there'} 👋
+          </h1>
+          <p className="text-[var(--text-secondary)]" style={{ fontSize: '16px' }}>
+            Here's your clinic overview for today
+          </p>
+        </div>
+        <ConnectionStatusBadge />
       </div>
 
       {/* ── Global Search ── */}
@@ -697,23 +851,32 @@ export default function AdminDashboardPage() {
                   {matchedClients.map((c, i) => (
                     <div
                       key={c.id}
-                      onClick={() => navigate('/admin/clients')}
+                      onClick={() => navigate(`/admin/clients/${c.clientId}`)}
                       className="flex items-center gap-4 cursor-pointer hover:bg-[var(--surface-elevated)] transition-colors"
                       style={{
                         padding: '14px 20px',
                         borderTop: i > 0 ? '1px solid var(--border-color)' : undefined,
                       }}
                     >
-                      <div
-                        className="flex items-center justify-center text-white font-bold flex-shrink-0"
-                        style={{
-                          width: '40px', height: '40px', borderRadius: '9999px',
-                          background: 'linear-gradient(135deg, #2D6A4F, #74C69D)',
-                          fontSize: '13px',
-                        }}
-                      >
-                        {c.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
-                      </div>
+                      {c.petPhoto ? (
+                        <img
+                          src={c.petPhoto}
+                          alt={c.pet}
+                          className="flex-shrink-0 object-cover"
+                          style={{ width: '40px', height: '40px', borderRadius: '9999px' }}
+                        />
+                      ) : (
+                        <div
+                          className="flex items-center justify-center text-white font-bold flex-shrink-0"
+                          style={{
+                            width: '40px', height: '40px', borderRadius: '9999px',
+                            background: 'linear-gradient(135deg, #2D6A4F, #74C69D)',
+                            fontSize: '13px',
+                          }}
+                        >
+                          {c.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
+                        </div>
+                      )}
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <p style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>{c.name}</p>
                         <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{c.pet} · {c.petType}</p>
@@ -829,7 +992,7 @@ export default function AdminDashboardPage() {
           </div>
           <div className="flex items-center gap-2">
             <span style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: 500 }}>
-              Mar 14, 2026
+              {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
             </span>
           </div>
         </div>
@@ -906,7 +1069,7 @@ export default function AdminDashboardPage() {
                       <StatusBadge status={effectiveStatus} />
                     </td>
                     <td style={{ padding: '14px 16px' }}>
-                      {(effectiveStatus === 'Confirmed' || effectiveStatus === 'Late') ? (
+                      {(effectiveStatus === 'Confirmed' || effectiveStatus === 'Late' || effectiveStatus === 'Scheduled' || effectiveStatus === 'Pending') ? (
                         <button
                           onClick={() => handleCheckIn(appt.id)}
                           style={{
@@ -984,27 +1147,42 @@ export default function AdminDashboardPage() {
             </Link>
           </div>
           <div style={{ padding: '8px 0' }}>
-            {RECENT_PAYMENTS.map((payment, idx) => {
+            {recentPayments.length === 0 ? (
+              <div style={{ padding: '32px 24px', textAlign: 'center' }}>
+                <Receipt className="w-8 h-8 mx-auto mb-2 opacity-30" style={{ color: 'var(--text-secondary)' }} />
+                <p style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>No recent payments</p>
+              </div>
+            ) : recentPayments.map((payment, idx) => {
               const ps = PAYMENT_STYLES[payment.status];
               return (
                 <div
                   key={payment.id}
-                  className="flex items-center gap-4 hover:bg-[var(--surface-elevated)] transition-colors"
+                  className="flex items-center gap-4 hover:bg-[var(--surface-elevated)] transition-colors cursor-pointer"
                   style={{
                     padding: '14px 24px',
-                    borderBottom: idx < RECENT_PAYMENTS.length - 1 ? '1px solid var(--border-color)' : 'none',
+                    borderBottom: idx < recentPayments.length - 1 ? '1px solid var(--border-color)' : 'none',
                   }}
+                  onClick={() => navigate('/admin/payments')}
                 >
-                  <div
-                    className="flex items-center justify-center text-white font-bold flex-shrink-0"
-                    style={{
-                      width: '38px', height: '38px', borderRadius: '9999px',
-                      background: 'linear-gradient(135deg, #2D6A4F, #74C69D)',
-                      fontSize: '12px',
-                    }}
-                  >
-                    {payment.pet.slice(0, 1)}
-                  </div>
+                  {payment.petPhoto ? (
+                    <img
+                      src={payment.petPhoto}
+                      alt={payment.pet}
+                      className="flex-shrink-0 object-cover"
+                      style={{ width: '38px', height: '38px', borderRadius: '9999px' }}
+                    />
+                  ) : (
+                    <div
+                      className="flex items-center justify-center text-white font-bold flex-shrink-0"
+                      style={{
+                        width: '38px', height: '38px', borderRadius: '9999px',
+                        background: 'linear-gradient(135deg, #2D6A4F, #74C69D)',
+                        fontSize: '12px',
+                      }}
+                    >
+                      {payment.pet.slice(0, 1)}
+                    </div>
+                  )}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>
                       {payment.pet}
@@ -1039,16 +1217,18 @@ export default function AdminDashboardPage() {
           <div className="border-b border-[var(--border-color)] flex items-center justify-between" style={{ padding: '20px 24px' }}>
             <div className="flex items-center gap-2">
               <h3 className="text-[var(--text-primary)]">Unread Messages</h3>
-              <span style={{
-                padding: '2px 8px', borderRadius: '9999px',
-                backgroundColor: '#d4183d15', color: '#d4183d',
-                fontSize: '12px', fontWeight: 700,
-              }}>
-                5
-              </span>
+              {unreadCount > 0 && (
+                <span style={{
+                  padding: '2px 8px', borderRadius: '9999px',
+                  backgroundColor: '#d4183d15', color: '#d4183d',
+                  fontSize: '12px', fontWeight: 700,
+                }}>
+                  {unreadCount}
+                </span>
+              )}
             </div>
             <Link
-              to="/admin/communications"
+              to="/admin/chat"
               className="flex items-center gap-1 text-[var(--text-secondary)] hover:opacity-75 transition-opacity"
               style={{ fontSize: '12px', fontWeight: 600 }}
             >
@@ -1056,14 +1236,20 @@ export default function AdminDashboardPage() {
             </Link>
           </div>
           <div style={{ padding: '8px 0' }}>
-            {UNREAD_MESSAGES.map((msg, idx) => (
+            {unreadMessages.length === 0 ? (
+              <div style={{ padding: '32px 24px', textAlign: 'center' }}>
+                <MessageSquare className="w-8 h-8 mx-auto mb-2 opacity-30" style={{ color: 'var(--text-secondary)' }} />
+                <p style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>No unread messages</p>
+              </div>
+            ) : unreadMessages.map((msg, idx) => (
               <div
                 key={msg.id}
                 className="flex items-start gap-3 hover:bg-[var(--surface-elevated)] transition-colors cursor-pointer"
                 style={{
                   padding: '14px 24px',
-                  borderBottom: idx < UNREAD_MESSAGES.length - 1 ? '1px solid var(--border-color)' : 'none',
+                  borderBottom: idx < unreadMessages.length - 1 ? '1px solid var(--border-color)' : 'none',
                 }}
+                onClick={() => navigate('/admin/chat')}
               >
                 <div
                   className="flex items-center justify-center text-white font-bold flex-shrink-0"
@@ -1084,9 +1270,6 @@ export default function AdminDashboardPage() {
                       {msg.time}
                     </span>
                   </div>
-                  <p style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>
-                    Re: {msg.pet}
-                  </p>
                   <p style={{
                     fontSize: '13px', color: 'var(--text-secondary)',
                     whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
@@ -1210,7 +1393,7 @@ export default function AdminDashboardPage() {
 
         const addInvoiceItem = () => {
           if (!newItemLabel) return;
-          const preset = SERVICE_PRICE_LIST.find(p => p.name === newItemLabel);
+          const preset = serviceList.find(p => p.name === newItemLabel);
           const price = preset?.price ?? 0;
           setInvoiceItems(prev => [...prev, { id: Date.now(), label: newItemLabel, desc: '', price }]);
           setNewItemLabel('');
@@ -1221,7 +1404,7 @@ export default function AdminDashboardPage() {
           setInvoiceItems(prev => prev.filter(i => i.id !== id));
 
         const updateItemService = (id: number, serviceName: string) => {
-          const preset = SERVICE_PRICE_LIST.find(p => p.name === serviceName);
+          const preset = serviceList.find(p => p.name === serviceName);
           setInvoiceItems(prev => prev.map(i =>
             i.id === id ? { ...i, label: serviceName, price: preset?.price ?? i.price } : i
           ));
@@ -1294,7 +1477,7 @@ export default function AdminDashboardPage() {
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent className="max-h-64 !z-[500]">
-                              {SERVICE_PRICE_LIST.map(p => (
+                              {serviceList.map(p => (
                                 <SelectItem key={p.name} value={p.name}>{p.name}</SelectItem>
                               ))}
                             </SelectContent>
@@ -1334,14 +1517,14 @@ export default function AdminDashboardPage() {
                       <div style={{ flex: 1 }}>
                         <Select value={newItemLabel} onValueChange={v => {
                           setNewItemLabel(v);
-                          const preset = SERVICE_PRICE_LIST.find(p => p.name === v);
+                          const preset = serviceList.find(p => p.name === v);
                           setNewItemPrice(String(preset?.price ?? ''));
                         }}>
                           <SelectTrigger style={{ fontSize: 13, height: 34, borderRadius: 7, border: '1.5px dashed #8B5CF650', backgroundColor: 'var(--surface-white)' }}>
                             <SelectValue placeholder="Select a service to add…" />
                           </SelectTrigger>
                           <SelectContent className="max-h-64 !z-[500]">
-                            {SERVICE_PRICE_LIST.map(p => (
+                            {serviceList.map(p => (
                               <SelectItem key={p.name} value={p.name}>
                                 <span className="flex items-center justify-between gap-8 w-full">
                                   <span>{p.name}</span>

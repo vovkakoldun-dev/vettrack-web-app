@@ -1,9 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   TrendingUp, Clock, AlertCircle, CheckCircle2,
   Search, Download, Eye, Bell, FileText,
 } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog';
 import { supabase } from '../../../lib/supabase';
+import { getOrgContext } from '../../hooks/useOrgContext';
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -11,7 +13,9 @@ type InvoiceStatus = 'Paid' | 'Pending' | 'Overdue' | 'Partial';
 
 interface Invoice {
   id: string;
+  supaId: string;
   client: string;
+  clientId: string;
   pet: string;
   service: string;
   date: string;
@@ -19,12 +23,26 @@ interface Invoice {
   status: InvoiceStatus;
 }
 
+interface InvoiceDetail {
+  invoiceNumber: string;
+  client: string;
+  pet: string;
+  service: string;
+  date: string;
+  dueDate: string;
+  status: InvoiceStatus;
+  total: number;
+  lineItems: { description: string; quantity: number; unitPrice: number }[];
+  payments: { amount: number; method: string; paidAt: string }[];
+  notes: string;
+}
+
 // ─── (data loaded from Supabase) ──────────────────────────────
 
 // ─── Status Badge ─────────────────────────────────────────────
 
 const STATUS_STYLES: Record<InvoiceStatus, { bg: string; color: string }> = {
-  Paid:    { bg: '#2D6A4F15', color: '#2D6A4F' },
+  Paid:    { bg: 'rgba(34,197,94,0.12)', color: '#16a34a' },
   Pending: { bg: '#F4A26115', color: '#D97706' },
   Overdue: { bg: '#d4183d15', color: '#d4183d' },
   Partial: { bg: '#3B82F615', color: '#3B82F6' },
@@ -77,15 +95,38 @@ function StatCard({
   );
 }
 
-// ─── Activity Feed ──────────────────────────────────────────
+// Activity feed + stats are now fetched from Supabase
 
-const ACTIVITY = [
-  { id: 1, label: 'Payment', text: 'Payment of $120.00 received from Sarah Johnson', time: '10 min ago', icon: CheckCircle2, color: '#2D6A4F', bg: '#2D6A4F15' },
-  { id: 2, label: 'Invoice', text: 'Invoice #INV-0042 sent to Mark Davis', time: '25 min ago', icon: FileText, color: '#3B82F6', bg: '#3B82F615' },
-  { id: 3, label: 'Overdue', text: 'Invoice #INV-0038 is now overdue — Lisa Park', time: '1 hr ago', icon: AlertCircle, color: '#d4183d', bg: '#d4183d15' },
-  { id: 4, label: 'Payment', text: 'Payment of $85.00 received from Tom Wilson', time: '2 hrs ago', icon: CheckCircle2, color: '#2D6A4F', bg: '#2D6A4F15' },
-  { id: 5, label: 'Reminder', text: 'Payment reminder sent to Emily Carter', time: '3 hrs ago', icon: Bell, color: '#D97706', bg: '#F4A26115' },
-];
+function formatRelTime(date: Date): string {
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return 'Just now';
+  if (diffMin < 60) return `${diffMin} min ago`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return `${diffH} hr${diffH > 1 ? 's' : ''} ago`;
+  if (diffH < 48) return 'Yesterday';
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+interface ActivityItem {
+  id: string; label: string; text: string; time: string;
+  icon: React.ElementType; color: string; bg: string;
+}
+
+interface PaymentStats {
+  totalRevenue: number;
+  pendingAmount: number;
+  pendingCount: number;
+  overdueAmount: number;
+  overdueCount: number;
+  collectedToday: number;
+  collectedTodayCount: number;
+}
+
+interface MethodBreakdown {
+  label: string; pct: number; color: string; amount: string;
+}
 
 // ─── Page ─────────────────────────────────────────────────────
 
@@ -95,33 +136,180 @@ export default function AdminPaymentsPage() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo]   = useState('');
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [stats, setStats] = useState<PaymentStats>({ totalRevenue: 0, pendingAmount: 0, pendingCount: 0, overdueAmount: 0, overdueCount: 0, collectedToday: 0, collectedTodayCount: 0 });
+  const [methods, setMethods] = useState<MethodBreakdown[]>([]);
+  const [totalProcessed, setTotalProcessed] = useState(0);
+  const [activity, setActivity] = useState<ActivityItem[]>([]);
 
-  useEffect(() => {
-    (async () => {
+  const loadData = useCallback(async () => {
+    const { organizationId } = await getOrgContext();
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}`;
+    const monthStart = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-01`;
+
+    // ── Invoices list ──
+    const { data: invData } = await supabase
+      .from('invoices')
+      .select('id, invoice_number, total, status, created_at, notes, clients(id, first_name, last_name), appointments(id, reason, pets(id, name))')
+      .eq('organization_id', organizationId)
+      .order('created_at', { ascending: false });
+    if (invData) {
+      const mapped: Invoice[] = invData.map((inv: any) => ({
+        id: inv.invoice_number || `INV-${inv.id?.substring(0, 8)}`,
+        supaId: inv.id,
+        client: inv.clients ? `${inv.clients.first_name} ${inv.clients.last_name}` : '—',
+        clientId: inv.clients?.id || '',
+        pet: inv.appointments?.pets?.name ?? '—',
+        service: inv.appointments?.reason ?? inv.notes ?? '—',
+        date: new Date(inv.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        amount: `$${inv.total?.toFixed(2) ?? '0.00'}`,
+        status: (inv.status || 'Pending') as InvoiceStatus,
+      }));
+      setInvoices(mapped);
+
+      // ── Stat cards from invoices ──
+      let pendingAmt = 0, pendingCt = 0, overdueAmt = 0, overdueCt = 0;
+      for (const inv of invData as any[]) {
+        if (inv.status === 'Pending' || inv.status === 'Sent') { pendingAmt += Number(inv.total || 0); pendingCt++; }
+        if (inv.status === 'Overdue') { overdueAmt += Number(inv.total || 0); overdueCt++; }
+      }
+      setStats(prev => ({ ...prev, pendingAmount: pendingAmt, pendingCount: pendingCt, overdueAmount: overdueAmt, overdueCount: overdueCt }));
+    }
+
+    // ── Payments (for revenue, collected today, methods, activity) ──
+    const { data: payData } = await supabase
+      .from('payments')
+      .select('id, amount, method, paid_at, invoices!inner(id, invoice_number, client_id, clients!inner(first_name, last_name))')
+      .order('paid_at', { ascending: false });
+    if (payData) {
+      // Revenue this month
+      const monthPayments = (payData as any[]).filter(p => p.paid_at >= `${monthStart}T00:00:00`);
+      const totalRev = monthPayments.reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0);
+
+      // Collected today
+      const todayPayments = (payData as any[]).filter(p => p.paid_at >= `${todayStr}T00:00:00`);
+      const collectedToday = todayPayments.reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0);
+
+      setStats(prev => ({
+        ...prev,
+        totalRevenue: totalRev,
+        collectedToday,
+        collectedTodayCount: todayPayments.length,
+      }));
+
+      // ── Payment methods breakdown ──
+      const methodMap = new Map<string, number>();
+      for (const p of monthPayments as any[]) {
+        const m = p.method || 'Other';
+        methodMap.set(m, (methodMap.get(m) || 0) + Number(p.amount || 0));
+      }
+      const total = totalRev || 1;
+      const methodColors: Record<string, string> = {
+        'Credit Card': '#3B82F6', 'Debit Card': '#3B82F6', 'Cash': '#2D6A4F',
+        'Check': '#8B5CF6', 'Insurance': '#F4A261', 'Financing': '#06B6D4', 'Other': '#6B7280',
+      };
+      const breakdowns: MethodBreakdown[] = Array.from(methodMap.entries())
+        .sort((a, b) => b[1] - a[1])
+        .map(([label, amt]) => ({
+          label, pct: Math.round((amt / total) * 100),
+          color: methodColors[label] || '#6B7280',
+          amount: `$${amt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        }));
+      setMethods(breakdowns);
+      setTotalProcessed(totalRev);
+
+      // ── Recent activity from payments + invoices ──
+      const acts: ActivityItem[] = [];
+      for (const p of (payData as any[]).slice(0, 5)) {
+        const client = p.invoices?.clients;
+        const clientName = client ? `${client.first_name} ${client.last_name}` : 'Unknown';
+        const dt = new Date(p.paid_at);
+        acts.push({
+          id: p.id, label: 'Payment',
+          text: `Payment of $${Number(p.amount).toFixed(2)} received from ${clientName}`,
+          time: formatRelTime(dt),
+          icon: CheckCircle2, color: '#16a34a', bg: 'rgba(34,197,94,0.12)',
+        });
+      }
+
+      // Add overdue invoices as activity items
+      if (invData) {
+        for (const inv of (invData as any[]).filter((i: any) => i.status === 'Overdue').slice(0, 2)) {
+          const clientName = inv.clients ? `${inv.clients.first_name} ${inv.clients.last_name}` : 'Unknown';
+          acts.push({
+            id: `overdue-${inv.id}`, label: 'Overdue',
+            text: `Invoice #${inv.invoice_number || inv.id?.substring(0, 8)} is now overdue — ${clientName}`,
+            time: formatRelTime(new Date(inv.created_at)),
+            icon: AlertCircle, color: '#d4183d', bg: '#d4183d15',
+          });
+        }
+        // Add recent invoices created
+        for (const inv of (invData as any[]).filter((i: any) => i.status === 'Sent' || i.status === 'Pending').slice(0, 2)) {
+          const clientName = inv.clients ? `${inv.clients.first_name} ${inv.clients.last_name}` : 'Unknown';
+          acts.push({
+            id: `inv-${inv.id}`, label: 'Invoice',
+            text: `Invoice #${inv.invoice_number || inv.id?.substring(0, 8)} sent to ${clientName}`,
+            time: formatRelTime(new Date(inv.created_at)),
+            icon: FileText, color: '#3B82F6', bg: '#3B82F615',
+          });
+        }
+      }
+      setActivity(acts.slice(0, 6));
+    }
+  }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  // ─── View Invoice Dialog ────────────────────────────────────
+  const [viewOpen, setViewOpen] = useState(false);
+  const [viewDetail, setViewDetail] = useState<InvoiceDetail | null>(null);
+  const [viewLoading, setViewLoading] = useState(false);
+
+  const openViewDialog = async (inv: Invoice) => {
+    setViewOpen(true);
+    setViewLoading(true);
+    setViewDetail(null);
+    try {
       const { data } = await supabase
         .from('invoices')
-        .select('id, invoice_number, total, status, created_at, notes, clients(id, first_name, last_name), appointments(id, reason, pets(id, name))')
-        .order('created_at', { ascending: false });
+        .select('id, invoice_number, total, status, created_at, due_date, notes, clients(first_name, last_name), appointments(reason, pets(name)), invoice_line_items(id, description, quantity, unit_price), payments(id, amount, method, paid_at)')
+        .eq('id', inv.supaId)
+        .single();
       if (data) {
-        const mapped: Invoice[] = data.map((inv: any) => ({
-          id: inv.invoice_number,
-          client: inv.clients ? `${inv.clients.first_name} ${inv.clients.last_name}` : '—',
-          pet: inv.appointments?.pets?.name ?? '—',
-          service: inv.appointments?.reason ?? inv.notes ?? '—',
-          date: new Date(inv.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-          amount: `$${inv.total?.toFixed(2) ?? '0.00'}`,
-          status: (inv.status || 'Pending') as InvoiceStatus,
-        }));
-        setInvoices(mapped);
+        const d = data as any;
+        setViewDetail({
+          invoiceNumber: d.invoice_number || `INV-${d.id?.substring(0, 8)}`,
+          client: d.clients ? `${d.clients.first_name} ${d.clients.last_name}` : '—',
+          pet: d.appointments?.pets?.name ?? '—',
+          service: d.appointments?.reason ?? '—',
+          date: new Date(d.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+          dueDate: d.due_date ? new Date(d.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—',
+          status: (d.status || 'Pending') as InvoiceStatus,
+          total: Number(d.total || 0),
+          lineItems: (d.invoice_line_items || []).map((li: any) => ({
+            description: li.description, quantity: li.quantity, unitPrice: Number(li.unit_price),
+          })),
+          payments: (d.payments || []).map((p: any) => ({
+            amount: Number(p.amount), method: p.method || 'Unknown',
+            paidAt: new Date(p.paid_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+          })),
+          notes: d.notes || '',
+        });
       }
-    })();
-  }, []);
+    } catch (err) {
+      console.error('Failed to load invoice detail:', err);
+    } finally {
+      setViewLoading(false);
+    }
+  };
 
   const filtered = invoices.filter(inv => {
     const q = search.toLowerCase();
     const matchQ = !q || inv.client.toLowerCase().includes(q) || inv.pet.toLowerCase().includes(q) || inv.id.toLowerCase().includes(q);
-    const matchS  = !statusFilter || inv.status === statusFilter;
-    return matchQ && matchS;
+    const matchS = !statusFilter || inv.status === statusFilter;
+    const matchFrom = !dateFrom || inv.date >= new Date(dateFrom).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const matchTo = !dateTo || inv.date <= new Date(dateTo).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    return matchQ && matchS && matchFrom && matchTo;
   });
 
   const inputStyle: React.CSSProperties = {
@@ -161,32 +349,32 @@ export default function AdminPaymentsPage() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '20px', marginBottom: '28px' }}>
         <StatCard
           title="Total Revenue (Month)"
-          value="$18,420"
-          subtitle="+8% from last month"
+          value={`$${stats.totalRevenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          subtitle="this month"
           icon={TrendingUp}
           color="#2D6A4F"
           bg="#2D6A4F15"
         />
         <StatCard
           title="Pending"
-          value="$3,150"
-          subtitle="14 invoices pending"
+          value={`$${stats.pendingAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          subtitle={`${stats.pendingCount} invoice${stats.pendingCount !== 1 ? 's' : ''} pending`}
           icon={Clock}
           color="#D97706"
           bg="#F4A26115"
         />
         <StatCard
           title="Overdue"
-          value="$840"
-          subtitle="3 invoices overdue"
+          value={`$${stats.overdueAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          subtitle={`${stats.overdueCount} invoice${stats.overdueCount !== 1 ? 's' : ''} overdue`}
           icon={AlertCircle}
           color="#d4183d"
           bg="#d4183d15"
         />
         <StatCard
           title="Collected Today"
-          value="$620"
-          subtitle="4 payments received"
+          value={`$${stats.collectedToday.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          subtitle={`${stats.collectedTodayCount} payment${stats.collectedTodayCount !== 1 ? 's' : ''} received`}
           icon={CheckCircle2}
           color="#3B82F6"
           bg="#3B82F615"
@@ -294,7 +482,7 @@ export default function AdminPaymentsPage() {
                   </td>
                   <td style={{ padding: '13px 16px' }}>
                     <div style={{ display: 'flex', gap: '8px' }}>
-                      <button style={{
+                      <button onClick={() => openViewDialog(inv)} style={{
                         padding: '5px 11px', borderRadius: '6px',
                         border: '1px solid var(--border-color)',
                         backgroundColor: 'var(--surface-elevated)',
@@ -347,11 +535,7 @@ export default function AdminPaymentsPage() {
         >
           <h3 className="text-[var(--text-primary)]" style={{ marginBottom: '20px' }}>Payment Methods</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            {[
-              { label: 'Credit / Debit Card', pct: 58, color: '#3B82F6', amount: '$10,684' },
-              { label: 'Cash',                pct: 32, color: '#2D6A4F', amount: '$5,894'  },
-              { label: 'Pet Insurance',       pct: 10, color: '#8B5CF6', amount: '$1,842'  },
-            ].map(item => (
+            {(methods.length > 0 ? methods : [{ label: 'No payments yet', pct: 0, color: '#6B7280', amount: '$0.00' }]).map(item => (
               <div key={item.label}>
                 <div className="flex items-center justify-between" style={{ marginBottom: '6px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -388,7 +572,7 @@ export default function AdminPaymentsPage() {
                 Total Processed (Month)
               </span>
               <span style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-primary)' }}>
-                $18,420
+                ${totalProcessed.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
             </div>
           </div>
@@ -401,18 +585,22 @@ export default function AdminPaymentsPage() {
         >
           <h3 className="text-[var(--text-primary)]" style={{ marginBottom: '20px' }}>Recent Activity</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
-            {ACTIVITY.map((item, idx) => {
+            {activity.length === 0 ? (
+              <div style={{ padding: '20px 0', textAlign: 'center' }}>
+                <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>No recent activity</p>
+              </div>
+            ) : activity.map((item, idx) => {
               const Icon = item.icon;
               return (
                 <div
                   key={item.id}
                   style={{
                     display: 'flex', gap: '14px', position: 'relative',
-                    paddingBottom: idx < ACTIVITY.length - 1 ? '20px' : '0',
+                    paddingBottom: idx < activity.length - 1 ? '20px' : '0',
                   }}
                 >
                   {/* Timeline line */}
-                  {idx < ACTIVITY.length - 1 && (
+                  {idx < activity.length - 1 && (
                     <div style={{
                       position: 'absolute', left: '17px', top: '34px',
                       width: '2px', height: 'calc(100% - 14px)',
@@ -453,6 +641,116 @@ export default function AdminPaymentsPage() {
         </div>
 
       </div>
+
+      {/* ── Invoice Detail Dialog ── */}
+      <Dialog open={viewOpen} onOpenChange={setViewOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText style={{ width: 16, height: 16, color: 'var(--brand-green-text)' }} />
+              {viewDetail?.invoiceNumber || 'Invoice'}
+            </DialogTitle>
+          </DialogHeader>
+          {viewLoading ? (
+            <div style={{ padding: '32px 0', textAlign: 'center' }}>
+              <div className="w-6 h-6 border-2 border-[var(--border-color)] border-t-[var(--brand-green-text)] rounded-full animate-spin mx-auto mb-3" />
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Loading…</p>
+            </div>
+          ) : viewDetail ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {/* Summary row */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <p style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Client</p>
+                  <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{viewDetail.client}</p>
+                </div>
+                <div>
+                  <p style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Pet</p>
+                  <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{viewDetail.pet}</p>
+                </div>
+                <div>
+                  <p style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Service</p>
+                  <p style={{ fontSize: 14, color: 'var(--text-primary)' }}>{viewDetail.service}</p>
+                </div>
+                <div>
+                  <p style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Status</p>
+                  <StatusBadge status={viewDetail.status} />
+                </div>
+                <div>
+                  <p style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Created</p>
+                  <p style={{ fontSize: 13, color: 'var(--text-primary)' }}>{viewDetail.date}</p>
+                </div>
+                <div>
+                  <p style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Due Date</p>
+                  <p style={{ fontSize: 13, color: 'var(--text-primary)' }}>{viewDetail.dueDate}</p>
+                </div>
+              </div>
+
+              {/* Line Items */}
+              {viewDetail.lineItems.length > 0 && (
+                <div>
+                  <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Line Items</p>
+                  <div className="border border-[var(--border-color)] overflow-hidden" style={{ borderRadius: 8 }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ backgroundColor: 'var(--bg-offwhite)' }}>
+                          <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Description</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Qty</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Price</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {viewDetail.lineItems.map((li, i) => (
+                          <tr key={i} style={{ borderTop: '1px solid var(--border-color)' }}>
+                            <td style={{ padding: '8px 12px', fontSize: 13, color: 'var(--text-primary)' }}>{li.description}</td>
+                            <td style={{ padding: '8px 12px', fontSize: 13, color: 'var(--text-secondary)', textAlign: 'right' }}>{li.quantity}</td>
+                            <td style={{ padding: '8px 12px', fontSize: 13, color: 'var(--text-secondary)', textAlign: 'right' }}>${li.unitPrice.toFixed(2)}</td>
+                            <td style={{ padding: '8px 12px', fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', textAlign: 'right' }}>${(li.quantity * li.unitPrice).toFixed(2)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Payments */}
+              {viewDetail.payments.length > 0 && (
+                <div>
+                  <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Payments Received</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {viewDetail.payments.map((p, i) => (
+                      <div key={i} className="flex items-center justify-between p-2 border border-[var(--border-color)]" style={{ borderRadius: 8 }}>
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 style={{ width: 14, height: 14, color: '#22c55e' }} />
+                          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>${p.amount.toFixed(2)}</span>
+                          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>via {p.method}</span>
+                        </div>
+                        <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{p.paidAt}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Notes */}
+              {viewDetail.notes && (
+                <div>
+                  <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Notes</p>
+                  <p style={{ fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.5 }}>{viewDetail.notes}</p>
+                </div>
+              )}
+
+              {/* Total */}
+              <div className="border-t border-[var(--border-color)] flex items-center justify-between" style={{ paddingTop: 12 }}>
+                <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-secondary)' }}>Invoice Total</span>
+                <span style={{ fontSize: 22, fontWeight: 800, color: 'var(--text-primary)' }}>${viewDetail.total.toFixed(2)}</span>
+              </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

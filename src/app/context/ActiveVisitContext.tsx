@@ -8,6 +8,7 @@ export interface ActiveVisit {
   petImage?: string;
   ownerName: string;
   service: string;
+  durationMinutes?: number;
   startedAt: Date;
   step: 'visit' | 'checkout';
 }

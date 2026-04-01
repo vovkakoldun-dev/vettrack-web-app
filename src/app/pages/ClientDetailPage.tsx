@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate, useSearchParams, useLocation } from 'react-router';
 import { supabase } from '../../lib/supabase';
 import { getOrgContext } from '../hooks/useOrgContext';
+import { useAuth } from '../context/AuthContext';
 import {
   ArrowLeft, Edit2, MoreHorizontal, Plus, Save, X, Printer, Archive, Trash2, FileDown, PawPrint,
   Mail, Phone, MapPin, Shield, AlertCircle, Check, PlusCircle,
@@ -252,16 +253,18 @@ export default function ClientDetailPage() {
       .single();
     if (c) {
       const petIds = (c.pets as any[] || []).map((p: any) => p.id);
-      const [allergiesRes, conditionsRes, treatmentsRes, appointmentsRes] = await Promise.all([
+      const [allergiesRes, conditionsRes, treatmentsRes, appointmentsRes, vaccinationsRes] = await Promise.all([
         petIds.length > 0 ? supabase.from('pet_allergies').select('*').in('pet_id', petIds) : { data: [] },
         petIds.length > 0 ? supabase.from('pet_conditions').select('*').in('pet_id', petIds) : { data: [] },
         petIds.length > 0 ? supabase.from('pet_treatments').select('*').in('pet_id', petIds).order('date', { ascending: false }) : { data: [] },
         petIds.length > 0 ? supabase.from('appointments').select('id, pet_id, scheduled_at, duration_minutes, status, reason, staff!appointments_vet_id_fkey(profiles:profiles!staff_profile_id_fkey(first_name, last_name))').eq('organization_id', organizationId).in('pet_id', petIds).gte('scheduled_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString()).order('scheduled_at', { ascending: true }) : { data: [] },
+        petIds.length > 0 ? supabase.from('vaccinations').select('*').in('pet_id', petIds).order('administered_date', { ascending: false }) : { data: [] },
       ]);
       const petAllergies = (allergiesRes.data || []) as any[];
       const petConditions = (conditionsRes.data || []) as any[];
       const petTreatments = (treatmentsRes.data || []) as any[];
       const petAppointments = (appointmentsRes.data || []) as any[];
+      const petVaccinations = (vaccinationsRes.data || []) as any[];
 
       const pets = (c.pets as any[] || []).map((p: any, idx: number) => ({
         id: idx + 1,
@@ -303,7 +306,19 @@ export default function ClientDetailPage() {
             reason: a.reason || a.status || 'Appointment',
           };
         }),
-        vaccinations: [] as { id: number; name: string; status: 'Up to date' | 'Due soon' | 'Overdue'; lastGiven: string; nextDue: string }[],
+        vaccinations: petVaccinations.filter((v: any) => v.pet_id === p.id).map((v: any, vi: number) => {
+          const lastGiven = v.administered_date ? new Date(v.administered_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+          const nextDue = v.next_due_date ? new Date(v.next_due_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+          let status: 'Up to date' | 'Due soon' | 'Overdue' = 'Up to date';
+          if (v.next_due_date) {
+            const dueDate = new Date(v.next_due_date);
+            const now = new Date();
+            const daysUntilDue = (dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+            if (daysUntilDue < 0) status = 'Overdue';
+            else if (daysUntilDue <= 30) status = 'Due soon';
+          }
+          return { id: vi + 1, name: v.vaccine_name, status, lastGiven, nextDue };
+        }),
       }));
       const addr = [c.address, c.city, c.state, c.zip].filter(Boolean).join(', ');
       setClient({
@@ -526,6 +541,12 @@ export default function ClientDetailPage() {
   const [newTreatmentNotes, setNewTreatmentNotes] = useState('');
   const [vetNotes, setVetNotes] = useState(client.pets[0].vetNotes);
   const [clientNotes, setClientNotes] = useState(client.pets[0].clientNotes);
+  const [newVetNote, setNewVetNote] = useState('');
+  const [newClientNote, setNewClientNote] = useState('');
+  const [noteHistory, setNoteHistory] = useState<{ id: string; type: string; content: string; created_at: string; author: { first_name: string; last_name: string; role: string } }[]>([]);
+  const [noteSaving, setNoteSaving] = useState(false);
+  const { user } = useAuth();
+  const [visitReports, setVisitReports] = useState<any[]>([]);
   const [activeVaxDot, setActiveVaxDot] = useState(0);
   const vaxScrollRef = useRef<HTMLDivElement>(null);
 
@@ -630,6 +651,95 @@ export default function ClientDetailPage() {
       if (data) setDiseasesDb(data.map((r: any) => r.name));
     })();
   }, []);
+
+  // Load note history for the selected pet
+  const fetchNotes = useCallback(async (petDbId: string) => {
+    if (!petDbId) return;
+    const { organizationId } = await getOrgContext();
+    const { data } = await supabase
+      .from('pet_notes')
+      .select('id, type, content, created_at, author:staff!pet_notes_author_id_fkey(role, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
+      .eq('pet_id', petDbId)
+      .eq('organization_id', organizationId)
+      .order('created_at', { ascending: false });
+    if (data) {
+      setNoteHistory(data.map((n: any) => ({
+        id: n.id,
+        type: n.type,
+        content: n.content,
+        created_at: n.created_at,
+        author: n.author?.profiles
+          ? { first_name: n.author.profiles.first_name, last_name: n.author.profiles.last_name, role: n.author.role || '' }
+          : { first_name: 'Unknown', last_name: '', role: '' },
+      })));
+    }
+  }, []);
+
+  const fetchVisitReports = useCallback(async (petDbId: string) => {
+    if (!petDbId) return;
+    const { organizationId } = await getOrgContext();
+    const { data } = await supabase
+      .from('medical_records')
+      .select('id, visit_date, reason, clinical_notes, follow_up_date, follow_up_notes, created_at, updated_at, record_diagnoses(type, description), record_treatments(procedure_name, post_visit_instructions), staff:staff!medical_records_vet_id_fkey(profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
+      .eq('pet_id', petDbId)
+      .eq('organization_id', organizationId)
+      .order('visit_date', { ascending: false });
+    if (data) {
+      // Map to the shape previously expected by the visit reports UI
+      const mapped = data.map((mr: any) => {
+        const primaryDx = mr.record_diagnoses?.find((d: any) => d.type === 'primary')?.description || null;
+        const secondaryDx = mr.record_diagnoses?.find((d: any) => d.type === 'secondary')?.description || null;
+        const treatment = mr.record_treatments?.[0];
+        const profile = mr.staff?.profiles;
+        return {
+          id: mr.id,
+          visit_date: mr.visit_date,
+          primary_diagnosis: primaryDx,
+          secondary_diagnosis: secondaryDx,
+          clinical_notes: mr.clinical_notes,
+          procedures: treatment?.procedure_name || null,
+          owner_instructions: treatment?.post_visit_instructions || null,
+          follow_up_date: mr.follow_up_date,
+          follow_up_notes: mr.follow_up_notes,
+          created_at: mr.created_at,
+          updated_at: mr.updated_at,
+          profiles: profile || null,
+        };
+      });
+      setVisitReports(mapped);
+    }
+  }, []);
+
+  useEffect(() => {
+    const petDbId = client.pets[selectedPetIdx]?.dbId;
+    if (petDbId) {
+      fetchNotes(petDbId);
+      fetchVisitReports(petDbId);
+    }
+  }, [selectedPetIdx, client.pets, fetchNotes, fetchVisitReports]);
+
+  const handleSaveNote = async (type: 'vet' | 'client') => {
+    const content = type === 'vet' ? newVetNote.trim() : newClientNote.trim();
+    if (!content || !user) return;
+    setNoteSaving(true);
+    try {
+      const { organizationId } = await getOrgContext();
+      const petDbId = client.pets[selectedPetIdx]?.dbId;
+      await supabase.from('pet_notes').insert({
+        pet_id: petDbId,
+        organization_id: organizationId,
+        author_id: user.id,
+        type,
+        content,
+      });
+      if (type === 'vet') setNewVetNote('');
+      else setNewClientNote('');
+      await fetchNotes(petDbId);
+    } catch (e) {
+      console.error('Failed to save note:', e);
+    }
+    setNoteSaving(false);
+  };
 
   const petStatus = statusColors[patientStatus] || statusColors.Healthy;
   const petStatusOpt = STATUS_OPTIONS.find((o) => o.value === patientStatus)!;
@@ -945,6 +1055,7 @@ export default function ClientDetailPage() {
             <TabsTrigger value="medical">Medical</TabsTrigger>
             <TabsTrigger value="visits">Visits</TabsTrigger>
             <TabsTrigger value="notes">Notes</TabsTrigger>
+            <TabsTrigger value="reports">Reports</TabsTrigger>
           </TabsList>
           {/* ── Pet Switcher + Add Pet ── */}
           <div className="flex items-center gap-1.5">
@@ -1801,14 +1912,47 @@ export default function ClientDetailPage() {
                 <Badge variant="outline" className="border-[#F4A261] text-[#F4A261]">Private</Badge>
               </div>
               <Textarea
-                value={vetNotes}
-                onChange={(e) => setVetNotes(e.target.value)}
-                className="min-h-32 bg-[var(--surface-white)]"
+                value={newVetNote}
+                onChange={(e) => setNewVetNote(e.target.value)}
+                className="min-h-24 bg-[var(--surface-white)]"
                 placeholder="Add internal notes about this patient..."
               />
               <div className="flex justify-end mt-3">
-                <Button size="sm"><Save className="w-4 h-4" /> Save Notes</Button>
+                <Button size="sm" disabled={!newVetNote.trim() || noteSaving} onClick={() => handleSaveNote('vet')}>
+                  <Save className="w-4 h-4" /> {noteSaving ? 'Saving...' : 'Save Note'}
+                </Button>
               </div>
+
+              {/* Vet notes history */}
+              {noteHistory.filter(n => n.type === 'vet').length > 0 && (
+                <div className="mt-5 pt-5 border-t border-[var(--border-color)]">
+                  <p className="text-[var(--text-secondary)] mb-3" style={{ fontSize: '13px', fontWeight: 600 }}>Note History</p>
+                  <div className="space-y-3">
+                    {noteHistory.filter(n => n.type === 'vet').map((note) => (
+                      <div key={note.id} className="border border-[var(--border-color)] p-4" style={{ borderRadius: '10px', backgroundColor: 'var(--surface-elevated)' }}>
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <div style={{ width: 28, height: 28, borderRadius: '50%', backgroundColor: '#F4A26120', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                              <span style={{ fontSize: 12, fontWeight: 700, color: '#F4A261' }}>
+                                {note.author.first_name?.[0]}{note.author.last_name?.[0]}
+                              </span>
+                            </div>
+                            <div>
+                              <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+                                Dr. {note.author.first_name} {note.author.last_name}
+                              </p>
+                            </div>
+                          </div>
+                          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                            {new Date(note.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} at {new Date(note.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                          </span>
+                        </div>
+                        <p style={{ fontSize: 14, color: 'var(--text-primary)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{note.content}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Client Notes (Visible) */}
@@ -1823,14 +1967,162 @@ export default function ClientDetailPage() {
                 <Badge variant="outline" className="border-[#2D6A4F] text-[var(--brand-green-text)]">Visible to Client</Badge>
               </div>
               <Textarea
-                value={clientNotes}
-                onChange={(e) => setClientNotes(e.target.value)}
-                className="min-h-32 bg-[var(--surface-white)]"
+                value={newClientNote}
+                onChange={(e) => setNewClientNote(e.target.value)}
+                className="min-h-24 bg-[var(--surface-white)]"
                 placeholder="Add notes for the pet owner..."
               />
               <div className="flex justify-end mt-3">
-                <Button size="sm"><Save className="w-4 h-4" /> Save Notes</Button>
+                <Button size="sm" disabled={!newClientNote.trim() || noteSaving} onClick={() => handleSaveNote('client')}>
+                  <Save className="w-4 h-4" /> {noteSaving ? 'Saving...' : 'Save Note'}
+                </Button>
               </div>
+
+              {/* Client notes history */}
+              {noteHistory.filter(n => n.type === 'client').length > 0 && (
+                <div className="mt-5 pt-5 border-t border-[var(--border-color)]">
+                  <p className="text-[var(--text-secondary)] mb-3" style={{ fontSize: '13px', fontWeight: 600 }}>Note History</p>
+                  <div className="space-y-3">
+                    {noteHistory.filter(n => n.type === 'client').map((note) => (
+                      <div key={note.id} className="border border-[var(--border-color)] p-4" style={{ borderRadius: '10px', backgroundColor: 'var(--surface-elevated)' }}>
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <div style={{ width: 28, height: 28, borderRadius: '50%', backgroundColor: '#2D6A4F20', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                              <span style={{ fontSize: 12, fontWeight: 700, color: '#2D6A4F' }}>
+                                {note.author.first_name?.[0]}{note.author.last_name?.[0]}
+                              </span>
+                            </div>
+                            <div>
+                              <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+                                Dr. {note.author.first_name} {note.author.last_name}
+                              </p>
+                            </div>
+                          </div>
+                          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                            {new Date(note.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} at {new Date(note.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                          </span>
+                        </div>
+                        <p style={{ fontSize: 14, color: 'var(--text-primary)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{note.content}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </TabsContent>
+
+        {/* ═══ REPORTS TAB ═══ */}
+        <TabsContent value="reports">
+          <div className="space-y-4">
+            <div className="border border-[var(--border-color)] p-6" style={{ borderRadius: '12px', backgroundColor: 'var(--surface-white)' }}>
+              <div className="flex items-center justify-between mb-5">
+                <div>
+                  <h3 className="text-[var(--text-primary)]" style={{ fontSize: 16, fontWeight: 600 }}>Visit Reports</h3>
+                  <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: 14 }}>
+                    Diagnosis, treatments, and clinical notes from each visit
+                  </p>
+                </div>
+              </div>
+
+              {visitReports.length === 0 ? (
+                <div className="text-center py-10">
+                  <Calendar className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--text-secondary)', opacity: 0.4 }} />
+                  <p className="text-[var(--text-secondary)]" style={{ fontSize: 14 }}>No visit reports yet.</p>
+                  <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: 13 }}>Reports are created when a visit is completed.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {visitReports.map((report) => {
+                    const vetName = report.profiles
+                      ? `Dr. ${report.profiles.first_name} ${report.profiles.last_name}`
+                      : 'Unknown';
+                    return (
+                      <div key={report.id} className="border border-[var(--border-color)]" style={{ borderRadius: '10px', overflow: 'hidden' }}>
+                        {/* Report header */}
+                        <div className="flex items-center justify-between px-5 py-3" style={{ backgroundColor: 'var(--surface-elevated)', borderBottom: '1px solid var(--border-color)' }}>
+                          <div className="flex items-center gap-3">
+                            <div style={{ width: 32, height: 32, borderRadius: '50%', backgroundColor: '#2D6A4F20', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <Calendar className="w-4 h-4" style={{ color: '#2D6A4F' }} />
+                            </div>
+                            <div>
+                              <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
+                                {new Date(report.visit_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                              </p>
+                              <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>by {vetName}</p>
+                            </div>
+                          </div>
+                          {report.primary_diagnosis && (
+                            <Badge variant="outline" className="border-[#2D6A4F] text-[var(--brand-green-text)]" style={{ fontSize: 11 }}>
+                              {report.primary_diagnosis}
+                            </Badge>
+                          )}
+                        </div>
+
+                        {/* Report body */}
+                        <div className="p-5 space-y-4">
+                          {/* Diagnoses */}
+                          {(report.primary_diagnosis || report.secondary_diagnosis) && (
+                            <div>
+                              <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 6 }}>Diagnosis</p>
+                              <div className="flex flex-wrap gap-2">
+                                {report.primary_diagnosis && (
+                                  <span style={{ fontSize: 13, padding: '4px 10px', borderRadius: 6, backgroundColor: '#2D6A4F15', color: 'var(--brand-green-text)', fontWeight: 500 }}>
+                                    {report.primary_diagnosis}
+                                  </span>
+                                )}
+                                {report.secondary_diagnosis && (
+                                  <span style={{ fontSize: 13, padding: '4px 10px', borderRadius: 6, backgroundColor: '#8B5CF615', color: '#8B5CF6', fontWeight: 500 }}>
+                                    {report.secondary_diagnosis}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Clinical notes */}
+                          {report.clinical_notes && (
+                            <div>
+                              <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>Clinical Notes</p>
+                              <p style={{ fontSize: 14, color: 'var(--text-primary)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{report.clinical_notes}</p>
+                            </div>
+                          )}
+
+                          {/* Procedures */}
+                          {report.procedures && (
+                            <div>
+                              <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>Procedures</p>
+                              <p style={{ fontSize: 14, color: 'var(--text-primary)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{report.procedures}</p>
+                            </div>
+                          )}
+
+                          {/* Owner instructions */}
+                          {report.owner_instructions && (
+                            <div style={{ backgroundColor: '#2D6A4F08', borderRadius: 8, padding: '10px 14px', border: '1px solid #2D6A4F15' }}>
+                              <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--brand-green-text)', marginBottom: 4 }}>Instructions for Owner</p>
+                              <p style={{ fontSize: 14, color: 'var(--text-primary)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{report.owner_instructions}</p>
+                            </div>
+                          )}
+
+                          {/* Follow-up */}
+                          {report.follow_up_date && (
+                            <div className="flex items-center gap-2" style={{ fontSize: 13 }}>
+                              <Clock className="w-3.5 h-3.5" style={{ color: '#F4A261' }} />
+                              <span style={{ color: 'var(--text-secondary)' }}>Follow-up:</span>
+                              <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>
+                                {new Date(report.follow_up_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                              </span>
+                              {report.follow_up_notes && (
+                                <span style={{ color: 'var(--text-secondary)' }}>— {report.follow_up_notes}</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         </TabsContent>

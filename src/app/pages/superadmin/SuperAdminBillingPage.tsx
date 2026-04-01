@@ -2,13 +2,17 @@ import { useState, useEffect } from 'react';
 import {
   TrendingUp, TrendingDown, DollarSign, CreditCard, AlertCircle,
   CheckCircle2, Clock, Download, ChevronDown, Search,
-  ArrowUpRight, ArrowDownRight, Banknote, Percent, FileText,
+  ArrowUpRight, ArrowDownRight, Banknote, Percent, FileText, X, Receipt,
+  Calendar, User, Hash,
 } from 'lucide-react';
 import { Input } from '../../components/ui/input';
 import { Button } from '../../components/ui/button';
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '../../components/ui/select';
+import { supabase } from '../../../lib/supabase';
+import { getOrgContext } from '../../hooks/useOrgContext';
+import { ConnectionStatusBadge } from '../../components/ConnectionStatusBadge';
 
 // ─── Accent ───────────────────────────────────────────────────
 const ACCENT   = '#F4A261';
@@ -37,31 +41,21 @@ function spline(pts: { x: number; y: number }[]) {
   return d;
 }
 
-// ─── Data ─────────────────────────────────────────────────────
+// ─── Helper functions ─────────────────────────────────────────
 
-const MONTHS = ['Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'];
+function getLast12Months(): { labels: string[]; starts: Date[] } {
+  const now = new Date();
+  const labels: string[] = [];
+  const starts: Date[] = [];
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    labels.push(d.toLocaleDateString('en-US', { month: 'short' }));
+    starts.push(d);
+  }
+  return { labels, starts };
+}
 
-const REVENUE   = [28400, 31200, 29800, 33500, 35100, 36800, 38200, 40100, 42800, 45200, 47300, 48920];
-const EXPENSES  = [18200, 19400, 18900, 20100, 21200, 21800, 22400, 23100, 24200, 25600, 26100, 26840];
-const CASHFLOW  = REVENUE.map((r, i) => r - EXPENSES[i]);  // net
-const FORECAST  = [...REVENUE.slice(-3), 51200, 53400];
-const F_MONTHS  = ['Jan', 'Feb', 'Mar', 'Apr (est)', 'May (est)'];
-
-const DAILY_REVENUE = [
-  { day: 'Mon', val: 1820 }, { day: 'Tue', val: 1540 }, { day: 'Wed', val: 2100 },
-  { day: 'Thu', val: 2480 }, { day: 'Fri', val: 2240 }, { day: 'Mon', val: 1680 },
-  { day: 'Tue', val: 2020 }, { day: 'Wed', val: 1940 }, { day: 'Thu', val: 2560 },
-  { day: 'Fri', val: 2340 }, { day: 'Sat', val: 1200 },
-];
-
-const SERVICE_REVENUE = [
-  { name: 'Wellness Visits',    amount: 14820, color: '#818CF8', pct: 30 },
-  { name: 'Surgery & Procedures', amount: 12340, color: ACCENT,   pct: 25 },
-  { name: 'Vaccinations',       amount:  8960, color: '#38BDF8', pct: 18 },
-  { name: 'Dental',             amount:  7410, color: '#4ADE80', pct: 15 },
-  { name: 'Lab & Imaging',      amount:  4930, color: '#F472B6', pct: 10 },
-  { name: 'Other',              amount:   460, color: '#94A3B8', pct:  1 },
-] as const;
+// ─── Types & Style Config ─────────────────────────────────────
 
 type InvoiceStatus = 'Paid' | 'Pending' | 'Overdue' | 'Partial';
 
@@ -75,22 +69,13 @@ const STATUS_STYLE: Record<InvoiceStatus, { bg: string; text: string; icon: type
 interface Invoice {
   id: string; client: string; pet: string; service: string;
   date: string; dateISO: string; amount: number; status: InvoiceStatus;
+  // Detail fields for View modal
+  subtotal: number; taxAmount: number; discountAmount: number;
+  amountPaid: number; dueDate: string; paidAt: string | null;
+  notes: string; invoiceUuid: string;
 }
 
-const INVOICES: Invoice[] = [
-  { id: 'INV-2026-042', client: 'John Smith',      pet: 'Max',     service: 'Annual Wellness',   date: 'Mar 14, 2026', dateISO: '2026-03-14', amount: 145,  status: 'Paid'    },
-  { id: 'INV-2026-041', client: 'Emily Johnson',   pet: 'Luna',    service: 'Renal Check',        date: 'Mar 14, 2026', dateISO: '2026-03-14', amount: 210,  status: 'Pending' },
-  { id: 'INV-2026-040', client: 'Michael Brown',   pet: 'Cooper',  service: 'TPLO Surgery',       date: 'Mar 10, 2026', dateISO: '2026-03-10', amount: 2480, status: 'Partial' },
-  { id: 'INV-2026-039', client: 'Sarah Williams',  pet: 'Bella',   service: 'Dental Prophylaxis', date: 'Mar 8, 2026',  dateISO: '2026-03-08', amount: 380,  status: 'Paid'    },
-  { id: 'INV-2026-038', client: 'James Wilson',    pet: 'Rocky',   service: 'GI Foreign Body',    date: 'Mar 3, 2026',  dateISO: '2026-03-03', amount: 1840, status: 'Paid'    },
-  { id: 'INV-2026-037', client: 'Jessica Taylor',  pet: 'Milo',    service: 'Cardiac Workup',     date: 'Mar 7, 2026',  dateISO: '2026-03-07', amount: 560,  status: 'Overdue' },
-  { id: 'INV-2026-036', client: 'Robert Anderson', pet: 'Daisy',   service: 'Ultrasound',         date: 'Feb 26, 2026', dateISO: '2026-02-26', amount: 290,  status: 'Paid'    },
-  { id: 'INV-2026-035', client: 'David Miller',    pet: 'Charlie', service: 'Dermatology Consult',date: 'Mar 5, 2026',  dateISO: '2026-03-05', amount: 175,  status: 'Paid'    },
-  { id: 'INV-2026-034', client: 'Karen Thomas',    pet: 'Buddy',   service: 'Vaccination Bundle', date: 'Feb 28, 2026', dateISO: '2026-02-28', amount: 95,   status: 'Pending' },
-  { id: 'INV-2026-033', client: 'Lisa Martinez',   pet: 'Simba',   service: 'Weight Mgmt Plan',   date: 'Feb 20, 2026', dateISO: '2026-02-20', amount: 85,   status: 'Overdue' },
-  { id: 'INV-2026-032', client: 'Amanda White',    pet: 'Coco',    service: 'Spay Procedure',     date: 'Feb 15, 2026', dateISO: '2026-02-15', amount: 420,  status: 'Paid'    },
-  { id: 'INV-2026-031', client: 'Chris Davis',     pet: 'Zeus',    service: 'Ortho Consultation', date: 'Feb 12, 2026', dateISO: '2026-02-12', amount: 220,  status: 'Paid'    },
-];
+const SERVICE_COLORS = ['#818CF8', ACCENT, '#38BDF8', '#4ADE80', '#F472B6', '#94A3B8'];
 
 // ─── KPI Card ─────────────────────────────────────────────────
 
@@ -142,10 +127,19 @@ function LineChart({ data, labels, color, prefix = '$', dashed = false, viewBoxW
   const [hovered, setHovered] = useState<number | null>(null);
   const W = viewBoxWidth, H = viewBoxHeight, PX = 56, PY = 20;
 
+  // Guard: empty data
+  if (!data.length || !labels.length) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '120px', color: 'var(--text-secondary)', fontSize: '14px' }}>
+        No data available
+      </div>
+    );
+  }
+
   const min = Math.min(...data), max = Math.max(...data);
   const range = max - min || 1;
   const pts = data.map((v, i) => ({
-    x: PX + (i / (data.length - 1)) * (W - PX * 2),
+    x: PX + (i / Math.max(data.length - 1, 1)) * (W - PX * 2),
     y: H - PY - ((v - min) / range) * (H - PY * 2),
   }));
 
@@ -189,7 +183,7 @@ function LineChart({ data, labels, color, prefix = '$', dashed = false, viewBoxW
           );
         })}
         {labels.map((l, i) => (
-          <text key={i} x={PX + (i / (labels.length - 1)) * (W - PX * 2)} y={H - 3}
+          <text key={i} x={PX + (i / Math.max(labels.length - 1, 1)) * (W - PX * 2)} y={H - 3}
             fill={labelColor} fontSize="11" textAnchor="middle" fontFamily="system-ui">{l}</text>
         ))}
         {!dashed && <path d={areaPath} fill={`url(#ag-${uid})`} />}
@@ -237,7 +231,17 @@ function DailyBar({ data }: { data: { day: string; val: number }[] }) {
   const dark = useDarkMode();
   const [hov, setHov] = useState<number | null>(null);
   const W = 600, H = 160, PY = 20, PX = 10;
-  const max = Math.max(...data.map(d => d.val));
+
+  // Guard: empty data
+  if (!data.length) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '120px', color: 'var(--text-secondary)', fontSize: '14px' }}>
+        No daily revenue data
+      </div>
+    );
+  }
+
+  const max = Math.max(...data.map(d => d.val)) || 1;
   const bW = (W - PX * 2) / data.length;
 
   const labelColor = dark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.4)';
@@ -294,11 +298,22 @@ function DailyBar({ data }: { data: { day: string; val: number }[] }) {
 
 // ─── Donut Chart ──────────────────────────────────────────────
 
-function DonutChart({ segments }: { segments: { name: string; amount: number; color: string; pct: number }[] }) {
+function DonutChart({ segments, totalLabel }: { segments: { name: string; amount: number; color: string; pct: number }[]; totalLabel?: string }) {
   const [hov, setHov] = useState<number | null>(null);
   const R = 80, cx = 120, cy = 100, stroke = 28;
   let cumPct = 0;
   const circumference = 2 * Math.PI * R;
+
+  // Guard: empty data
+  if (!segments.length) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '180px', color: 'var(--text-secondary)', fontSize: '14px' }}>
+        No service data
+      </div>
+    );
+  }
+
+  const totalAmount = segments.reduce((s, seg) => s + seg.amount, 0);
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '24px', flexWrap: 'wrap' }}>
@@ -339,7 +354,9 @@ function DonutChart({ segments }: { segments: { name: string; amount: number; co
           </>
         ) : (
           <>
-            <text x={cx} y={cy - 6} textAnchor="middle" fill="var(--text-primary)" fontSize="16" fontWeight="800" fontFamily="system-ui">$48.9k</text>
+            <text x={cx} y={cy - 6} textAnchor="middle" fill="var(--text-primary)" fontSize="16" fontWeight="800" fontFamily="system-ui">
+              {totalLabel || `$${(totalAmount / 1000).toFixed(1)}k`}
+            </text>
             <text x={cx} y={cy + 12} textAnchor="middle" fill="var(--text-secondary)" fontSize="10" fontFamily="system-ui">Total Revenue</text>
           </>
         )}
@@ -408,28 +425,294 @@ export default function SuperAdminBillingPage() {
   const [period,        setPeriod]        = useState('last12');
   const [invoiceSearch, setInvoiceSearch] = useState('');
   const [statusFilter,  setStatusFilter]  = useState<string>('all');
+  const [viewInvoice, setViewInvoice] = useState<Invoice | null>(null);
 
-  const totalRevenue   = REVENUE[REVENUE.length - 1];
-  const prevRevenue    = REVENUE[REVENUE.length - 2];
-  const revenueGrowth  = (((totalRevenue - prevRevenue) / prevRevenue) * 100).toFixed(1);
+  // ─── State — initialised empty, populated from Supabase ───
+  const [loading, setLoading] = useState(true);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [monthlyRevenue, setMonthlyRevenue] = useState<number[]>([]);
+  const [monthlyCashflow, setMonthlyCashflow] = useState<number[]>([]);
+  const [monthLabels, setMonthLabels] = useState<string[]>([]);
+  const [dailyRevenue, setDailyRevenue] = useState<{ day: string; val: number }[]>([]);
+  const [serviceRevenue, setServiceRevenue] = useState<{ name: string; amount: number; color: string; pct: number }[]>([]);
+  const [forecastData, setForecastData] = useState<number[]>([]);
+  const [forecastLabels, setForecastLabels] = useState<string[]>([]);
+  const [forecastNextMonth, setForecastNextMonth] = useState(0);
+  const [forecastGrowth, setForecastGrowth] = useState('0');
+  const [forecastQ2, setForecastQ2] = useState(0);
 
-  const totalExpenses  = EXPENSES[EXPENSES.length - 1];
-  const netCashflow    = totalRevenue - totalExpenses;
-  const prevCashflow   = REVENUE[REVENUE.length - 2] - EXPENSES[EXPENSES.length - 2];
-  const cashflowGrowth = (((netCashflow - prevCashflow) / prevCashflow) * 100).toFixed(1);
+  const [totalRevenue, setTotalRevenue] = useState(0);
+  const [revenueGrowth, setRevenueGrowth] = useState('0');
+  const [netCashflow, setNetCashflow] = useState(0);
+  const [cashflowGrowth, setCashflowGrowth] = useState('0');
+  const [outstandingAmt, setOutstandingAmt] = useState(0);
+  const [outstandingCount, setOutstandingCount] = useState(0);
+  const [overdueCnt, setOverdueCnt] = useState(0);
+  const [collectionRate, setCollectionRate] = useState(0);
 
-  const outstanding    = INVOICES.filter(i => i.status === 'Pending' || i.status === 'Overdue');
-  const outstandingAmt = outstanding.reduce((s, i) => s + i.amount, 0);
-  const overdueCnt     = INVOICES.filter(i => i.status === 'Overdue').length;
-  const paidCnt        = INVOICES.filter(i => i.status === 'Paid').length;
-  const collectionRate = Math.round((paidCnt / INVOICES.length) * 100);
+  // ─── Load real data ───
+  useEffect(() => {
+    async function loadBillingData() {
+      try {
+        const { organizationId } = await getOrgContext();
+        const now = new Date();
+        const { labels, starts } = getLast12Months();
 
-  const filtered = INVOICES.filter(inv => {
+        // ── Fetch data in parallel ──
+        const [invoicesRes, appointmentsRes] = await Promise.all([
+          supabase
+            .from('invoices')
+            .select('id, invoice_number, subtotal, tax_amount, discount_amount, total, amount_paid, status, created_at, due_date, paid_at, notes, clients(id, first_name, last_name)')
+            .eq('organization_id', organizationId)
+            .order('created_at', { ascending: false }),
+          supabase
+            .from('appointments')
+            .select('reason, type, scheduled_at')
+            .eq('organization_id', organizationId),
+        ]);
+
+        const rawInvoices = (invoicesRes.data || []).filter(
+          (inv: any) => inv.status !== 'Draft'
+        );
+        const appointmentsData = appointmentsRes.data || [];
+
+        // ── Map invoices to display format ──
+        // Map 'Sent' to 'Pending' for display
+        const mappedInvoices: Invoice[] = rawInvoices.map((inv: any) => {
+          let displayStatus = inv.status;
+          if (displayStatus === 'Sent') displayStatus = 'Pending';
+          // Ensure status is valid
+          if (!['Paid', 'Pending', 'Overdue', 'Partial'].includes(displayStatus)) {
+            displayStatus = 'Pending';
+          }
+          return {
+            id: inv.invoice_number || `INV-${inv.id.slice(0, 8)}`,
+            invoiceUuid: inv.id,
+            client: inv.clients
+              ? `${inv.clients.first_name || ''} ${inv.clients.last_name || ''}`.trim()
+              : 'Unknown',
+            pet: '',
+            service: inv.notes || '\u2014',
+            date: new Date(inv.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+            dateISO: inv.created_at.split('T')[0],
+            amount: inv.total || 0,
+            status: displayStatus as InvoiceStatus,
+            subtotal: inv.subtotal || inv.total || 0,
+            taxAmount: inv.tax_amount || 0,
+            discountAmount: inv.discount_amount || 0,
+            amountPaid: inv.amount_paid || 0,
+            dueDate: inv.due_date || '',
+            paidAt: inv.paid_at || null,
+            notes: inv.notes || '',
+          };
+        });
+        setInvoices(mappedInvoices);
+
+        // ── KPI: Revenue (invoices with status Paid, Partial, Sent/Pending) ──
+        const revenueInvoices = rawInvoices.filter((inv: any) =>
+          ['Paid', 'Partial', 'Sent', 'Pending'].includes(inv.status)
+        );
+
+        // Monthly revenue for last 12 months
+        const monthlyRev = starts.map((start, i) => {
+          const end = i < starts.length - 1 ? starts[i + 1] : new Date(now.getFullYear(), now.getMonth() + 1, 1);
+          return revenueInvoices
+            .filter((inv: any) => {
+              const d = new Date(inv.created_at);
+              return d >= start && d < end;
+            })
+            .reduce((sum: number, inv: any) => sum + (inv.total || 0), 0);
+        });
+        setMonthlyRevenue(monthlyRev);
+        setMonthLabels(labels);
+
+        // Cashflow estimate: revenue - 60% expenses
+        const monthlyCf = monthlyRev.map(r => Math.round(r * 0.4));
+        setMonthlyCashflow(monthlyCf);
+
+        // Current month revenue
+        const currentRev = monthlyRev[monthlyRev.length - 1] || 0;
+        const prevRev = monthlyRev[monthlyRev.length - 2] || 0;
+        setTotalRevenue(currentRev);
+
+        if (prevRev > 0) {
+          setRevenueGrowth(((currentRev - prevRev) / prevRev * 100).toFixed(1));
+        }
+
+        // Net cashflow KPI
+        const currentCf = monthlyCf[monthlyCf.length - 1] || 0;
+        const prevCf = monthlyCf[monthlyCf.length - 2] || 0;
+        setNetCashflow(currentCf);
+        if (prevCf > 0) {
+          setCashflowGrowth(((currentCf - prevCf) / prevCf * 100).toFixed(1));
+        }
+
+        // Outstanding & overdue
+        const outstandingInvs = mappedInvoices.filter(i => i.status === 'Pending' || i.status === 'Overdue');
+        setOutstandingAmt(outstandingInvs.reduce((s, i) => s + i.amount, 0));
+        setOutstandingCount(outstandingInvs.length);
+        const overdueCount = mappedInvoices.filter(i => i.status === 'Overdue').length;
+        setOverdueCnt(overdueCount);
+
+        // Collection rate
+        const paidCnt = mappedInvoices.filter(i => i.status === 'Paid').length;
+        setCollectionRate(mappedInvoices.length > 0 ? Math.round((paidCnt / mappedInvoices.length) * 100) : 0);
+
+        // ── Daily Revenue — last ~11 working days ──
+        const dailyData: { day: string; val: number }[] = [];
+        const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        for (let i = 10; i >= 0; i--) {
+          const d = new Date(today);
+          d.setDate(d.getDate() - i);
+          const nextDay = new Date(d);
+          nextDay.setDate(nextDay.getDate() + 1);
+          const dayLabel = dayNames[d.getDay()];
+          const dayTotal = revenueInvoices
+            .filter((inv: any) => {
+              const invDate = new Date(inv.created_at);
+              return invDate >= d && invDate < nextDay;
+            })
+            .reduce((sum: number, inv: any) => sum + (inv.total || 0), 0);
+          dailyData.push({ day: dayLabel, val: dayTotal });
+        }
+        setDailyRevenue(dailyData);
+
+        // ── Service Revenue Breakdown (from appointments) ──
+        const serviceCounts: Record<string, number> = {};
+        appointmentsData.forEach((appt: any) => {
+          const name = appt.type || appt.reason || 'Other';
+          serviceCounts[name] = (serviceCounts[name] || 0) + 1;
+        });
+
+        const totalAppts = appointmentsData.length || 1;
+        const serviceEntries = Object.entries(serviceCounts)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 6);
+
+        // Estimate service revenue proportionally from total revenue
+        const totalServiceRev = monthlyRev.reduce((s, v) => s + v, 0);
+        const serviceSegs = serviceEntries.map(([name, count], i) => {
+          const pct = Math.round((count / totalAppts) * 100);
+          return {
+            name,
+            amount: Math.round((count / totalAppts) * totalServiceRev),
+            color: SERVICE_COLORS[i % SERVICE_COLORS.length],
+            pct,
+          };
+        });
+        // Ensure percentages add to ~100
+        const pctSum = serviceSegs.reduce((s, seg) => s + seg.pct, 0);
+        if (serviceSegs.length > 0 && pctSum !== 100) {
+          serviceSegs[0].pct += (100 - pctSum);
+        }
+        setServiceRevenue(serviceSegs);
+
+        // ── Forecast — based on last 3 months ──
+        const last3 = monthlyRev.slice(-3);
+        const avgGrowthRate = last3.length >= 2
+          ? last3.slice(1).reduce((sum, val, i) => {
+              const prev = last3[i];
+              return sum + (prev > 0 ? (val - prev) / prev : 0);
+            }, 0) / (last3.length - 1)
+          : 0;
+
+        const lastRev = monthlyRev[monthlyRev.length - 1] || 0;
+        const forecastM1 = Math.round(lastRev * (1 + avgGrowthRate));
+        const forecastM2 = Math.round(forecastM1 * (1 + avgGrowthRate));
+
+        const fLabels = labels.slice(-3);
+        const nextMonth1 = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+        const nextMonth2 = new Date(now.getFullYear(), now.getMonth() + 2, 1);
+        fLabels.push(`${nextMonth1.toLocaleDateString('en-US', { month: 'short' })} (est)`);
+        fLabels.push(`${nextMonth2.toLocaleDateString('en-US', { month: 'short' })} (est)`);
+
+        setForecastData([...last3, forecastM1, forecastM2]);
+        setForecastLabels(fLabels);
+        setForecastNextMonth(forecastM1);
+        setForecastGrowth(lastRev > 0 ? ((forecastM1 - lastRev) / lastRev * 100).toFixed(1) : '0');
+
+        // Q2 estimate (sum of next 3 months projected)
+        const forecastM3 = Math.round(forecastM2 * (1 + avgGrowthRate));
+        setForecastQ2(forecastM1 + forecastM2 + forecastM3);
+
+      } catch (err) {
+        console.error('Failed to load billing data:', err);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadBillingData();
+  }, []);
+
+  // ─── Derived values ───
+  const filtered = invoices.filter(inv => {
     const q = invoiceSearch.toLowerCase();
     const matchSearch = !q || inv.client.toLowerCase().includes(q) || inv.id.toLowerCase().includes(q) || inv.service.toLowerCase().includes(q);
     const matchStatus = statusFilter === 'all' || inv.status === statusFilter;
     return matchSearch && matchStatus;
   });
+
+  // ─── Loading state ───
+  if (loading) {
+    return (
+      <div className="max-w-[1440px] mx-auto p-8">
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '32px' }}>
+          <div>
+            <h1 style={{ fontSize: '32px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '6px' }}>
+              Billing & Cashflow
+            </h1>
+            <p style={{ fontSize: '16px', color: 'var(--text-secondary)' }}>
+              Loading financial overview...
+            </p>
+          </div>
+        </div>
+        {/* Skeleton KPI row */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} style={{
+              backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)',
+              borderRadius: '14px', padding: '20px 22px', height: '130px',
+            }}>
+              <div style={{ width: '60%', height: '12px', borderRadius: '6px', backgroundColor: 'var(--border-color)', marginBottom: '14px', animation: 'pulse 1.5s ease-in-out infinite' }} />
+              <div style={{ width: '40%', height: '28px', borderRadius: '8px', backgroundColor: 'var(--border-color)', marginBottom: '10px', animation: 'pulse 1.5s ease-in-out infinite' }} />
+              <div style={{ width: '50%', height: '10px', borderRadius: '5px', backgroundColor: 'var(--border-color)', animation: 'pulse 1.5s ease-in-out infinite' }} />
+            </div>
+          ))}
+        </div>
+        {/* Skeleton chart areas */}
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '20px', marginBottom: '24px' }}>
+          {Array.from({ length: 2 }).map((_, i) => (
+            <div key={i} style={{
+              backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)',
+              borderRadius: '14px', height: '340px',
+            }}>
+              <div style={{ padding: '18px 22px 14px', borderBottom: '1px solid var(--border-color)' }}>
+                <div style={{ width: '50%', height: '14px', borderRadius: '7px', backgroundColor: 'var(--border-color)', marginBottom: '6px', animation: 'pulse 1.5s ease-in-out infinite' }} />
+                <div style={{ width: '35%', height: '10px', borderRadius: '5px', backgroundColor: 'var(--border-color)', animation: 'pulse 1.5s ease-in-out infinite' }} />
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{
+          backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)',
+          borderRadius: '14px', height: '300px',
+        }}>
+          <div style={{ padding: '18px 22px 14px', borderBottom: '1px solid var(--border-color)' }}>
+            <div style={{ width: '30%', height: '14px', borderRadius: '7px', backgroundColor: 'var(--border-color)', marginBottom: '6px', animation: 'pulse 1.5s ease-in-out infinite' }} />
+            <div style={{ width: '20%', height: '10px', borderRadius: '5px', backgroundColor: 'var(--border-color)', animation: 'pulse 1.5s ease-in-out infinite' }} />
+          </div>
+        </div>
+        <style>{`@keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.8; } }`}</style>
+      </div>
+    );
+  }
+
+  const currentMonthName = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  const dailyAvg = dailyRevenue.length > 0
+    ? Math.round(dailyRevenue.reduce((s, d) => s + d.val, 0) / dailyRevenue.length)
+    : 0;
 
   return (
     <div className="max-w-[1440px] mx-auto p-8">
@@ -441,10 +724,11 @@ export default function SuperAdminBillingPage() {
             Billing & Cashflow
           </h1>
           <p style={{ fontSize: '16px', color: 'var(--text-secondary)' }}>
-            Hugory Animal Hospital · financial overview
+            Financial overview
           </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <ConnectionStatusBadge />
           <Select value={period} onValueChange={setPeriod}>
             <SelectTrigger style={{ width: '170px' }}><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -476,7 +760,7 @@ export default function SuperAdminBillingPage() {
           value={`$${(netCashflow / 1000).toFixed(1)}k`}
           trend={`${cashflowGrowth}%`}
           trendUp={parseFloat(cashflowGrowth) >= 0}
-          sub="revenue − expenses"
+          sub="revenue − est. expenses"
           color="#4ADE80"
           icon={Banknote}
         />
@@ -485,15 +769,15 @@ export default function SuperAdminBillingPage() {
           value={`$${outstandingAmt.toLocaleString()}`}
           trend={`${overdueCnt} overdue`}
           trendUp={false}
-          sub={`${outstanding.length} invoices`}
+          sub={`${outstandingCount} invoices`}
           color="#EF4444"
           icon={AlertCircle}
         />
         <KpiCard
           label="Collection Rate"
           value={`${collectionRate}%`}
-          trend="+2% this month"
-          trendUp={true}
+          trend={collectionRate >= 70 ? 'Good' : 'Low'}
+          trendUp={collectionRate >= 70}
           sub="paid on time"
           color="#818CF8"
           icon={Percent}
@@ -506,7 +790,7 @@ export default function SuperAdminBillingPage() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
             <div>
               <h2 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>Revenue & Cashflow</h2>
-              <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '2px' }}>Monthly revenue vs net cashflow</p>
+              <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '2px' }}>Monthly revenue vs estimated net cashflow</p>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -521,9 +805,9 @@ export default function SuperAdminBillingPage() {
           </div>
           {/* Two overlapping line charts */}
           <div style={{ position: 'relative' }}>
-            <LineChart data={REVENUE}   labels={MONTHS} color={ACCENT}   viewBoxWidth={700} viewBoxHeight={210} />
+            <LineChart data={monthlyRevenue}  labels={monthLabels} color={ACCENT}   viewBoxWidth={700} viewBoxHeight={210} />
             <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-              <LineChart data={CASHFLOW} labels={MONTHS} color="#4ADE80" viewBoxWidth={700} viewBoxHeight={210} dashed />
+              <LineChart data={monthlyCashflow} labels={monthLabels} color="#4ADE80" viewBoxWidth={700} viewBoxHeight={210} dashed />
             </div>
           </div>
         </Card>
@@ -531,7 +815,7 @@ export default function SuperAdminBillingPage() {
         {/* Revenue breakdown donut */}
         <Card>
           <SectionTitle>Revenue by Service</SectionTitle>
-          <DonutChart segments={SERVICE_REVENUE as unknown as { name: string; amount: number; color: string; pct: number }[]} />
+          <DonutChart segments={serviceRevenue} />
         </Card>
       </div>
 
@@ -539,43 +823,51 @@ export default function SuperAdminBillingPage() {
       <div className="grid grid-cols-3 gap-5 mb-7">
         <Card style={{ gridColumn: 'span 2' }}>
           <SectionTitle>
-            Daily Revenue — March 2026
+            Daily Revenue — {currentMonthName}
             <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-              Avg: ${Math.round(DAILY_REVENUE.reduce((s,d) => s + d.val, 0) / DAILY_REVENUE.length).toLocaleString()}/day
+              Avg: ${dailyAvg.toLocaleString()}/day
             </span>
           </SectionTitle>
-          <DailyBar data={DAILY_REVENUE} />
+          <DailyBar data={dailyRevenue} />
         </Card>
 
         {/* Forecast card */}
         <Card>
           <SectionTitle>Revenue Forecast</SectionTitle>
           <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '-10px', marginBottom: '16px' }}>
-            Based on current growth trajectory
+            Based on recent growth trajectory
           </p>
           <LineChart
-            data={FORECAST}
-            labels={F_MONTHS}
+            data={forecastData}
+            labels={forecastLabels}
             color="#818CF8"
             viewBoxWidth={320}
             viewBoxHeight={160}
           />
           {/* Projected total */}
           <div style={{ marginTop: '16px', padding: '14px 16px', borderRadius: '10px', background: `linear-gradient(135deg, #818CF815, #818CF808)`, border: '1px solid #818CF830' }}>
-            <p style={{ fontSize: '11px', fontWeight: 700, color: '#818CF8', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '4px' }}>Apr 2026 Forecast</p>
-            <p style={{ fontSize: '26px', fontWeight: 900, color: 'var(--text-primary)', letterSpacing: '-0.5px' }}>$51,200</p>
-            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>+4.7% projected growth</p>
+            <p style={{ fontSize: '11px', fontWeight: 700, color: '#818CF8', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '4px' }}>
+              Next Month Forecast
+            </p>
+            <p style={{ fontSize: '26px', fontWeight: 900, color: 'var(--text-primary)', letterSpacing: '-0.5px' }}>
+              ${forecastNextMonth.toLocaleString()}
+            </p>
+            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+              {parseFloat(forecastGrowth) >= 0 ? '+' : ''}{forecastGrowth}% projected growth
+            </p>
           </div>
           <div style={{ marginTop: '12px', display: 'flex', gap: '8px' }}>
             <div style={{ flex: 1, padding: '10px 12px', borderRadius: '8px', backgroundColor: 'var(--surface-elevated)', border: '1px solid var(--border-color)', textAlign: 'center' }}>
-              <p style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Q2 2026</p>
-              <p style={{ fontSize: '18px', fontWeight: 800, color: ACCENT }}>$159k</p>
+              <p style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Q2 Est.</p>
+              <p style={{ fontSize: '18px', fontWeight: 800, color: ACCENT }}>${(forecastQ2 / 1000).toFixed(0)}k</p>
               <p style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>est. total</p>
             </div>
             <div style={{ flex: 1, padding: '10px 12px', borderRadius: '8px', backgroundColor: 'var(--surface-elevated)', border: '1px solid var(--border-color)', textAlign: 'center' }}>
-              <p style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>YoY Growth</p>
-              <p style={{ fontSize: '18px', fontWeight: 800, color: '#4ADE80' }}>+18%</p>
-              <p style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>vs 2025</p>
+              <p style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Growth</p>
+              <p style={{ fontSize: '18px', fontWeight: 800, color: parseFloat(forecastGrowth) >= 0 ? '#4ADE80' : '#EF4444' }}>
+                {parseFloat(forecastGrowth) >= 0 ? '+' : ''}{forecastGrowth}%
+              </p>
+              <p style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>projected</p>
             </div>
           </div>
         </Card>
@@ -587,8 +879,8 @@ export default function SuperAdminBillingPage() {
           <div>
             <h2 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>Invoices</h2>
             <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-              {filtered.length} of {INVOICES.length} invoices
-              {overdueCnt > 0 && <span style={{ marginLeft: '10px', color: '#DC2626', fontWeight: 600 }}>· {overdueCnt} overdue</span>}
+              {filtered.length} of {invoices.length} invoices
+              {overdueCnt > 0 && <span style={{ marginLeft: '10px', color: '#DC2626', fontWeight: 600 }}>{'\u00B7'} {overdueCnt} overdue</span>}
             </p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
@@ -605,10 +897,10 @@ export default function SuperAdminBillingPage() {
               <SelectTrigger style={{ width: '150px' }}><SelectValue placeholder="All statuses" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Statuses</SelectItem>
-                <SelectItem value="Paid">✅ Paid</SelectItem>
-                <SelectItem value="Pending">⏳ Pending</SelectItem>
-                <SelectItem value="Overdue">🔴 Overdue</SelectItem>
-                <SelectItem value="Partial">🔵 Partial</SelectItem>
+                <SelectItem value="Paid">Paid</SelectItem>
+                <SelectItem value="Pending">Pending</SelectItem>
+                <SelectItem value="Overdue">Overdue</SelectItem>
+                <SelectItem value="Partial">Partial</SelectItem>
               </SelectContent>
             </Select>
             <Button variant="outline" style={{ gap: '6px' }}>
@@ -620,7 +912,7 @@ export default function SuperAdminBillingPage() {
         {/* Summary strip */}
         <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
           {(['Paid', 'Pending', 'Overdue', 'Partial'] as InvoiceStatus[]).map(s => {
-            const items = INVOICES.filter(i => i.status === s);
+            const items = invoices.filter(i => i.status === s);
             const total = items.reduce((acc, i) => acc + i.amount, 0);
             const cfg   = STATUS_STYLE[s];
             const Icon  = cfg.icon;
@@ -638,7 +930,7 @@ export default function SuperAdminBillingPage() {
                 <Icon style={{ width: 13, height: 13, color: cfg.text }} />
                 <span style={{ fontSize: '12px', fontWeight: 700, color: cfg.text }}>{s}</span>
                 <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                  {items.length} · ${total.toLocaleString()}
+                  {items.length} {'\u00B7'} ${total.toLocaleString()}
                 </span>
               </button>
             );
@@ -655,7 +947,7 @@ export default function SuperAdminBillingPage() {
           </div>
           {filtered.map((inv, i) => (
             <div
-              key={inv.id}
+              key={inv.id + '-' + i}
               style={{
                 display: 'grid', gridTemplateColumns: '140px 1fr 1fr 1fr 110px 90px 100px',
                 gap: '0', padding: '13px 16px', alignItems: 'center',
@@ -674,7 +966,10 @@ export default function SuperAdminBillingPage() {
               <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>${inv.amount.toLocaleString()}.00</span>
               <StatusBadge status={inv.status} />
               <div style={{ display: 'flex', gap: '6px' }}>
-                <button style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'transparent', cursor: 'pointer', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                <button
+                  onClick={() => setViewInvoice(inv)}
+                  style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'transparent', cursor: 'pointer', fontSize: '12px', color: 'var(--text-secondary)' }}
+                >
                   View
                 </button>
                 {inv.status === 'Overdue' && (
@@ -695,7 +990,7 @@ export default function SuperAdminBillingPage() {
         {/* Footer */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '14px' }}>
           <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-            Showing {filtered.length} of {INVOICES.length} invoices
+            Showing {filtered.length} of {invoices.length} invoices
           </p>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Total:</span>
@@ -705,6 +1000,166 @@ export default function SuperAdminBillingPage() {
           </div>
         </div>
       </Card>
+
+      {/* ─── Invoice Detail Modal ──────────────────────────── */}
+      {viewInvoice && (() => {
+        const inv = viewInvoice;
+        const balance = inv.amount - inv.amountPaid;
+        const statusCfg = STATUS_STYLE[inv.status];
+        const StatusIcon = statusCfg.icon;
+        return (
+          <div
+            style={{ position: 'fixed', inset: 0, zIndex: 300, backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
+            onClick={e => { if (e.target === e.currentTarget) setViewInvoice(null); }}
+          >
+            <div
+              style={{ backgroundColor: 'var(--surface-white)', borderRadius: 16, width: '100%', maxWidth: 480, boxShadow: '0 24px 64px rgba(0,0,0,0.2)', overflow: 'hidden', maxHeight: '92vh', overflowY: 'auto' }}
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Accent bar */}
+              <div style={{ height: 4, background: `linear-gradient(90deg, ${ACCENT}, ${ACCENT_D})`, flexShrink: 0 }} />
+
+              {/* Header */}
+              <div style={{ padding: '18px 22px 14px', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: `${ACCENT}15`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Receipt style={{ width: 17, height: 17, color: ACCENT }} />
+                  </div>
+                  <div>
+                    <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>Invoice {inv.id}</p>
+                    <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: 0 }}>{inv.client}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setViewInvoice(null)}
+                  style={{ width: 28, height: 28, borderRadius: 8, border: 'none', cursor: 'pointer', backgroundColor: 'var(--surface-elevated)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}
+                >
+                  <X style={{ width: 14, height: 14 }} />
+                </button>
+              </div>
+
+              {/* Status + Amount */}
+              <div style={{ padding: '16px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <StatusIcon style={{ width: 16, height: 16, color: statusCfg.text }} />
+                  <span style={{ fontSize: 14, fontWeight: 700, color: statusCfg.text, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{inv.status}</span>
+                </div>
+                <span style={{ fontSize: 26, fontWeight: 800, color: ACCENT }}>${inv.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              </div>
+
+              {/* Details grid */}
+              <div style={{ padding: '0 22px 16px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 20px' }}>
+                <div>
+                  <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 3px' }}>Client</p>
+                  <p style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <User style={{ width: 13, height: 13, color: 'var(--text-secondary)' }} /> {inv.client}
+                  </p>
+                </div>
+                <div>
+                  <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 3px' }}>Invoice #</p>
+                  <p style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'monospace' }}>
+                    <Hash style={{ width: 13, height: 13, color: 'var(--text-secondary)' }} /> {inv.id}
+                  </p>
+                </div>
+                <div>
+                  <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 3px' }}>Issued</p>
+                  <p style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <Calendar style={{ width: 13, height: 13, color: 'var(--text-secondary)' }} /> {inv.date}
+                  </p>
+                </div>
+                <div>
+                  <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 3px' }}>Due Date</p>
+                  <p style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <Calendar style={{ width: 13, height: 13, color: 'var(--text-secondary)' }} /> {inv.dueDate ? new Date(inv.dueDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Breakdown */}
+              <div style={{ padding: '0 22px 16px' }}>
+                <div style={{ borderRadius: 10, border: '1px solid var(--border-color)', overflow: 'hidden' }}>
+                  <div style={{ padding: '9px 14px', backgroundColor: 'var(--surface-elevated)' }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Breakdown</span>
+                  </div>
+                  {inv.service && inv.service !== '—' && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 14px', borderTop: '1px solid var(--border-color)' }}>
+                      <span style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 500 }}>{inv.service}</span>
+                      <span style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 600 }}>${inv.subtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 14px', borderTop: '1px solid var(--border-color)' }}>
+                    <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Subtotal</span>
+                    <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>${inv.subtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  {inv.taxAmount > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 14px', borderTop: '1px solid var(--border-color)' }}>
+                      <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Tax</span>
+                      <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>${inv.taxAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  )}
+                  {inv.discountAmount > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 14px', borderTop: '1px solid var(--border-color)' }}>
+                      <span style={{ fontSize: 13, color: '#2D6A4F' }}>Discount</span>
+                      <span style={{ fontSize: 13, color: '#2D6A4F' }}>−${inv.discountAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 14px', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--surface-elevated)' }}>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>Total</span>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>${inv.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  {inv.amountPaid > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 14px', borderTop: '1px solid var(--border-color)' }}>
+                      <span style={{ fontSize: 13, color: '#2D6A4F', fontWeight: 600 }}>Amount Paid</span>
+                      <span style={{ fontSize: 13, color: '#2D6A4F', fontWeight: 600 }}>${inv.amountPaid.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  )}
+                  {balance > 0 && inv.status !== 'Paid' && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 14px', borderTop: '1px solid var(--border-color)' }}>
+                      <span style={{ fontSize: 13, color: '#DC2626', fontWeight: 600 }}>Balance Due</span>
+                      <span style={{ fontSize: 13, color: '#DC2626', fontWeight: 600 }}>${balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Paid at info */}
+              {inv.paidAt && (
+                <div style={{ padding: '0 22px 16px' }}>
+                  <p style={{ fontSize: 12, color: '#2D6A4F', margin: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <CheckCircle2 style={{ width: 13, height: 13 }} />
+                    Paid on {new Date(inv.paidAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                  </p>
+                </div>
+              )}
+
+              {/* Notes */}
+              {inv.notes && (
+                <div style={{ padding: '0 22px 16px' }}>
+                  <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 4px' }}>Notes</p>
+                  <p style={{ fontSize: 13, color: 'var(--text-primary)', margin: 0, lineHeight: 1.5 }}>{inv.notes}</p>
+                </div>
+              )}
+
+              {/* Close button */}
+              <div style={{ padding: '10px 22px 18px' }}>
+                <button
+                  onClick={() => setViewInvoice(null)}
+                  style={{
+                    width: '100%', padding: '10px', borderRadius: 10,
+                    border: '1px solid var(--border-color)', cursor: 'pointer',
+                    backgroundColor: 'var(--surface-elevated)', color: 'var(--text-secondary)',
+                    fontSize: 13, fontWeight: 600, transition: 'opacity 0.15s',
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.opacity = '0.7')}
+                  onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
     </div>
   );

@@ -13,7 +13,7 @@ function useIsMobile() {
 import { Link, useLocation, useNavigate } from 'react-router';
 import { useAuth } from '../context/AuthContext';
 import {
-  Home, BarChart2, Users, Building2, Calendar, CreditCard,
+  Home, BarChart2, Users, Building2, Calendar, CreditCard, Clock,
   Settings, ClipboardList, Sun, Moon, ChevronLeft, ChevronRight,
   LogOut, ChevronUp, Crown, MessageSquare, Tag, MonitorSmartphone,
 } from 'lucide-react';
@@ -45,6 +45,7 @@ const NAV_SECTIONS: NavSection[] = [
     label: 'Operations',
     items: [
       { name: 'Staff',            icon: Users,             path: '/superadmin/staff' },
+      { name: 'Shifts',           icon: Clock,             path: '/superadmin/shifts' },
       { name: 'Clinics',          icon: Building2,         path: '/superadmin/clinics' },
       { name: 'Appointments',     icon: Calendar,          path: '/superadmin/appointments' },
       { name: 'Patient Portals',  icon: MonitorSmartphone, path: '/superadmin/portals' },
@@ -113,7 +114,9 @@ export function SuperAdminSidebar({
       });
     })();
   }, []);
-  const saFullName = `Dr. ${saProfile.firstName} ${saProfile.lastName}`.trim();
+  const saFullName = (saProfile.role === 'doctor' || saProfile.role === 'veterinarian')
+    ? `Dr. ${saProfile.firstName} ${saProfile.lastName}`.trim()
+    : `${saProfile.firstName} ${saProfile.lastName}`.trim();
   const saInitials = `${(saProfile.firstName[0] || '').toUpperCase()}${(saProfile.lastName[0] || '').toUpperCase()}`;
 
   // Poll for unread chat messages
@@ -191,28 +194,21 @@ export function SuperAdminSidebar({
         }}
       >
         <Link to="/superadmin" className="flex items-center gap-2 flex-shrink-0">
-          <div
-            className="w-10 h-10 flex items-center justify-center flex-shrink-0"
-            style={{ borderRadius: '10px', backgroundColor: LOGO_BG }}
-          >
-            <Crown className="w-5 h-5" style={{ color: BRAND }} />
-          </div>
-          {!effectiveCollapsed && (
-            <div className="flex flex-col">
-              <span
-                className="text-[var(--text-primary)] whitespace-nowrap"
-                style={{ fontSize: '20px', fontWeight: 700, lineHeight: 1.2 }}
-              >
-                Hugory
-              </span>
+          {effectiveCollapsed ? (
+            <img src="/logo-mini.svg" alt="HugoIT" className="flex-shrink-0" style={{ width: '32px', height: '32px' }} />
+          ) : (
+            <div className="flex flex-col items-start gap-0">
+              <img src={isDark ? '/logo-full-dark.svg' : '/logo-full.svg'} alt="HugoIT" className="flex-shrink-0" style={{ height: '40px' }} />
               <span
                 style={{
-                  fontSize: '10px',
+                  fontSize: '9px',
                   fontWeight: 700,
-                  letterSpacing: '0.08em',
+                  letterSpacing: '0.1em',
                   textTransform: 'uppercase',
                   color: BRAND_TEXT,
-                  lineHeight: 1.2,
+                  lineHeight: 1,
+                  marginTop: '-2px',
+                  marginLeft: '2px',
                 }}
               >
                 Super Admin
