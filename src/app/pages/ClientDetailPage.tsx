@@ -531,7 +531,6 @@ export default function ClientDetailPage() {
   const [allergies, setAllergies] = useState(client.pets[0].allergies);
   const [allergyInput, setAllergyInput] = useState('');
   const [showAllergyInput, setShowAllergyInput] = useState(false);
-  const [visitDialogOpen, setVisitDialogOpen] = useState(false);
   const [treatmentDialogOpen, setTreatmentDialogOpen] = useState(false);
   const [treatmentPopoverOpen, setTreatmentPopoverOpen] = useState(false);
   const [treatments, setTreatments] = useState(client.pets[0].treatments);
@@ -679,31 +678,27 @@ export default function ClientDetailPage() {
     if (!petDbId) return;
     const { organizationId } = await getOrgContext();
     const { data } = await supabase
-      .from('medical_records')
-      .select('id, visit_date, reason, clinical_notes, follow_up_date, follow_up_notes, created_at, updated_at, record_diagnoses(type, description), record_treatments(procedure_name, post_visit_instructions), staff:staff!medical_records_vet_id_fkey(profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
+      .from('appointments')
+      .select('id, scheduled_at, duration_minutes, status, type, reason, notes, room, visit_started_at, checkout_done_at, staff:staff!appointments_vet_id_fkey(profiles:profiles!staff_profile_id_fkey(first_name, last_name)), services:services!appointments_service_id_fkey(name)')
       .eq('pet_id', petDbId)
       .eq('organization_id', organizationId)
-      .order('visit_date', { ascending: false });
+      .eq('status', 'Completed')
+      .order('scheduled_at', { ascending: false });
     if (data) {
-      // Map to the shape previously expected by the visit reports UI
-      const mapped = data.map((mr: any) => {
-        const primaryDx = mr.record_diagnoses?.find((d: any) => d.type === 'primary')?.description || null;
-        const secondaryDx = mr.record_diagnoses?.find((d: any) => d.type === 'secondary')?.description || null;
-        const treatment = mr.record_treatments?.[0];
-        const profile = mr.staff?.profiles;
+      const mapped = data.map((apt: any) => {
+        const profile = apt.staff?.profiles;
         return {
-          id: mr.id,
-          visit_date: mr.visit_date,
-          primary_diagnosis: primaryDx,
-          secondary_diagnosis: secondaryDx,
-          clinical_notes: mr.clinical_notes,
-          procedures: treatment?.procedure_name || null,
-          owner_instructions: treatment?.post_visit_instructions || null,
-          follow_up_date: mr.follow_up_date,
-          follow_up_notes: mr.follow_up_notes,
-          created_at: mr.created_at,
-          updated_at: mr.updated_at,
-          profiles: profile || null,
+          id: apt.id,
+          visit_date: apt.scheduled_at?.split('T')[0] || '',
+          visit_time: apt.scheduled_at ? new Date(apt.scheduled_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '',
+          reason: apt.reason || apt.services?.name || apt.type || 'Appointment',
+          status: apt.status || 'Scheduled',
+          type: apt.type,
+          notes: apt.notes,
+          room: apt.room,
+          duration_minutes: apt.duration_minutes,
+          service_name: apt.services?.name || null,
+          vet_name: profile ? `Dr. ${profile.first_name} ${profile.last_name}` : '—',
         };
       });
       setVisitReports(mapped);
@@ -717,6 +712,7 @@ export default function ClientDetailPage() {
       fetchVisitReports(petDbId);
     }
   }, [selectedPetIdx, client.pets, fetchNotes, fetchVisitReports]);
+
 
   const handleSaveNote = async (type: 'vet' | 'client') => {
     const content = type === 'vet' ? newVetNote.trim() : newClientNote.trim();
@@ -992,23 +988,230 @@ export default function ClientDetailPage() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => {
-                // Export full client + pet info as JSON download
-                const exportData = {
-                  owner: { name: ownerName, email: ownerEmail, phone: ownerPhone, address: ownerAddress, emergencyContact, emergencyPhone },
-                  insurance: { provider: insProvider, policyNumber: insPolicyNumber, coverageType: insCoverageType, expiryDate: insExpiry },
-                  pets: client.pets.map(p => ({ name: p.name, species: p.species, breed: p.breed, dob: p.dob, age: p.age, sex: p.sex, weight: p.weight, microchip: p.microchip, assignedVet: p.assignedVet })),
-                };
-                const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `${ownerName.replace(/\s+/g, '_')}_profile.json`;
-                a.click();
-                URL.revokeObjectURL(url);
+                const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+                const petsHtml = client.pets.map((p: any) => {
+                  const conditionsHtml = (p.conditions || []).map((c: any) =>
+                    `<tr><td>${c.name}</td><td>${c.dateDiagnosed || '—'}</td><td><span class="badge ${c.status === 'active' ? 'badge-active' : 'badge-resolved'}">${c.status}</span></td></tr>`
+                  ).join('') || '<tr><td colspan="3" class="empty">No conditions recorded</td></tr>';
+
+                  const treatmentsHtml = (p.treatments || []).map((t: any) =>
+                    `<tr><td>${t.name}</td><td>${t.date || '—'}</td><td>${t.vet || '—'}</td><td>${t.notes || '—'}</td></tr>`
+                  ).join('') || '<tr><td colspan="4" class="empty">No treatments recorded</td></tr>';
+
+                  const vaccHtml = (p.vaccinations || []).map((v: any) =>
+                    `<tr><td>${v.name}</td><td><span class="badge ${v.status === 'Up to date' ? 'badge-active' : 'badge-due'}">${v.status}</span></td><td>${v.lastGiven || '—'}</td><td>${v.nextDue || '—'}</td></tr>`
+                  ).join('') || '<tr><td colspan="4" class="empty">No vaccination records</td></tr>';
+
+                  const visitsHtml = visitReports.map((v: any) =>
+                    `<tr><td>${new Date(v.visit_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}${v.visit_time ? ' ' + v.visit_time : ''}</td><td>${v.reason}</td><td>${v.vet_name}</td><td><span class="badge badge-active">${v.status}</span></td></tr>`
+                  ).join('') || '<tr><td colspan="4" class="empty">No completed visits</td></tr>';
+
+                  return `
+                    <div class="pet-section">
+                      <div class="pet-header">
+                        ${p.image ? `<img src="${p.image}" class="pet-photo" alt="${p.name}" />` : `<div class="pet-photo pet-photo-placeholder">${(p.name || '?')[0]}</div>`}
+                        <div>
+                          <h2>${p.name}</h2>
+                          <p class="subtitle">${p.species} &middot; ${p.breed} &middot; ${p.sex || '—'} &middot; ${p.age || '—'}</p>
+                        </div>
+                        <span class="badge ${p.status === 'Healthy' ? 'badge-active' : 'badge-due'}" style="margin-left:auto;font-size:13px;">${p.status}</span>
+                      </div>
+                      <div class="info-grid">
+                        <div><span class="label">Date of Birth</span><span class="value">${p.dob || '—'}</span></div>
+                        <div><span class="label">Weight</span><span class="value">${p.weight || '—'}</span></div>
+                        <div><span class="label">Microchip</span><span class="value">${p.microchip || '—'}</span></div>
+                        <div><span class="label">Color</span><span class="value">${p.color || '—'}</span></div>
+                        <div><span class="label">Assigned Vet</span><span class="value">${p.assignedVet || '—'}</span></div>
+                        <div><span class="label">Allergies</span><span class="value">${(p.allergies || []).join(', ') || 'None'}</span></div>
+                      </div>
+
+                      <h3>Conditions</h3>
+                      <table><thead><tr><th>Condition</th><th>Date Diagnosed</th><th>Status</th></tr></thead><tbody>${conditionsHtml}</tbody></table>
+
+                      <h3>Treatments</h3>
+                      <table><thead><tr><th>Treatment</th><th>Date</th><th>Vet</th><th>Notes</th></tr></thead><tbody>${treatmentsHtml}</tbody></table>
+
+                      <h3>Vaccinations</h3>
+                      <table><thead><tr><th>Vaccine</th><th>Status</th><th>Last Given</th><th>Next Due</th></tr></thead><tbody>${vaccHtml}</tbody></table>
+
+                      <h3>Visit History</h3>
+                      <table><thead><tr><th>Date</th><th>Reason</th><th>Vet</th><th>Status</th></tr></thead><tbody>${visitsHtml}</tbody></table>
+                    </div>`;
+                }).join('');
+
+                const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Client Report — ${ownerName}</title>
+                <style>
+                  @page { margin: 20mm; size: A4; }
+                  * { box-sizing: border-box; margin: 0; padding: 0; }
+                  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1a1a2e; line-height: 1.5; padding: 0; }
+                  .header { display: flex; align-items: center; justify-content: space-between; border-bottom: 3px solid #2d6a4f; padding-bottom: 16px; margin-bottom: 24px; }
+                  .header h1 { font-size: 22px; color: #2d6a4f; }
+                  .header .meta { text-align: right; font-size: 12px; color: #666; }
+                  .owner-card { background: #f8faf9; border: 1px solid #dce8e0; border-radius: 10px; padding: 20px; margin-bottom: 28px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px 32px; }
+                  .owner-card h2 { grid-column: 1/-1; font-size: 18px; margin-bottom: 4px; color: #1a1a2e; }
+                  .owner-card .field { display: flex; flex-direction: column; }
+                  .owner-card .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #888; font-weight: 600; }
+                  .owner-card .value { font-size: 14px; color: #333; }
+                  .pet-section { border: 1px solid #e0e0e0; border-radius: 10px; padding: 20px; margin-bottom: 24px; page-break-inside: avoid; }
+                  .pet-header { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+                  .pet-photo { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; border: 2px solid #2d6a4f; }
+                  .pet-photo-placeholder { background: #2d6a4f; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 700; }
+                  .pet-header h2 { font-size: 18px; margin: 0; }
+                  .subtitle { font-size: 13px; color: #666; }
+                  .info-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 18px; background: #fafafa; padding: 12px; border-radius: 8px; }
+                  .info-grid .label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: #999; font-weight: 600; display: block; }
+                  .info-grid .value { font-size: 13px; color: #333; }
+                  h3 { font-size: 14px; color: #2d6a4f; margin: 16px 0 8px; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #e8e8e8; padding-bottom: 4px; }
+                  table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 12px; }
+                  th { background: #f0f5f2; color: #2d6a4f; text-align: left; padding: 6px 10px; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+                  td { padding: 6px 10px; border-bottom: 1px solid #f0f0f0; color: #444; }
+                  tr:last-child td { border-bottom: none; }
+                  .empty { text-align: center; color: #aaa; font-style: italic; padding: 12px; }
+                  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+                  .badge-active { background: #d4edda; color: #155724; }
+                  .badge-resolved { background: #e2e8f0; color: #4a5568; }
+                  .badge-due { background: #fff3cd; color: #856404; }
+                  .footer { margin-top: 32px; padding-top: 12px; border-top: 1px solid #ddd; font-size: 11px; color: #999; text-align: center; }
+                  @media print { body { padding: 0; } .no-print { display: none; } }
+                </style></head><body>
+                <div class="header">
+                  <h1>HugoIT &mdash; Client Report</h1>
+                  <div class="meta">Generated: ${today}<br/>Client ID: ${id || '—'}</div>
+                </div>
+
+                <div class="owner-card">
+                  <h2>${ownerName}</h2>
+                  <div class="field"><span class="label">Email</span><span class="value">${ownerEmail}</span></div>
+                  <div class="field"><span class="label">Phone</span><span class="value">${ownerPhone}</span></div>
+                  <div class="field"><span class="label">Address</span><span class="value">${ownerAddress}</span></div>
+                  <div class="field"><span class="label">Emergency Contact</span><span class="value">${emergencyContact || '—'} ${emergencyPhone ? '· ' + emergencyPhone : ''}</span></div>
+                  <div class="field"><span class="label">Insurance</span><span class="value">${insProvider || '—'} ${insPolicyNumber ? '· ' + insPolicyNumber : ''}</span></div>
+                  <div class="field"><span class="label">Coverage</span><span class="value">${insCoverageType || '—'} ${insExpiry ? '· Exp: ' + insExpiry : ''}</span></div>
+                </div>
+
+                ${petsHtml}
+
+                <div class="footer">HugoIT Veterinary Management &mdash; Confidential Patient Record &mdash; ${today}</div>
+
+                <div class="no-print" style="text-align:center;margin-top:24px;">
+                  <button onclick="window.print()" style="padding:10px 28px;background:#2d6a4f;color:#fff;border:none;border-radius:8px;font-size:14px;cursor:pointer;font-weight:600;">Print / Save as PDF</button>
+                </div>
+                </body></html>`;
+
+                const w = window.open('', '_blank');
+                if (w) { w.document.write(html); w.document.close(); }
               }}>
-                <FileDown className="w-4 h-4 mr-2" /> Export Full Info
+                <FileDown className="w-4 h-4 mr-2" /> Export Full Report
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => window.print()}><Printer className="w-4 h-4 mr-2" /> Print Record</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => {
+                const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+                const petsHtml = client.pets.map((p: any) => {
+                  const conditionsHtml = (p.conditions || []).map((c: any) =>
+                    `<tr><td>${c.name}</td><td>${c.dateDiagnosed || '—'}</td><td><span class="badge ${c.status === 'active' ? 'badge-active' : 'badge-resolved'}">${c.status}</span></td></tr>`
+                  ).join('') || '<tr><td colspan="3" class="empty">No conditions recorded</td></tr>';
+
+                  const treatmentsHtml = (p.treatments || []).map((t: any) =>
+                    `<tr><td>${t.name}</td><td>${t.date || '—'}</td><td>${t.vet || '—'}</td><td>${t.notes || '—'}</td></tr>`
+                  ).join('') || '<tr><td colspan="4" class="empty">No treatments recorded</td></tr>';
+
+                  const vaccHtml = (p.vaccinations || []).map((v: any) =>
+                    `<tr><td>${v.name}</td><td><span class="badge ${v.status === 'Up to date' ? 'badge-active' : 'badge-due'}">${v.status}</span></td><td>${v.lastGiven || '—'}</td><td>${v.nextDue || '—'}</td></tr>`
+                  ).join('') || '<tr><td colspan="4" class="empty">No vaccination records</td></tr>';
+
+                  const visitsHtml = visitReports.map((v: any) =>
+                    `<tr><td>${new Date(v.visit_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}${v.visit_time ? ' ' + v.visit_time : ''}</td><td>${v.reason}</td><td>${v.vet_name}</td><td><span class="badge badge-active">${v.status}</span></td></tr>`
+                  ).join('') || '<tr><td colspan="4" class="empty">No completed visits</td></tr>';
+
+                  return `
+                    <div class="pet-section">
+                      <div class="pet-header">
+                        ${p.image ? `<img src="${p.image}" class="pet-photo" alt="${p.name}" />` : `<div class="pet-photo pet-photo-placeholder">${(p.name || '?')[0]}</div>`}
+                        <div>
+                          <h2>${p.name}</h2>
+                          <p class="subtitle">${p.species} &middot; ${p.breed} &middot; ${p.sex || '—'} &middot; ${p.age || '—'}</p>
+                        </div>
+                        <span class="badge ${p.status === 'Healthy' ? 'badge-active' : 'badge-due'}" style="margin-left:auto;font-size:13px;">${p.status}</span>
+                      </div>
+                      <div class="info-grid">
+                        <div><span class="label">Date of Birth</span><span class="value">${p.dob || '—'}</span></div>
+                        <div><span class="label">Weight</span><span class="value">${p.weight || '—'}</span></div>
+                        <div><span class="label">Microchip</span><span class="value">${p.microchip || '—'}</span></div>
+                        <div><span class="label">Color</span><span class="value">${p.color || '—'}</span></div>
+                        <div><span class="label">Assigned Vet</span><span class="value">${p.assignedVet || '—'}</span></div>
+                        <div><span class="label">Allergies</span><span class="value">${(p.allergies || []).join(', ') || 'None'}</span></div>
+                      </div>
+
+                      <h3>Conditions</h3>
+                      <table><thead><tr><th>Condition</th><th>Date Diagnosed</th><th>Status</th></tr></thead><tbody>${conditionsHtml}</tbody></table>
+
+                      <h3>Treatments</h3>
+                      <table><thead><tr><th>Treatment</th><th>Date</th><th>Vet</th><th>Notes</th></tr></thead><tbody>${treatmentsHtml}</tbody></table>
+
+                      <h3>Vaccinations</h3>
+                      <table><thead><tr><th>Vaccine</th><th>Status</th><th>Last Given</th><th>Next Due</th></tr></thead><tbody>${vaccHtml}</tbody></table>
+
+                      <h3>Visit History</h3>
+                      <table><thead><tr><th>Date</th><th>Reason</th><th>Vet</th><th>Status</th></tr></thead><tbody>${visitsHtml}</tbody></table>
+                    </div>`;
+                }).join('');
+
+                const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Client Report — ${ownerName}</title>
+                <style>
+                  @page { margin: 20mm; size: A4; }
+                  * { box-sizing: border-box; margin: 0; padding: 0; }
+                  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1a1a2e; line-height: 1.5; padding: 0; }
+                  .header { display: flex; align-items: center; justify-content: space-between; border-bottom: 3px solid #2d6a4f; padding-bottom: 16px; margin-bottom: 24px; }
+                  .header h1 { font-size: 22px; color: #2d6a4f; }
+                  .header .meta { text-align: right; font-size: 12px; color: #666; }
+                  .owner-card { background: #f8faf9; border: 1px solid #dce8e0; border-radius: 10px; padding: 20px; margin-bottom: 28px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px 32px; }
+                  .owner-card h2 { grid-column: 1/-1; font-size: 18px; margin-bottom: 4px; color: #1a1a2e; }
+                  .owner-card .field { display: flex; flex-direction: column; }
+                  .owner-card .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #888; font-weight: 600; }
+                  .owner-card .value { font-size: 14px; color: #333; }
+                  .pet-section { border: 1px solid #e0e0e0; border-radius: 10px; padding: 20px; margin-bottom: 24px; page-break-inside: avoid; }
+                  .pet-header { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+                  .pet-photo { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; border: 2px solid #2d6a4f; }
+                  .pet-photo-placeholder { background: #2d6a4f; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 700; }
+                  .pet-header h2 { font-size: 18px; margin: 0; }
+                  .subtitle { font-size: 13px; color: #666; }
+                  .info-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 18px; background: #fafafa; padding: 12px; border-radius: 8px; }
+                  .info-grid .label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: #999; font-weight: 600; display: block; }
+                  .info-grid .value { font-size: 13px; color: #333; }
+                  h3 { font-size: 14px; color: #2d6a4f; margin: 16px 0 8px; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #e8e8e8; padding-bottom: 4px; }
+                  table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 12px; }
+                  th { background: #f0f5f2; color: #2d6a4f; text-align: left; padding: 6px 10px; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+                  td { padding: 6px 10px; border-bottom: 1px solid #f0f0f0; color: #444; }
+                  tr:last-child td { border-bottom: none; }
+                  .empty { text-align: center; color: #aaa; font-style: italic; padding: 12px; }
+                  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+                  .badge-active { background: #d4edda; color: #155724; }
+                  .badge-resolved { background: #e2e8f0; color: #4a5568; }
+                  .badge-due { background: #fff3cd; color: #856404; }
+                  .footer { margin-top: 32px; padding-top: 12px; border-top: 1px solid #ddd; font-size: 11px; color: #999; text-align: center; }
+                  @media print { body { padding: 0; } }
+                </style></head><body>
+                <div class="header">
+                  <h1>HugoIT &mdash; Client Report</h1>
+                  <div class="meta">Generated: ${today}<br/>Client ID: ${id || '—'}</div>
+                </div>
+                <div class="owner-card">
+                  <h2>${ownerName}</h2>
+                  <div class="field"><span class="label">Email</span><span class="value">${ownerEmail}</span></div>
+                  <div class="field"><span class="label">Phone</span><span class="value">${ownerPhone}</span></div>
+                  <div class="field"><span class="label">Address</span><span class="value">${ownerAddress}</span></div>
+                  <div class="field"><span class="label">Emergency Contact</span><span class="value">${emergencyContact || '—'} ${emergencyPhone ? '· ' + emergencyPhone : ''}</span></div>
+                  <div class="field"><span class="label">Insurance</span><span class="value">${insProvider || '—'} ${insPolicyNumber ? '· ' + insPolicyNumber : ''}</span></div>
+                  <div class="field"><span class="label">Coverage</span><span class="value">${insCoverageType || '—'} ${insExpiry ? '· Exp: ' + insExpiry : ''}</span></div>
+                </div>
+                ${petsHtml}
+                <div class="footer">HugoIT Veterinary Management &mdash; Confidential Patient Record &mdash; ${today}</div>
+                </body></html>`;
+
+                const w = window.open('', '_blank');
+                if (w) { w.document.write(html); w.document.close(); w.onload = () => w.print(); }
+              }}>
+                <Printer className="w-4 h-4 mr-2" /> Print Record
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 className="text-[#d4183d]"
@@ -1803,98 +2006,84 @@ export default function ClientDetailPage() {
           <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6" style={{ borderRadius: '12px' }}>
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-[var(--text-primary)]">Visit History</h3>
-              <Button onClick={() => setVisitDialogOpen(true)}>
-                <Plus className="w-4 h-4" /> Log Visit
-              </Button>
+              <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{visitReports.length} appointment{visitReports.length !== 1 ? 's' : ''}</span>
             </div>
 
-            <Accordion type="single" collapsible className="space-y-3">
-              {client.pets[selectedPetIdx].visits.map((v) => (
-                <AccordionItem key={v.id} value={`visit-${v.id}`} className="border border-[var(--border-color)] px-4" style={{ borderRadius: '8px' }}>
-                  <AccordionTrigger className="py-4 hover:no-underline">
-                    <div className="flex items-center gap-4 text-left flex-1 mr-4">
-                      <span className="text-[var(--text-secondary)] w-28 flex-shrink-0" style={{ fontSize: '14px' }}>{v.date}</span>
-                      <span className="text-[var(--text-primary)] flex-1" style={{ fontSize: '16px', fontWeight: 600 }}>{v.reason}</span>
-                      <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>{v.vet}</span>
-                      <span
-                        className="inline-block px-2 py-0.5 flex-shrink-0"
-                        style={{ backgroundColor: '#74C69D20', color: 'var(--brand-green-text)', borderRadius: '9999px', fontSize: '12px', fontWeight: 600 }}
-                      >
-                        {v.status}
-                      </span>
-                    </div>
-                  </AccordionTrigger>
-                  <AccordionContent className="pb-4">
-                    <Separator className="mb-4" />
-                    <div className="space-y-3">
-                      <div>
-                        <p className="text-[var(--text-secondary)] mb-1" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Summary</p>
-                        <p className="text-[var(--text-primary)]" style={{ fontSize: '14px' }}>{v.summary}</p>
-                      </div>
-                      <div>
-                        <p className="text-[var(--text-secondary)] mb-1" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Detailed Notes</p>
-                        <p className="text-[var(--text-primary)]" style={{ fontSize: '14px', lineHeight: 1.6 }}>{v.notes}</p>
-                      </div>
-                    </div>
-                  </AccordionContent>
-                </AccordionItem>
-              ))}
-            </Accordion>
+            {visitReports.length === 0 ? (
+              <p className="text-[var(--text-secondary)] text-center py-8" style={{ fontSize: '14px' }}>No appointments found for this pet.</p>
+            ) : (
+              <Accordion type="single" collapsible className="space-y-3">
+                {visitReports.map((v) => {
+                  const statusColor = v.status === 'Completed'
+                    ? { bg: '#74C69D20', text: 'var(--brand-green-text)' }
+                    : v.status === 'Cancelled'
+                    ? { bg: '#E76F5120', text: '#E76F51' }
+                    : v.status === 'In Progress' || v.status === 'Checked In'
+                    ? { bg: '#F4A26120', text: '#F4A261' }
+                    : { bg: '#5390D920', text: '#5390D9' };
+                  return (
+                    <AccordionItem key={v.id} value={`visit-${v.id}`} className="border border-[var(--border-color)] px-4" style={{ borderRadius: '8px' }}>
+                      <AccordionTrigger className="py-4 hover:no-underline">
+                        <div className="flex items-center gap-4 text-left flex-1 mr-4">
+                          <div className="flex flex-col flex-shrink-0 w-28">
+                            <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>
+                              {new Date(v.visit_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                            </span>
+                            {v.visit_time && <span className="text-[var(--text-secondary)]" style={{ fontSize: '12px' }}>{v.visit_time}</span>}
+                          </div>
+                          <span className="text-[var(--text-primary)] flex-1 truncate" style={{ fontSize: '16px', fontWeight: 600 }}>{v.reason}</span>
+                          <span className="text-[var(--text-secondary)] hidden sm:inline" style={{ fontSize: '14px' }}>{v.vet_name}</span>
+                          <span
+                            className="inline-block px-2 py-0.5 flex-shrink-0"
+                            style={{ backgroundColor: statusColor.bg, color: statusColor.text, borderRadius: '9999px', fontSize: '12px', fontWeight: 600 }}
+                          >
+                            {v.status}
+                          </span>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent className="pb-4">
+                        <Separator className="mb-4" />
+                        <div className="space-y-3">
+                          <div className="flex flex-wrap gap-x-6 gap-y-2">
+                            {v.type && (
+                              <div>
+                                <p className="text-[var(--text-secondary)] mb-0.5" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Type</p>
+                                <p className="text-[var(--text-primary)]" style={{ fontSize: '14px' }}>{v.type}</p>
+                              </div>
+                            )}
+                            {v.service_name && (
+                              <div>
+                                <p className="text-[var(--text-secondary)] mb-0.5" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Service</p>
+                                <p className="text-[var(--text-primary)]" style={{ fontSize: '14px' }}>{v.service_name}</p>
+                              </div>
+                            )}
+                            {v.duration_minutes && (
+                              <div>
+                                <p className="text-[var(--text-secondary)] mb-0.5" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Duration</p>
+                                <p className="text-[var(--text-primary)]" style={{ fontSize: '14px' }}>{v.duration_minutes} min</p>
+                              </div>
+                            )}
+                            {v.room && (
+                              <div>
+                                <p className="text-[var(--text-secondary)] mb-0.5" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Room</p>
+                                <p className="text-[var(--text-primary)]" style={{ fontSize: '14px' }}>{v.room}</p>
+                              </div>
+                            )}
+                          </div>
+                          {v.notes && (
+                            <div>
+                              <p className="text-[var(--text-secondary)] mb-1" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Notes</p>
+                              <p className="text-[var(--text-primary)] whitespace-pre-wrap" style={{ fontSize: '14px', lineHeight: 1.6 }}>{v.notes}</p>
+                            </div>
+                          )}
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  );
+                })}
+              </Accordion>
+            )}
           </div>
-
-          {/* Log Visit Dialog */}
-          <Dialog open={visitDialogOpen} onOpenChange={setVisitDialogOpen}>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Log Visit</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div>
-                  <label className="text-[var(--text-primary)] mb-1.5 block" style={{ fontSize: '14px', fontWeight: 600 }}>Date</label>
-                  <Input type="date" defaultValue="2026-03-11" />
-                </div>
-                <div>
-                  <label className="text-[var(--text-primary)] mb-1.5 block" style={{ fontSize: '14px', fontWeight: 600 }}>Reason for Visit</label>
-                  <Select>
-                    <SelectTrigger><SelectValue placeholder="Select reason..." /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="checkup">Annual Checkup</SelectItem>
-                      <SelectItem value="vaccination">Vaccination</SelectItem>
-                      <SelectItem value="illness">Illness</SelectItem>
-                      <SelectItem value="injury">Injury</SelectItem>
-                      <SelectItem value="followup">Follow-up</SelectItem>
-                      <SelectItem value="dental">Dental</SelectItem>
-                      <SelectItem value="surgery">Surgery</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <label className="text-[var(--text-primary)] mb-1.5 block" style={{ fontSize: '14px', fontWeight: 600 }}>Veterinarian</label>
-                  <Select defaultValue="chen">
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="chen">Dr. Chen</SelectItem>
-                      <SelectItem value="patel">Dr. Patel</SelectItem>
-                      <SelectItem value="garcia">Dr. Garcia</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <label className="text-[var(--text-primary)] mb-1.5 block" style={{ fontSize: '14px', fontWeight: 600 }}>Summary</label>
-                  <Input placeholder="Brief summary of the visit..." />
-                </div>
-                <div>
-                  <label className="text-[var(--text-primary)] mb-1.5 block" style={{ fontSize: '14px', fontWeight: 600 }}>Detailed Notes</label>
-                  <Textarea placeholder="Full visit notes..." className="min-h-24" />
-                </div>
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setVisitDialogOpen(false)}>Cancel</Button>
-                <Button onClick={() => setVisitDialogOpen(false)}>Save Visit</Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
         </TabsContent>
 
         {/* ═══ NOTES TAB ═══ */}
