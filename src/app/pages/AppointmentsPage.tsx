@@ -86,6 +86,7 @@ const statusStyles: Record<string, { bg: string; text: string; icon: typeof Chec
 };
 
 const serviceColors: Record<string, string> = {
+  // Legacy / short names
   'Annual Checkup': 'var(--brand-green-text)',
   Checkup: 'var(--brand-green-text)',
   Vaccination: '#3B82F6',
@@ -93,6 +94,16 @@ const serviceColors: Record<string, string> = {
   'Follow-up': '#F4A261',
   Emergency: '#d4183d',
   Surgery: '#EC4899',
+  // Full service names from DB
+  'General Wellness Exam': 'var(--brand-green-text)',
+  'Rabies Vaccination': '#3B82F6',
+  'DHPP Vaccine (Dog)': '#3B82F6',
+  'Blood Panel (CBC + Chemistry)': '#06B6D4',
+  'Cardiology Consultation': '#EC4899',
+  'Flea & Tick Prevention (3-Month)': '#F4A261',
+  'Spay Surgery': '#EC4899',
+  'X-Ray (2 Views)': '#6B7280',
+  'Emergency Triage & Stabilization': '#d4183d',
   Other: 'var(--text-secondary)',
 };
 
