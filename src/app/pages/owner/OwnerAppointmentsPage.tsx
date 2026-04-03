@@ -80,8 +80,8 @@ export default function OwnerAppointmentsPage() {
   const mappedAppts: Appointment[] = useMemo(() =>
     supaAppts.map((a, idx) => {
       const dt = new Date(a.scheduled_at);
-      const dateStr = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-      const h = dt.getHours(); const m = dt.getMinutes();
+      const dateStr = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+      const h = dt.getUTCHours(); const m = dt.getUTCMinutes();
       const ampm = h >= 12 ? 'PM' : 'AM';
       const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
       const time = `${h12}:${String(m).padStart(2, '0')} ${ampm}`;

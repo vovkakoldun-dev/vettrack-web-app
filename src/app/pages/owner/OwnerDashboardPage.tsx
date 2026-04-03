@@ -207,8 +207,8 @@ export default function OwnerDashboardPage() {
           const dt = new Date(a.scheduled_at);
           return {
             id: i + 1,
-            time: dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
-            date: dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+            time: dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' }),
+            date: dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }),
             reason: a.reason ?? a.services?.name ?? 'Checkup',
           };
         });

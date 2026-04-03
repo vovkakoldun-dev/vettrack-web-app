@@ -1,20 +1,81 @@
 @custom-variant dark (&:is(.dark *));
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   THEME SYSTEM — Multi-style design tokens
+   ═══════════════════════════════════════════════════════════════════════════
+   Architecture:
+     :root           → Light (default base)
+     .dark           → Default Dark
+     .theme-glass    → Glassmorphism
+     .theme-pastel   → Soft Pastel
+     .theme-contrast → High Contrast Pro
+     .theme-midnight → Midnight Blue
+
+   Each style defines ALL tokens so any can work standalone.
+   The .dark class activator still works for dark-mode variants.
+   Styles are applied via data-theme attribute + class on <html>.
+
+   Token naming:
+     --background         Page background
+     --foreground          Default text on background
+     --card / --card-foreground    Card surfaces
+     --surface-white       Primary surface (cards, panels)
+     --surface-elevated    Raised surface (dropdowns, elevated cards)
+     --surface-glass       Translucent surface (glass theme)
+     --text-primary        Strongest text
+     --text-secondary      Muted text
+     --border / --border-color     Dividers and outlines
+     --shadow-sm/md/lg     Elevation shadows
+     --blur-amount         Backdrop blur for glass effects
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── 1. LIGHT (default) ──────────────────────────────────────────────────── */
 :root {
   --font-size: 16px;
-  
+
   /* Hugory Brand Colors */
   --primary-green: #2D6A4F;
-  --brand-green-text: #2D6A4F;   /* use this for text — overridden in dark mode */
+  --brand-green-text: #2D6A4F;
+  --on-brand-green: #FFFFFF;
   --primary-light: #74C69D;
   --accent-amber: #F4A261;
   --bg-offwhite: #F8F7F4;
   --surface-white: #FFFFFF;
   --surface-elevated: #F8F7F4;
+  --surface-glass: rgba(255, 255, 255, 0.7);
   --text-primary: #1A1A2E;
   --text-secondary: #6B7280;
   --border-color: #E5E7EB;
-  
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+  --shadow-lg: 0 12px 40px rgba(0,0,0,0.12);
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-elevated: 0 4px 16px rgba(0,0,0,0.10);
+  --blur-amount: 0px;
+
+  /* Stat card tokens */
+  --stat-card-bg-from: #ffffff;
+  --stat-card-bg-mid: #f8faff;
+  --stat-card-bg-to: #ffffff;
+  --stat-card-text: #0F172A;
+  --stat-card-text-muted: rgba(0,0,0,0.38);
+  --stat-card-text-label: rgba(0,0,0,0.35);
+  --stat-card-border-alpha: 0.16;
+  --stat-card-btn-border: rgba(0,0,0,0.1);
+  --stat-card-btn-bg: rgba(0,0,0,0.03);
+  --stat-card-btn-icon: rgba(0,0,0,0.3);
+  --stat-card-dot-fill: #ffffff;
+  --stat-card-midline: rgba(0,0,0,0.07);
+  --stat-card-anno-start: rgba(0,0,0,0.4);
+  --stat-card-anno-end: rgba(0,0,0,0.8);
+  --stat-card-area-opacity: 0.14;
+  --stat-card-glow1: 0.28;
+  --stat-card-glow2: 0.45;
+  --stat-card-line-white-opacity: 1;
+  --stat-card-use-accent-line: 1;
+
   /* Map to shadcn tokens */
   --background: #F8F7F4;
   --foreground: #1A1A2E;
@@ -55,8 +116,8 @@
   --sidebar-ring: #2D6A4F;
 }
 
+/* ── 2. DEFAULT DARK ─────────────────────────────────────────────────────── */
 .dark {
-  /* Shadcn/ui semantic tokens — dark */
   --background: #0F172A;
   --foreground: #E2E8F0;
   --card: #1E293B;
@@ -86,18 +147,46 @@
   --chart-4: #94A3B8;
   --chart-5: #E2E8F0;
 
-  /* Hugory branded tokens — dark overrides */
   --primary-green: #2D6A4F;
-  --brand-green-text: #21C55E;   /* brighter in dark mode for legibility */
+  --brand-green-text: #21C55E;
+  --on-brand-green: #0A2618;
   --primary-light: #4ADE80;
   --bg-offwhite: #0F172A;
   --surface-white: #1E293B;
   --surface-elevated: #273549;
+  --surface-glass: rgba(30, 41, 59, 0.7);
   --text-primary: #E2E8F0;
   --text-secondary: #94A3B8;
   --border-color: #334155;
 
-  /* Sidebar */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.2);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.3);
+  --shadow-lg: 0 12px 40px rgba(0,0,0,0.4);
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.2), 0 1px 2px rgba(0,0,0,0.15);
+  --shadow-elevated: 0 4px 16px rgba(0,0,0,0.35);
+  --blur-amount: 0px;
+
+  /* Stat card tokens */
+  --stat-card-bg-from: #0D1B2A;
+  --stat-card-bg-mid: #0A1520;
+  --stat-card-bg-to: #0D1B2A;
+  --stat-card-text: #ffffff;
+  --stat-card-text-muted: rgba(255,255,255,0.35);
+  --stat-card-text-label: rgba(255,255,255,0.3);
+  --stat-card-border-alpha: 0.07;
+  --stat-card-btn-border: rgba(255,255,255,0.1);
+  --stat-card-btn-bg: rgba(255,255,255,0.04);
+  --stat-card-btn-icon: rgba(255,255,255,0.35);
+  --stat-card-dot-fill: #0D1B2A;
+  --stat-card-midline: rgba(255,255,255,0.07);
+  --stat-card-anno-start: rgba(255,255,255,0.45);
+  --stat-card-anno-end: rgba(255,255,255,0.9);
+  --stat-card-area-opacity: 0.22;
+  --stat-card-glow1: 0.35;
+  --stat-card-glow2: 0.5;
+  --stat-card-line-white-opacity: 0.9;
+  --stat-card-use-accent-line: 0;
+
   --sidebar: #161E2E;
   --sidebar-foreground: #E2E8F0;
   --sidebar-primary: #2D6A4F;
@@ -106,6 +195,528 @@
   --sidebar-accent-foreground: #E2E8F0;
   --sidebar-border: #334155;
   --sidebar-ring: #2D6A4F;
+}
+
+/* ── 3. GLASS / BLUR (glassmorphism) ─────────────────────────────────────── */
+.theme-glass {
+  --background: #0B1120;
+  --foreground: #E0E7FF;
+  --card: rgba(30, 41, 70, 0.45);
+  --card-foreground: #E0E7FF;
+  --popover: rgba(30, 41, 70, 0.75);
+  --popover-foreground: #E0E7FF;
+  --primary: #6366F1;
+  --primary-foreground: #ffffff;
+  --secondary: rgba(99, 102, 241, 0.15);
+  --secondary-foreground: #C7D2FE;
+  --muted: rgba(99, 102, 241, 0.10);
+  --muted-foreground: #94A3C8;
+  --accent: #818CF8;
+  --accent-foreground: #0B1120;
+  --destructive: #f87171;
+  --destructive-foreground: #ffffff;
+  --border: rgba(148, 163, 200, 0.15);
+  --input: rgba(148, 163, 200, 0.12);
+  --input-background: rgba(30, 41, 70, 0.40);
+  --switch-background: rgba(100, 116, 139, 0.4);
+  --ring: #6366F1;
+  --font-weight-medium: 600;
+  --font-weight-normal: 400;
+  --chart-1: #818CF8;
+  --chart-2: #A5B4FC;
+  --chart-3: #C084FC;
+  --chart-4: #94A3C8;
+  --chart-5: #E0E7FF;
+
+  --primary-green: #6366F1;
+  --brand-green-text: #818CF8;
+  --on-brand-green: #FFFFFF;
+  --primary-light: #A5B4FC;
+  --bg-offwhite: #0B1120;
+  --surface-white: rgba(30, 41, 70, 0.45);
+  --surface-elevated: rgba(50, 60, 100, 0.40);
+  --surface-glass: rgba(30, 41, 70, 0.30);
+  --text-primary: #E0E7FF;
+  --text-secondary: #94A3C8;
+  --border-color: rgba(148, 163, 200, 0.15);
+
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.15);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.2);
+  --shadow-lg: 0 12px 48px rgba(0,0,0,0.3);
+  --shadow-card: 0 2px 8px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.05);
+  --shadow-elevated: 0 8px 32px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.06);
+  --blur-amount: 16px;
+
+  /* Stat card tokens */
+  --stat-card-bg-from: rgba(30, 41, 70, 0.5);
+  --stat-card-bg-mid: rgba(20, 28, 55, 0.6);
+  --stat-card-bg-to: rgba(30, 41, 70, 0.5);
+  --stat-card-text: #ffffff;
+  --stat-card-text-muted: rgba(224,231,255,0.4);
+  --stat-card-text-label: rgba(224,231,255,0.35);
+  --stat-card-border-alpha: 0.12;
+  --stat-card-btn-border: rgba(255,255,255,0.1);
+  --stat-card-btn-bg: rgba(255,255,255,0.05);
+  --stat-card-btn-icon: rgba(224,231,255,0.4);
+  --stat-card-dot-fill: #0B1120;
+  --stat-card-midline: rgba(255,255,255,0.06);
+  --stat-card-anno-start: rgba(224,231,255,0.45);
+  --stat-card-anno-end: rgba(224,231,255,0.9);
+  --stat-card-area-opacity: 0.18;
+  --stat-card-glow1: 0.4;
+  --stat-card-glow2: 0.55;
+  --stat-card-line-white-opacity: 0.9;
+  --stat-card-use-accent-line: 0;
+
+  --radius: 0.75rem;
+
+  --sidebar: rgba(15, 23, 50, 0.60);
+  --sidebar-foreground: #E0E7FF;
+  --sidebar-primary: #6366F1;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: rgba(99, 102, 241, 0.12);
+  --sidebar-accent-foreground: #E0E7FF;
+  --sidebar-border: rgba(148, 163, 200, 0.12);
+  --sidebar-ring: #6366F1;
+}
+
+/* ── 4. SOFT PASTEL ──────────────────────────────────────────────────────── */
+.theme-pastel {
+  --background: #FDF6F0;
+  --foreground: #3D3240;
+  --card: #FFFFFF;
+  --card-foreground: #3D3240;
+  --popover: #FFFFFF;
+  --popover-foreground: #3D3240;
+  --primary: #D4727A;
+  --primary-foreground: #ffffff;
+  --secondary: #F5E6D3;
+  --secondary-foreground: #3D3240;
+  --muted: #F0E4DA;
+  --muted-foreground: #8E7B8B;
+  --accent: #C9A9E0;
+  --accent-foreground: #3D3240;
+  --destructive: #E06C75;
+  --destructive-foreground: #ffffff;
+  --border: #E8D5C8;
+  --input: transparent;
+  --input-background: #FFFFFF;
+  --switch-background: #D4C5B9;
+  --ring: #D4727A;
+  --font-weight-medium: 600;
+  --font-weight-normal: 400;
+  --chart-1: #D4727A;
+  --chart-2: #C9A9E0;
+  --chart-3: #7EC8C8;
+  --chart-4: #F4C283;
+  --chart-5: #8FB9D4;
+
+  --primary-green: #D4727A;
+  --brand-green-text: #C25D66;
+  --on-brand-green: #FFFFFF;
+  --primary-light: #F0B3B8;
+  --bg-offwhite: #FDF6F0;
+  --surface-white: #FFFFFF;
+  --surface-elevated: #FBF0E8;
+  --surface-glass: rgba(255, 255, 255, 0.7);
+  --text-primary: #3D3240;
+  --text-secondary: #8E7B8B;
+  --border-color: #E8D5C8;
+
+  --shadow-sm: 0 1px 2px rgba(180,140,120,0.06);
+  --shadow-md: 0 4px 12px rgba(180,140,120,0.10);
+  --shadow-lg: 0 12px 40px rgba(180,140,120,0.15);
+  --shadow-card: 0 1px 4px rgba(180,140,120,0.08);
+  --shadow-elevated: 0 4px 16px rgba(180,140,120,0.12);
+  --blur-amount: 0px;
+
+  /* Stat card tokens */
+  --stat-card-bg-from: #FFFFFF;
+  --stat-card-bg-mid: #FDF6F0;
+  --stat-card-bg-to: #FFFFFF;
+  --stat-card-text: #3D3240;
+  --stat-card-text-muted: rgba(61,50,64,0.4);
+  --stat-card-text-label: rgba(61,50,64,0.38);
+  --stat-card-border-alpha: 0.2;
+  --stat-card-btn-border: rgba(61,50,64,0.12);
+  --stat-card-btn-bg: rgba(61,50,64,0.04);
+  --stat-card-btn-icon: rgba(61,50,64,0.3);
+  --stat-card-dot-fill: #FFFFFF;
+  --stat-card-midline: rgba(61,50,64,0.08);
+  --stat-card-anno-start: rgba(61,50,64,0.4);
+  --stat-card-anno-end: rgba(61,50,64,0.75);
+  --stat-card-area-opacity: 0.12;
+  --stat-card-glow1: 0.25;
+  --stat-card-glow2: 0.4;
+  --stat-card-line-white-opacity: 1;
+  --stat-card-use-accent-line: 1;
+
+  --radius: 0.75rem;
+
+  --sidebar: #FBF0E8;
+  --sidebar-foreground: #3D3240;
+  --sidebar-primary: #D4727A;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #F5E6D3;
+  --sidebar-accent-foreground: #3D3240;
+  --sidebar-border: #E8D5C8;
+  --sidebar-ring: #D4727A;
+}
+
+/* ── 5. HIGH CONTRAST PRO ────────────────────────────────────────────────── */
+.theme-contrast {
+  --background: #000000;
+  --foreground: #FFFFFF;
+  --card: #0A0A0A;
+  --card-foreground: #FFFFFF;
+  --popover: #0A0A0A;
+  --popover-foreground: #FFFFFF;
+  --primary: #00FF88;
+  --primary-foreground: #000000;
+  --secondary: #1A1A1A;
+  --secondary-foreground: #FFFFFF;
+  --muted: #1A1A1A;
+  --muted-foreground: #A0A0A0;
+  --accent: #00FF88;
+  --accent-foreground: #000000;
+  --destructive: #FF4444;
+  --destructive-foreground: #ffffff;
+  --border: #333333;
+  --input: #333333;
+  --input-background: #0A0A0A;
+  --switch-background: #444444;
+  --ring: #00FF88;
+  --font-weight-medium: 700;
+  --font-weight-normal: 500;
+  --chart-1: #00FF88;
+  --chart-2: #00CCFF;
+  --chart-3: #FF6644;
+  --chart-4: #A0A0A0;
+  --chart-5: #FFFFFF;
+
+  --primary-green: #00FF88;
+  --brand-green-text: #00FF88;
+  --on-brand-green: #0A2618;
+  --primary-light: #66FFB3;
+  --bg-offwhite: #000000;
+  --surface-white: #0A0A0A;
+  --surface-elevated: #141414;
+  --surface-glass: rgba(10, 10, 10, 0.8);
+  --text-primary: #FFFFFF;
+  --text-secondary: #A0A0A0;
+  --border-color: #333333;
+
+  --shadow-sm: 0 1px 2px rgba(0,255,136,0.05);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
+  --shadow-lg: 0 12px 40px rgba(0,0,0,0.6);
+  --shadow-card: 0 0 0 1px #333333;
+  --shadow-elevated: 0 0 0 1px #333333, 0 4px 16px rgba(0,0,0,0.5);
+  --blur-amount: 0px;
+
+  /* Stat card tokens */
+  --stat-card-bg-from: #0A0A0A;
+  --stat-card-bg-mid: #050505;
+  --stat-card-bg-to: #0A0A0A;
+  --stat-card-text: #FFFFFF;
+  --stat-card-text-muted: rgba(255,255,255,0.45);
+  --stat-card-text-label: rgba(255,255,255,0.4);
+  --stat-card-border-alpha: 0.15;
+  --stat-card-btn-border: rgba(255,255,255,0.15);
+  --stat-card-btn-bg: rgba(255,255,255,0.05);
+  --stat-card-btn-icon: rgba(255,255,255,0.5);
+  --stat-card-dot-fill: #0A0A0A;
+  --stat-card-midline: rgba(255,255,255,0.1);
+  --stat-card-anno-start: rgba(255,255,255,0.55);
+  --stat-card-anno-end: rgba(255,255,255,0.95);
+  --stat-card-area-opacity: 0.25;
+  --stat-card-glow1: 0.4;
+  --stat-card-glow2: 0.6;
+  --stat-card-line-white-opacity: 1;
+  --stat-card-use-accent-line: 0;
+
+  --radius: 0.375rem;
+
+  --sidebar: #050505;
+  --sidebar-foreground: #FFFFFF;
+  --sidebar-primary: #00FF88;
+  --sidebar-primary-foreground: #000000;
+  --sidebar-accent: #1A1A1A;
+  --sidebar-accent-foreground: #FFFFFF;
+  --sidebar-border: #333333;
+  --sidebar-ring: #00FF88;
+}
+
+/* ── 6. SAGE (light, earthy green) ───────────────────────────────────────── */
+.theme-sage {
+  --background: #F0F4EF;
+  --foreground: #1E2B22;
+  --card: #FFFFFF;
+  --card-foreground: #1E2B22;
+  --popover: #FFFFFF;
+  --popover-foreground: #1E2B22;
+  --primary: #4A7C59;
+  --primary-foreground: #ffffff;
+  --secondary: #E0EBE0;
+  --secondary-foreground: #1E2B22;
+  --muted: #D8E4D8;
+  --muted-foreground: #5F7A65;
+  --accent: #6B8F71;
+  --accent-foreground: #1E2B22;
+  --destructive: #d4183d;
+  --destructive-foreground: #ffffff;
+  --border: #C8D8C8;
+  --input: transparent;
+  --input-background: #FFFFFF;
+  --switch-background: #B4C8B4;
+  --ring: #4A7C59;
+  --font-weight-medium: 600;
+  --font-weight-normal: 400;
+  --chart-1: #4A7C59;
+  --chart-2: #6B8F71;
+  --chart-3: #F4A261;
+  --chart-4: #5F7A65;
+  --chart-5: #1E2B22;
+
+  --primary-green: #4A7C59;
+  --brand-green-text: #3D6A4B;
+  --on-brand-green: #FFFFFF;
+  --primary-light: #6B8F71;
+  --bg-offwhite: #F0F4EF;
+  --surface-white: #FFFFFF;
+  --surface-elevated: #EAF0E9;
+  --surface-glass: rgba(255, 255, 255, 0.7);
+  --text-primary: #1E2B22;
+  --text-secondary: #5F7A65;
+  --border-color: #C8D8C8;
+
+  --shadow-sm: 0 1px 2px rgba(30,43,34,0.05);
+  --shadow-md: 0 4px 12px rgba(30,43,34,0.08);
+  --shadow-lg: 0 12px 40px rgba(30,43,34,0.12);
+  --shadow-card: 0 1px 3px rgba(30,43,34,0.06), 0 1px 2px rgba(30,43,34,0.04);
+  --shadow-elevated: 0 4px 16px rgba(30,43,34,0.10);
+  --blur-amount: 0px;
+
+  --stat-card-bg-from: #ffffff;
+  --stat-card-bg-mid: #f5f8f5;
+  --stat-card-bg-to: #ffffff;
+  --stat-card-text: #1E2B22;
+  --stat-card-text-muted: rgba(30,43,34,0.38);
+  --stat-card-text-label: rgba(30,43,34,0.35);
+  --stat-card-border-alpha: 0.16;
+  --stat-card-btn-border: rgba(30,43,34,0.1);
+  --stat-card-btn-bg: rgba(30,43,34,0.03);
+  --stat-card-btn-icon: rgba(30,43,34,0.3);
+  --stat-card-dot-fill: #ffffff;
+  --stat-card-midline: rgba(30,43,34,0.07);
+  --stat-card-anno-start: rgba(30,43,34,0.4);
+  --stat-card-anno-end: rgba(30,43,34,0.8);
+  --stat-card-area-opacity: 0.14;
+  --stat-card-glow1: 0.28;
+  --stat-card-glow2: 0.45;
+  --stat-card-line-white-opacity: 1;
+  --stat-card-use-accent-line: 1;
+
+  --radius: 0.5rem;
+
+  --sidebar: #E8F0E7;
+  --sidebar-foreground: #1E2B22;
+  --sidebar-primary: #4A7C59;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #D8E4D8;
+  --sidebar-accent-foreground: #1E2B22;
+  --sidebar-border: #C8D8C8;
+  --sidebar-ring: #4A7C59;
+}
+
+/* ── 7. SAND (light, warm golden) ───────────────────────────────────────── */
+.theme-sand {
+  --background: #FAF6ED;
+  --foreground: #2C2417;
+  --card: #FFFFFF;
+  --card-foreground: #2C2417;
+  --popover: #FFFFFF;
+  --popover-foreground: #2C2417;
+  --primary: #B8860B;
+  --primary-foreground: #ffffff;
+  --secondary: #F0E4D0;
+  --secondary-foreground: #2C2417;
+  --muted: #EBD9C0;
+  --muted-foreground: #8B7D6B;
+  --accent: #C49A4A;
+  --accent-foreground: #2C2417;
+  --destructive: #d4183d;
+  --destructive-foreground: #ffffff;
+  --border: #DDD0BB;
+  --input: transparent;
+  --input-background: #FFFFFF;
+  --switch-background: #C8BAA5;
+  --ring: #B8860B;
+  --font-weight-medium: 600;
+  --font-weight-normal: 400;
+  --chart-1: #B8860B;
+  --chart-2: #C49A4A;
+  --chart-3: #E07A3A;
+  --chart-4: #8B7D6B;
+  --chart-5: #2C2417;
+
+  --primary-green: #B8860B;
+  --brand-green-text: #9A7209;
+  --on-brand-green: #FFFFFF;
+  --primary-light: #C49A4A;
+  --bg-offwhite: #FAF6ED;
+  --surface-white: #FFFFFF;
+  --surface-elevated: #F5EFE3;
+  --surface-glass: rgba(255, 255, 255, 0.7);
+  --text-primary: #2C2417;
+  --text-secondary: #8B7D6B;
+  --border-color: #DDD0BB;
+
+  --shadow-sm: 0 1px 2px rgba(44,36,23,0.05);
+  --shadow-md: 0 4px 12px rgba(44,36,23,0.08);
+  --shadow-lg: 0 12px 40px rgba(44,36,23,0.12);
+  --shadow-card: 0 1px 3px rgba(44,36,23,0.06), 0 1px 2px rgba(44,36,23,0.04);
+  --shadow-elevated: 0 4px 16px rgba(44,36,23,0.10);
+  --blur-amount: 0px;
+
+  --stat-card-bg-from: #ffffff;
+  --stat-card-bg-mid: #faf8f3;
+  --stat-card-bg-to: #ffffff;
+  --stat-card-text: #2C2417;
+  --stat-card-text-muted: rgba(44,36,23,0.38);
+  --stat-card-text-label: rgba(44,36,23,0.35);
+  --stat-card-border-alpha: 0.16;
+  --stat-card-btn-border: rgba(44,36,23,0.1);
+  --stat-card-btn-bg: rgba(44,36,23,0.03);
+  --stat-card-btn-icon: rgba(44,36,23,0.3);
+  --stat-card-dot-fill: #ffffff;
+  --stat-card-midline: rgba(44,36,23,0.07);
+  --stat-card-anno-start: rgba(44,36,23,0.4);
+  --stat-card-anno-end: rgba(44,36,23,0.8);
+  --stat-card-area-opacity: 0.14;
+  --stat-card-glow1: 0.28;
+  --stat-card-glow2: 0.45;
+  --stat-card-line-white-opacity: 1;
+  --stat-card-use-accent-line: 1;
+
+  --radius: 0.5rem;
+
+  --sidebar: #F2EBDF;
+  --sidebar-foreground: #2C2417;
+  --sidebar-primary: #B8860B;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #EBD9C0;
+  --sidebar-accent-foreground: #2C2417;
+  --sidebar-border: #DDD0BB;
+  --sidebar-ring: #B8860B;
+}
+
+/* ── 8. MIDNIGHT BLUE ────────────────────────────────────────────────────── */
+.theme-midnight {
+  --background: #0D1B2A;
+  --foreground: #D6E4F0;
+  --card: #1B2838;
+  --card-foreground: #D6E4F0;
+  --popover: #1B2838;
+  --popover-foreground: #D6E4F0;
+  --primary: #3B82F6;
+  --primary-foreground: #ffffff;
+  --secondary: #1E3A5F;
+  --secondary-foreground: #D6E4F0;
+  --muted: #1E3A5F;
+  --muted-foreground: #8BA4BD;
+  --accent: #60A5FA;
+  --accent-foreground: #0D1B2A;
+  --destructive: #f87171;
+  --destructive-foreground: #ffffff;
+  --border: #2A4365;
+  --input: #2A4365;
+  --input-background: #1B2838;
+  --switch-background: #3D5A80;
+  --ring: #3B82F6;
+  --font-weight-medium: 600;
+  --font-weight-normal: 400;
+  --chart-1: #60A5FA;
+  --chart-2: #93C5FD;
+  --chart-3: #F59E0B;
+  --chart-4: #8BA4BD;
+  --chart-5: #D6E4F0;
+
+  --primary-green: #3B82F6;
+  --brand-green-text: #60A5FA;
+  --on-brand-green: #0A1929;
+  --primary-light: #93C5FD;
+  --bg-offwhite: #0D1B2A;
+  --surface-white: #1B2838;
+  --surface-elevated: #243447;
+  --surface-glass: rgba(27, 40, 56, 0.7);
+  --text-primary: #D6E4F0;
+  --text-secondary: #8BA4BD;
+  --border-color: #2A4365;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.2);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.3);
+  --shadow-lg: 0 12px 40px rgba(0,0,0,0.4);
+  --shadow-card: 0 1px 4px rgba(0,0,0,0.2), 0 0 0 1px rgba(42,67,101,0.5);
+  --shadow-elevated: 0 4px 20px rgba(0,0,0,0.35);
+  --blur-amount: 0px;
+
+  /* Stat card tokens */
+  --stat-card-bg-from: #0D1B2A;
+  --stat-card-bg-mid: #0A1520;
+  --stat-card-bg-to: #0D1B2A;
+  --stat-card-text: #ffffff;
+  --stat-card-text-muted: rgba(214,228,240,0.4);
+  --stat-card-text-label: rgba(214,228,240,0.35);
+  --stat-card-border-alpha: 0.08;
+  --stat-card-btn-border: rgba(255,255,255,0.1);
+  --stat-card-btn-bg: rgba(255,255,255,0.04);
+  --stat-card-btn-icon: rgba(214,228,240,0.4);
+  --stat-card-dot-fill: #0D1B2A;
+  --stat-card-midline: rgba(255,255,255,0.06);
+  --stat-card-anno-start: rgba(214,228,240,0.45);
+  --stat-card-anno-end: rgba(214,228,240,0.9);
+  --stat-card-area-opacity: 0.2;
+  --stat-card-glow1: 0.35;
+  --stat-card-glow2: 0.5;
+  --stat-card-line-white-opacity: 0.9;
+  --stat-card-use-accent-line: 0;
+
+  --radius: 0.5rem;
+
+  --sidebar: #111E2E;
+  --sidebar-foreground: #D6E4F0;
+  --sidebar-primary: #3B82F6;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #1E3A5F;
+  --sidebar-accent-foreground: #D6E4F0;
+  --sidebar-border: #2A4365;
+  --sidebar-ring: #3B82F6;
+}
+
+/* ── Glass-specific backdrop blur for cards & surfaces ────────────────────
+   Only applies when blur-amount > 0 (glass theme). Uses the same
+   semantic classes the app already uses — no component changes. ─────────── */
+.theme-glass [class*="bg-[var(--surface-white)]"],
+.theme-glass [class*="bg-[var(--card)]"] {
+  backdrop-filter: blur(var(--blur-amount));
+  -webkit-backdrop-filter: blur(var(--blur-amount));
+}
+
+/* Glass theme sidebar backdrop */
+.theme-glass aside,
+.theme-glass [class*="sidebar"] {
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+/* Glass theme: floating overlays (dialogs, popovers, dropdowns) must be opaque */
+.theme-glass [role="dialog"],
+.theme-glass [data-radix-popper-content-wrapper] > *,
+.theme-glass [data-slot="dropdown-menu-content"],
+.theme-glass [data-slot="select-content"] {
+  background: #1E2946 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 @theme inline {

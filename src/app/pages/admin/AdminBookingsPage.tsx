@@ -44,6 +44,16 @@ const serviceColors: Record<string, string> = {
   'Follow-up': '#F4A261',
   Emergency: '#d4183d',
   Surgery: '#EC4899',
+  // Full service names from DB
+  'General Wellness Exam': 'var(--brand-green-text)',
+  'Rabies Vaccination': '#3B82F6',
+  'DHPP Vaccine (Dog)': '#3B82F6',
+  'Blood Panel (CBC + Chemistry)': '#06B6D4',
+  'Cardiology Consultation': '#EC4899',
+  'Flea & Tick Prevention (3-Month)': '#F4A261',
+  'Spay Surgery': '#EC4899',
+  'X-Ray (2 Views)': '#6B7280',
+  'Emergency Triage & Stabilization': '#d4183d',
   Other: 'var(--text-secondary)',
 };
 
@@ -121,9 +131,9 @@ function getDurationMin(start: string, end: string): number {
   return toMin(end) - toMin(start);
 }
 
-// Generate 30-min slots for full 24 hours
-const SCHEDULE_SLOTS = Array.from({ length: 48 }, (_, i) => {
-  const totalMin = i * 30;
+// Generate 30-min slots from 8:00 AM to 5:30 PM (business hours)
+const SCHEDULE_SLOTS = Array.from({ length: 20 }, (_, i) => {
+  const totalMin = 8 * 60 + i * 30;
   const h = Math.floor(totalMin / 60);
   const m = totalMin % 60;
   const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
@@ -159,18 +169,19 @@ export default function AdminBookingsPage() {
   const mappedAppointments = useMemo(() =>
     supaAppts.map((a) => {
       const dt = new Date(a.scheduled_at);
-      const yyyy = dt.getFullYear();
-      const mm = String(dt.getMonth() + 1).padStart(2, '0');
-      const dd = String(dt.getDate()).padStart(2, '0');
-      const startH = dt.getHours();
-      const startM = dt.getMinutes();
+      // Use UTC methods — scheduled_at is stored as UTC and represents clinic local time
+      const yyyy = dt.getUTCFullYear();
+      const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+      const dd = String(dt.getUTCDate()).padStart(2, '0');
+      const startH = dt.getUTCHours();
+      const startM = dt.getUTCMinutes();
       const ampm = startH >= 12 ? 'PM' : 'AM';
       const h12 = startH > 12 ? startH - 12 : startH === 0 ? 12 : startH;
       const timeStart = `${h12}:${String(startM).padStart(2, '0')} ${ampm}`;
       const dur = a.duration_minutes ?? 30;
       const endDt = new Date(dt.getTime() + dur * 60000);
-      const endH = endDt.getHours();
-      const endM = endDt.getMinutes();
+      const endH = endDt.getUTCHours();
+      const endM = endDt.getUTCMinutes();
       const endAmpm = endH >= 12 ? 'PM' : 'AM';
       const endH12 = endH > 12 ? endH - 12 : endH === 0 ? 12 : endH;
       const timeEnd = `${endH12}:${String(endM).padStart(2, '0')} ${endAmpm}`;
@@ -398,7 +409,13 @@ export default function AdminBookingsPage() {
   const cancelledToday = dayAppointments.filter((a) => a.status === 'Cancelled').length;
   const remainingToday = totalToday - completedToday - cancelledToday;
   const scheduledCount = dayAppointments.filter((a) => a.status === 'Confirmed' || a.status === 'Pending').length;
-  const appointmentByTime = new Map(dayAppointments.map((a) => [a.timeStart, a]));
+  // Group appointments by time slot (multiple doctors can have bookings at same time)
+  const appointmentsByTime = new Map<string, typeof dayAppointments>();
+  dayAppointments.forEach((a) => {
+    const existing = appointmentsByTime.get(a.timeStart) || [];
+    existing.push(a);
+    appointmentsByTime.set(a.timeStart, existing);
+  });
 
   const goToPrevDay = () => {
     const prev = new Date(selectedDate);
@@ -1393,7 +1410,7 @@ export default function AdminBookingsPage() {
               {/* Time Slot Grid */}
               <div className="bg-[var(--surface-white)] border border-[var(--border-color)] overflow-hidden" style={{ borderRadius: '12px', maxHeight: '600px', overflowY: 'auto' }}>
                 {SCHEDULE_SLOTS.map((slot, idx) => {
-                  const appt = appointmentByTime.get(slot);
+                  const slotAppts = appointmentsByTime.get(slot) || [];
                   const isLast = idx === SCHEDULE_SLOTS.length - 1;
                   return (
                     <div
@@ -1405,40 +1422,48 @@ export default function AdminBookingsPage() {
                         <span style={{ fontSize: '14px', color: 'var(--text-secondary)', fontWeight: 500 }}>{slot}</span>
                       </div>
 
-                      {/* Slot Content */}
-                      {appt ? (
-                        <div
-                          className="flex-1 m-1.5 px-4 py-3 flex items-center gap-4 cursor-pointer hover:brightness-95 transition-all"
-                          style={{
-                            backgroundColor: '#2D6A4F10',
-                            borderLeft: '4px solid #2D6A4F',
-                            borderRadius: '8px',
-                          }}
-                          onClick={() => openApptDetail(appt)}
-                        >
-                          <Avatar className="w-8 h-8 flex-shrink-0">
-                            <AvatarImage src={appt.petImage} alt={appt.petName} className="object-cover" />
-                            <AvatarFallback>{appt.petName.slice(0, 2)}</AvatarFallback>
-                          </Avatar>
-                          <div className="flex-1 min-w-0">
-                            <p style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>{appt.petName}</p>
-                            <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{appt.service}</p>
-                          </div>
-                          <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>
-                            {getDurationMin(appt.timeStart, appt.timeEnd)} min
-                          </span>
-                          <span
-                            className="inline-flex items-center gap-1 px-2 py-0.5"
-                            style={{
-                              backgroundColor: statusStyles[appt.status].bg,
-                              color: statusStyles[appt.status].text,
-                              borderRadius: '9999px',
-                              fontSize: '11px',
-                              fontWeight: 600,
-                            }}
-                          >
-                            {appt.status}
-                          </span>
+                      {/* Slot Content — supports multiple appointments (different doctors) */}
+                      {slotAppts.length > 0 ? (
+                        <div className="flex-1 flex gap-1.5 m-1.5">
+                          {slotAppts.map((appt) => {
+                            const svcColor = serviceColors[appt.service] || 'var(--brand-green-text)';
+                            return (
+                              <div
+                                key={appt.id}
+                                className="flex-1 px-4 py-3 flex items-center gap-4 cursor-pointer hover:brightness-95 transition-all"
+                                style={{
+                                  backgroundColor: `${svcColor}10`,
+                                  borderLeft: `4px solid ${svcColor}`,
+                                  borderRadius: '8px',
+                                }}
+                                onClick={() => openApptDetail(appt)}
+                              >
+                                <Avatar className="w-8 h-8 flex-shrink-0">
+                                  <AvatarImage src={appt.petImage} alt={appt.petName} className="object-cover" />
+                                  <AvatarFallback>{appt.petName.slice(0, 2)}</AvatarFallback>
+                                </Avatar>
+                                <div className="flex-1 min-w-0">
+                                  <p style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>{appt.petName}</p>
+                                  <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{appt.service} · {appt.vet}</p>
+                                </div>
+                                <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>
+                                  {getDurationMin(appt.timeStart, appt.timeEnd)} min
+                                </span>
+                                <span
+                                  className="inline-flex items-center gap-1 px-2 py-0.5"
+                                  style={{
+                                    backgroundColor: statusStyles[appt.status]?.bg ?? '#6B728020',
+                                    color: statusStyles[appt.status]?.text ?? 'var(--text-secondary)',
+                                    borderRadius: '9999px',
+                                    fontSize: '11px',
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  {appt.status}
+                                </span>
+                              </div>
+                            );
+                          })}
                         </div>
                       ) : (
                         <div
