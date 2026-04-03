@@ -5,6 +5,8 @@ import { Sidebar } from './components/Sidebar';
 import { AdminSidebar } from './components/AdminSidebar';
 import { useTheme } from './hooks/useTheme';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { TenantProvider, TenantGate } from './context/TenantContext';
+import { PortalGuard } from './components/PortalGuard';
 import DashboardPage from './pages/DashboardPage';
 import ClientsPage from './pages/ClientsPage';
 import ClientDetailPage from './pages/ClientDetailPage';
@@ -393,20 +395,76 @@ function SuperAdminApp() {
 // ─── Auth Loading Screen ──────────────────────────────────────
 
 function AuthLoading() {
+  // Read saved theme mode directly from localStorage so we can match the user's
+  // theme before CSS variables are available (theme hook hasn't run yet).
+  const isDark = (() => {
+    try {
+      const path = typeof window !== 'undefined' ? window.location.pathname : '';
+      const prefix = 'vettrack-theme';
+      const portalKey = path.startsWith('/superadmin') ? `${prefix}-superadmin`
+        : path.startsWith('/admin') ? `${prefix}-admin`
+        : path.startsWith('/owner') ? `${prefix}-owner`
+        : prefix;
+      return localStorage.getItem(`${portalKey}-mode`) === 'dark';
+    } catch { return false; }
+  })();
+
+  const bg = isDark ? '#000000' : '#F8F7F4';
+  const textPrimary = isDark ? '#E2E8F0' : '#1A1A2E';
+  const textSecondary = isDark ? '#64748B' : '#94A3B8';
+
   return (
     <div style={{
       height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      backgroundColor: 'var(--bg-offwhite)',
+      backgroundColor: bg,
     }}>
+      <style>{`
+        @keyframes logo-float {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-10px); }
+        }
+        @keyframes logo-glow {
+          0%, 100% { filter: drop-shadow(0 0 8px rgba(99,102,241,0.0)); }
+          50% { filter: drop-shadow(0 0 18px rgba(99,102,241,0.35)); }
+        }
+        @keyframes shimmer {
+          0% { background-position: -200% center; }
+          100% { background-position: 200% center; }
+        }
+        @keyframes dot-wave {
+          0%, 60%, 100% { transform: translateY(0); opacity: 0.3; }
+          30% { transform: translateY(-6px); opacity: 1; }
+        }
+      `}</style>
       <div style={{ textAlign: 'center' }}>
-        <div style={{
-          width: 44, height: 44, borderRadius: 12, margin: '0 auto 16px',
-          background: 'linear-gradient(135deg, #2D6A4F, #74C69D)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        <img
+          src="/logo-mini.svg"
+          alt="HugoIT"
+          style={{
+            width: 56, height: 56, marginBottom: 24,
+            animation: 'logo-float 2s ease-in-out infinite, logo-glow 2s ease-in-out infinite',
+          }}
+        />
+        <p style={{
+          fontSize: 14, fontWeight: 500, letterSpacing: '0.08em',
+          margin: '0 0 16px',
+          background: `linear-gradient(90deg, ${textSecondary} 0%, ${textPrimary} 50%, ${textSecondary} 100%)`,
+          backgroundSize: '200% auto',
+          WebkitBackgroundClip: 'text',
+          WebkitTextFillColor: 'transparent',
+          animation: 'shimmer 2.5s linear infinite',
         }}>
-          <PawPrint style={{ width: 24, height: 24, color: '#fff' }} />
+          Loading
+        </p>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+          {[0, 1, 2].map(i => (
+            <div key={i} style={{
+              width: 5, height: 5, borderRadius: '50%',
+              backgroundColor: textSecondary,
+              animation: `dot-wave 1.4s ease-in-out ${i * 0.15}s infinite`,
+            }} />
+          ))}
         </div>
-        <p style={{ fontSize: 14, color: 'var(--text-secondary)' }}>Loading…</p>
       </div>
     </div>
   );
@@ -420,7 +478,11 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   if (loading) return <AuthLoading />;
   if (!user) return <Navigate to="/login" replace />;
 
-  return <>{children}</>;
+  return (
+    <TenantGate fallback={<AuthLoading />}>
+      {children}
+    </TenantGate>
+  );
 }
 
 // ─── Public Route (redirect if already logged in) ─────────────
@@ -462,18 +524,20 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
 
 function AppRoutes() {
   return (
+    <TenantProvider>
     <AppointmentStatusProvider>
     <ActiveVisitProvider>
       <Routes>
         <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
-        <Route path="/sysadmin" element={<ProtectedRoute><SystemAdminPage /></ProtectedRoute>} />
-        <Route path="/superadmin/*" element={<ProtectedRoute><SuperAdminApp /></ProtectedRoute>} />
-        <Route path="/admin/*" element={<ProtectedRoute><AdminApp /></ProtectedRoute>} />
-        <Route path="/owner/*" element={<ProtectedRoute><OwnerApp /></ProtectedRoute>} />
-        <Route path="/*" element={<ProtectedRoute><MainApp /></ProtectedRoute>} />
+        <Route path="/sysadmin" element={<ProtectedRoute><PortalGuard portal="sysadmin"><SystemAdminPage /></PortalGuard></ProtectedRoute>} />
+        <Route path="/superadmin/*" element={<ProtectedRoute><PortalGuard portal="superadmin"><SuperAdminApp /></PortalGuard></ProtectedRoute>} />
+        <Route path="/admin/*" element={<ProtectedRoute><PortalGuard portal="admin"><AdminApp /></PortalGuard></ProtectedRoute>} />
+        <Route path="/owner/*" element={<ProtectedRoute><PortalGuard portal="owner"><OwnerApp /></PortalGuard></ProtectedRoute>} />
+        <Route path="/*" element={<ProtectedRoute><PortalGuard portal="doctor"><MainApp /></PortalGuard></ProtectedRoute>} />
       </Routes>
     </ActiveVisitProvider>
     </AppointmentStatusProvider>
+    </TenantProvider>
   );
 }
 

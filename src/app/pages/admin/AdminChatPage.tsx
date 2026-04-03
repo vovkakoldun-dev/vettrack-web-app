@@ -13,6 +13,9 @@ import {
   X,
   Plus,
   Users,
+  FileText,
+  Download,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { Input } from '../../components/ui/input';
 import { supabase } from '../../../lib/supabase';
@@ -37,7 +40,17 @@ type DisplayMessage = {
   text: string;
   timestamp: Date;
   imageUrl?: string;
+  fileUrl?: string;
+  fileName?: string;
+  fileSize?: number;
 };
+
+type Reaction = {
+  emoji: string;
+  users: string[];
+};
+
+const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
 
 type ConversationItem = {
   id: string;
@@ -157,11 +170,15 @@ export default function AdminChatPage() {
   const [loadingConvs, setLoadingConvs] = useState(true);
   const [loadingMsgs, setLoadingMsgs] = useState(false);
 
-  // Image attachment state
+  // Attachment state (images + files)
   const chatImageRef = useRef<HTMLInputElement>(null);
+  const chatFileRef = useRef<HTMLInputElement>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const attachMenuRef = useRef<HTMLDivElement>(null);
 
   // Delete conversation
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -183,6 +200,10 @@ export default function AdminChatPage() {
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [emojiTab, setEmojiTab] = useState(0);
   const emojiRef = useRef<HTMLDivElement>(null);
+
+  // Reactions
+  const [reactions, setReactions] = useState<Record<string, Reaction[]>>({});
+  const [hoveredMsgId, setHoveredMsgId] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const lastReadAtRef = useRef<string | null>(null);
@@ -402,7 +423,7 @@ export default function AdminChatPage() {
     setLoadingMsgs(true);
     const { data } = await supabase
       .from('messages')
-      .select('id, content, sender_id, image_url, created_at')
+      .select('id, content, sender_id, image_url, file_url, file_name, file_size, created_at')
       .eq('organization_id', organizationId)
       .eq('conversation_id', convId)
       .order('created_at', { ascending: true });
@@ -414,10 +435,58 @@ export default function AdminChatPage() {
         text: m.content,
         timestamp: new Date(m.created_at),
         imageUrl: m.image_url || undefined,
+        fileUrl: m.file_url || undefined,
+        fileName: m.file_name || undefined,
+        fileSize: m.file_size || undefined,
       })));
+    }
+    // Fetch reactions
+    if (data && data.length > 0) {
+      const msgIds = data.map((m: { id: string }) => m.id);
+      const { data: rxns } = await supabase
+        .from('message_reactions')
+        .select('message_id, emoji, user_id')
+        .in('message_id', msgIds);
+      if (rxns) {
+        const grouped: Record<string, Reaction[]> = {};
+        for (const r of rxns) {
+          if (!grouped[r.message_id]) grouped[r.message_id] = [];
+          const existing = grouped[r.message_id].find(rx => rx.emoji === r.emoji);
+          if (existing) existing.users.push(r.user_id);
+          else grouped[r.message_id] = [...grouped[r.message_id], { emoji: r.emoji, users: [r.user_id] }];
+        }
+        setReactions(grouped);
+      }
     }
     setLoadingMsgs(false);
   }, [user]);
+
+  async function toggleReaction(messageId: string, emoji: string) {
+    if (!user) return;
+    const msgReactions = reactions[messageId] || [];
+    const existing = msgReactions.find(r => r.emoji === emoji);
+    const alreadyReacted = existing?.users.includes(user.id);
+    setReactions(prev => {
+      const current = [...(prev[messageId] || [])];
+      if (alreadyReacted) {
+        const idx = current.findIndex(r => r.emoji === emoji);
+        if (idx >= 0) {
+          current[idx] = { ...current[idx], users: current[idx].users.filter(u => u !== user.id) };
+          if (current[idx].users.length === 0) current.splice(idx, 1);
+        }
+      } else {
+        const idx = current.findIndex(r => r.emoji === emoji);
+        if (idx >= 0) current[idx] = { ...current[idx], users: [...current[idx].users, user.id] };
+        else current.push({ emoji, users: [user.id] });
+      }
+      return { ...prev, [messageId]: current };
+    });
+    if (alreadyReacted) {
+      await supabase.from('message_reactions').delete().eq('message_id', messageId).eq('user_id', user.id).eq('emoji', emoji);
+    } else {
+      await supabase.from('message_reactions').insert({ message_id: messageId, user_id: user.id, emoji });
+    }
+  }
 
   function closeMsgSearch() {
     setMsgSearchOpen(false);
@@ -476,7 +545,9 @@ export default function AdminChatPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     setImageFile(file);
+    setAttachedFile(null);
     setImagePreview(URL.createObjectURL(file));
+    setAttachMenuOpen(false);
     e.target.value = '';
   }
 
@@ -486,16 +557,64 @@ export default function AdminChatPage() {
     setImagePreview(null);
   }
 
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAttachedFile(file);
+    setImageFile(null);
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
+    setImagePreview(null);
+    setAttachMenuOpen(false);
+    e.target.value = '';
+  }
+
+  function clearAttachedFile() {
+    setAttachedFile(null);
+  }
+
+  function formatFileSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  function getFileIcon(name: string): string {
+    const ext = name.split('.').pop()?.toLowerCase() || '';
+    if (['pdf'].includes(ext)) return '📄';
+    if (['doc', 'docx'].includes(ext)) return '📝';
+    if (['xls', 'xlsx', 'csv'].includes(ext)) return '📊';
+    if (['ppt', 'pptx'].includes(ext)) return '📑';
+    if (['zip', 'rar', '7z'].includes(ext)) return '📦';
+    if (['mp4', 'mov', 'avi'].includes(ext)) return '🎬';
+    if (['mp3', 'wav', 'ogg'].includes(ext)) return '🎵';
+    return '📎';
+  }
+
+  // Close attach menu on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (attachMenuRef.current && !attachMenuRef.current.contains(e.target as Node)) {
+        setAttachMenuOpen(false);
+      }
+    }
+    if (attachMenuOpen) document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [attachMenuOpen]);
+
   // ── Send message ────────────────────────────────────────────────────────────
 
   async function handleSend() {
-    if ((!inputValue.trim() && !imageFile) || !selectedId || !user) return;
+    if ((!inputValue.trim() && !imageFile && !attachedFile) || !selectedId || !user) return;
     const content = inputValue.trim();
     setInputValue('');
-    const pendingFile = imageFile;
+    const pendingImageFile = imageFile;
     const pendingPreview = imagePreview;
+    const pendingAttachedFile = attachedFile;
     setImageFile(null);
     setImagePreview(null);
+    setAttachedFile(null);
+
+    const attachLabel = pendingAttachedFile ? `📎 ${pendingAttachedFile.name}` : pendingImageFile ? '📷 Image' : '';
 
     // Optimistic update
     const tempId = `temp-${Date.now()}`;
@@ -503,25 +622,28 @@ export default function AdminChatPage() {
     setMessages(prev => [...prev, {
       id: tempId,
       from: 'me',
-      text: content || (pendingFile ? '📷 Image' : ''),
+      text: content || attachLabel,
       timestamp: now,
       imageUrl: pendingPreview || undefined,
+      fileName: pendingAttachedFile?.name,
+      fileSize: pendingAttachedFile?.size,
     }]);
 
     setConversations(prev => prev.map(c =>
       c.id === selectedId
-        ? { ...c, lastMessage: content || '📷 Image', lastMessageTime: now, lastMessageIsMe: true }
+        ? { ...c, lastMessage: content || attachLabel, lastMessageTime: now, lastMessageIsMe: true }
         : c
     ));
 
     // Upload image if present
     let imageUrl: string | null = null;
-    if (pendingFile) {
+    if (pendingImageFile) {
       setUploadingImage(true);
-      const path = `msg-${Date.now()}.png`;
+      const ext = pendingImageFile.name.split('.').pop() || 'png';
+      const path = `msg-${Date.now()}.${ext}`;
       const { error: uploadErr } = await supabase.storage
         .from('chat-images')
-        .upload(path, pendingFile, { upsert: true, contentType: pendingFile.type });
+        .upload(path, pendingImageFile, { upsert: true, contentType: pendingImageFile.type });
       if (!uploadErr) {
         const { data: urlData } = supabase.storage.from('chat-images').getPublicUrl(path);
         imageUrl = urlData.publicUrl + '?t=' + Date.now();
@@ -530,22 +652,52 @@ export default function AdminChatPage() {
       if (pendingPreview) URL.revokeObjectURL(pendingPreview);
     }
 
+    // Upload file if present
+    let fileUrl: string | null = null;
+    let fileName: string | null = null;
+    let fileSize: number | null = null;
+    if (pendingAttachedFile) {
+      setUploadingImage(true);
+      fileName = pendingAttachedFile.name;
+      fileSize = pendingAttachedFile.size;
+      const safeName = `file-${Date.now()}-${pendingAttachedFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+      const { error: uploadErr } = await supabase.storage
+        .from('chat-images')
+        .upload(safeName, pendingAttachedFile, { upsert: true, contentType: pendingAttachedFile.type });
+      if (!uploadErr) {
+        const { data: urlData } = supabase.storage.from('chat-images').getPublicUrl(safeName);
+        fileUrl = urlData.publicUrl + '?t=' + Date.now();
+      }
+      setUploadingImage(false);
+    }
+
     // Insert into Supabase
     const { organizationId } = await getOrgContext();
+    const msgContent = content || (imageUrl ? '📷 Image' : fileName ? `📎 ${fileName}` : '');
     const { data } = await supabase
       .from('messages')
       .insert({
         organization_id: organizationId,
         conversation_id: selectedId,
         sender_id: user.id,
-        content: content || (imageUrl ? '📷 Image' : ''),
+        content: msgContent,
         image_url: imageUrl,
+        file_url: fileUrl,
+        file_name: fileName,
+        file_size: fileSize,
       })
       .select('id')
       .single();
 
     if (data) {
-      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, id: data.id, imageUrl: imageUrl || m.imageUrl } : m));
+      setMessages(prev => prev.map(m => m.id === tempId ? {
+        ...m,
+        id: data.id,
+        imageUrl: imageUrl || m.imageUrl,
+        fileUrl: fileUrl || undefined,
+        fileName: fileName || m.fileName,
+        fileSize: fileSize ?? m.fileSize,
+      } : m));
     }
 
     // Update my last_read_at
@@ -574,6 +726,9 @@ export default function AdminChatPage() {
             text: msg.content,
             timestamp: new Date(msg.created_at),
             imageUrl: msg.image_url || undefined,
+            fileUrl: msg.file_url || undefined,
+            fileName: msg.file_name || undefined,
+            fileSize: msg.file_size || undefined,
           }]);
           const now = new Date().toISOString();
           lastReadAtRef.current = now;
@@ -898,22 +1053,95 @@ export default function AdminChatPage() {
                             </div>
                           )}
 
-                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start', maxWidth: '60%' }}>
+                          <div
+                            style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start', maxWidth: '60%', position: 'relative' }}
+                            onMouseEnter={() => setHoveredMsgId(msg.id)}
+                            onMouseLeave={() => setHoveredMsgId(null)}
+                          >
+                            {hoveredMsgId === msg.id && !msg.id.startsWith('temp-') && (
+                              <div style={{
+                                position: 'absolute', top: '-32px',
+                                [isMe ? 'right' : 'left']: '0',
+                                display: 'flex', gap: '2px', padding: '4px 6px',
+                                backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)',
+                                borderRadius: '20px', boxShadow: '0 2px 8px rgba(0,0,0,0.12)', zIndex: 10,
+                              }}>
+                                {QUICK_REACTIONS.map(emoji => {
+                                  const msgRx = reactions[msg.id] || [];
+                                  const myReaction = msgRx.find(r => r.emoji === emoji && r.users.includes(user!.id));
+                                  return (
+                                    <button key={emoji} onClick={(e) => { e.stopPropagation(); toggleReaction(msg.id, emoji); }}
+                                      style={{ width: '28px', height: '28px', borderRadius: '50%', border: 'none', backgroundColor: myReaction ? 'var(--surface-elevated)' : 'transparent', cursor: 'pointer', fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'transform 0.15s, background-color 0.15s' }}
+                                      onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.25)'; e.currentTarget.style.backgroundColor = 'var(--surface-elevated)'; }}
+                                      onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; if (!myReaction) e.currentTarget.style.backgroundColor = 'transparent'; }}
+                                    >{emoji}</button>
+                                  );
+                                })}
+                              </div>
+                            )}
                             <div style={{
-                              padding: msg.imageUrl ? '4px' : '10px 14px',
+                              padding: (msg.imageUrl || msg.fileUrl) ? '4px' : '10px 14px',
                               borderRadius: isMe ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
                               backgroundColor: isMe ? 'var(--brand-green-text)' : 'var(--surface-elevated)',
-                              color: isMe ? '#fff' : 'var(--text-primary)',
+                              color: isMe ? 'var(--on-brand-green)' : 'var(--text-primary)',
                               fontSize: '14px', lineHeight: 1.5, wordBreak: 'break-word',
                               overflow: 'hidden',
                             }}>
                               {msg.imageUrl && (
                                 <img src={msg.imageUrl} alt="Attachment" style={{ maxWidth: '240px', maxHeight: '200px', borderRadius: msg.text && msg.text !== '📷 Image' ? '12px 12px 0 0' : '12px', display: 'block', objectFit: 'cover' }} />
                               )}
-                              {msg.text && msg.text !== '📷 Image' && (
-                                <div style={{ padding: msg.imageUrl ? '8px 10px 6px' : '0' }}>{msg.text}</div>
+                              {msg.fileUrl && msg.fileName && (
+                                <a
+                                  href={msg.fileUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  style={{
+                                    display: 'flex', alignItems: 'center', gap: '10px',
+                                    padding: '10px 12px', margin: '4px',
+                                    borderRadius: '10px',
+                                    backgroundColor: isMe ? 'rgba(255,255,255,0.15)' : 'var(--bg-offwhite)',
+                                    textDecoration: 'none', color: 'inherit',
+                                    transition: 'background-color 0.15s',
+                                    minWidth: '180px',
+                                  }}
+                                >
+                                  <div style={{
+                                    width: 36, height: 36, borderRadius: '8px',
+                                    backgroundColor: isMe ? 'rgba(255,255,255,0.2)' : 'var(--surface-elevated)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    fontSize: '18px', flexShrink: 0,
+                                  }}>
+                                    {getFileIcon(msg.fileName)}
+                                  </div>
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontSize: '13px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      {msg.fileName}
+                                    </div>
+                                    {msg.fileSize && (
+                                      <div style={{ fontSize: '11px', opacity: 0.7, marginTop: '1px' }}>
+                                        {formatFileSize(msg.fileSize)}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <Download style={{ width: 14, height: 14, opacity: 0.6, flexShrink: 0 }} />
+                                </a>
+                              )}
+                              {msg.text && msg.text !== '📷 Image' && !msg.text.startsWith('📎 ') && (
+                                <div style={{ padding: (msg.imageUrl || msg.fileUrl) ? '8px 10px 6px' : '0' }}>{msg.text}</div>
                               )}
                             </div>
+
+                            {(reactions[msg.id] || []).length > 0 && (
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px' }}>
+                                {(reactions[msg.id] || []).map(rx => (
+                                  <button key={rx.emoji} onClick={() => toggleReaction(msg.id, rx.emoji)}
+                                    style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 8px', borderRadius: '999px', border: '1px solid var(--border-color)', backgroundColor: rx.users.includes(user!.id) ? 'var(--brand-green-text)' : 'var(--surface-elevated)', color: rx.users.includes(user!.id) ? 'var(--on-brand-green)' : 'var(--text-primary)', cursor: 'pointer', fontSize: '13px', lineHeight: '20px', transition: 'background-color 0.15s' }}>
+                                    <span>{rx.emoji}</span>
+                                    {rx.users.length > 1 && <span style={{ fontSize: '11px', fontWeight: 600 }}>{rx.users.length}</span>}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
 
                             <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '3px' }}>
                               <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{formatTime(msg.timestamp)}</span>
@@ -947,19 +1175,77 @@ export default function AdminChatPage() {
               </div>
             )}
 
+            {/* File preview */}
+            {attachedFile && (
+              <div style={{ flexShrink: 0, borderTop: '1px solid var(--border-color)', padding: '12px 16px 0', backgroundColor: 'var(--surface-white)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: '10px',
+                  padding: '8px 12px', borderRadius: '10px',
+                  backgroundColor: 'var(--surface-elevated)',
+                  border: '1px solid var(--border-color)',
+                }}>
+                  <span style={{ fontSize: '20px' }}>{getFileIcon(attachedFile.name)}</span>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '200px' }}>
+                      {attachedFile.name}
+                    </div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                      {formatFileSize(attachedFile.size)}
+                    </div>
+                  </div>
+                  <button
+                    onClick={clearAttachedFile}
+                    style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: '#d4183d', color: '#fff', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 700, flexShrink: 0 }}
+                  >x</button>
+                </div>
+              </div>
+            )}
+
             {/* Input area */}
-            <div style={{ flexShrink: 0, borderTop: imagePreview ? 'none' : '1px solid var(--border-color)', padding: '16px', display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: 'var(--surface-white)' }}>
+            <div style={{ flexShrink: 0, borderTop: (imagePreview || attachedFile) ? 'none' : '1px solid var(--border-color)', padding: '16px', display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: 'var(--surface-white)' }}>
               <input type="file" ref={chatImageRef} accept="image/*" style={{ display: 'none' }} onChange={handleImageSelect} />
-              <button
-                title="Attach image"
-                onClick={() => chatImageRef.current?.click()}
-                disabled={uploadingImage}
-                style={{ width: '36px', height: '36px', flexShrink: 0, borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-secondary)', transition: 'background-color 0.15s', opacity: uploadingImage ? 0.5 : 1 }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--surface-elevated)')}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-              >
-                <Paperclip style={{ width: '16px', height: '16px' }} />
-              </button>
+              <input type="file" ref={chatFileRef} accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.ppt,.pptx,.txt,.zip,.rar,.7z,.mp4,.mov,.mp3,.wav" style={{ display: 'none' }} onChange={handleFileSelect} />
+              <div ref={attachMenuRef} style={{ position: 'relative', flexShrink: 0 }}>
+                <button
+                  title="Attach"
+                  onClick={() => setAttachMenuOpen(v => !v)}
+                  disabled={uploadingImage}
+                  style={{ width: '36px', height: '36px', flexShrink: 0, borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: attachMenuOpen ? 'var(--surface-elevated)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-secondary)', transition: 'background-color 0.15s', opacity: uploadingImage ? 0.5 : 1 }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--surface-elevated)')}
+                  onMouseLeave={(e) => { if (!attachMenuOpen) e.currentTarget.style.backgroundColor = 'transparent'; }}
+                >
+                  <Paperclip style={{ width: '16px', height: '16px' }} />
+                </button>
+
+                {attachMenuOpen && (
+                  <div style={{
+                    position: 'absolute', bottom: 'calc(100% + 8px)', left: 0,
+                    backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)',
+                    borderRadius: '10px', boxShadow: '0 8px 24px rgba(0,0,0,0.14)',
+                    zIndex: 40, overflow: 'hidden', minWidth: '160px',
+                  }}>
+                    <button
+                      onClick={() => { chatImageRef.current?.click(); }}
+                      style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: '10px 14px', border: 'none', backgroundColor: 'transparent', cursor: 'pointer', color: 'var(--text-primary)', fontSize: '13px', fontWeight: 500, transition: 'background-color 0.15s' }}
+                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--surface-elevated)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                    >
+                      <ImageIcon style={{ width: 16, height: 16, color: '#3B82F6' }} />
+                      Photo or Image
+                    </button>
+                    <div style={{ height: '1px', backgroundColor: 'var(--border-color)' }} />
+                    <button
+                      onClick={() => { chatFileRef.current?.click(); }}
+                      style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: '10px 14px', border: 'none', backgroundColor: 'transparent', cursor: 'pointer', color: 'var(--text-primary)', fontSize: '13px', fontWeight: 500, transition: 'background-color 0.15s' }}
+                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--surface-elevated)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                    >
+                      <FileText style={{ width: 16, height: 16, color: '#8B5CF6' }} />
+                      Document or File
+                    </button>
+                  </div>
+                )}
+              </div>
 
               <Input
                 type="text"
@@ -1008,12 +1294,12 @@ export default function AdminChatPage() {
               <button
                 title="Send"
                 onClick={handleSend}
-                disabled={!inputValue.trim() && !imageFile}
+                disabled={!inputValue.trim() && !imageFile && !attachedFile}
                 style={{
                   width: '36px', height: '36px', flexShrink: 0, borderRadius: '999px', border: 'none',
-                  backgroundColor: (inputValue.trim() || imageFile) ? 'var(--brand-green-text)' : 'var(--border-color)',
+                  backgroundColor: (inputValue.trim() || imageFile || attachedFile) ? 'var(--brand-green-text)' : 'var(--border-color)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  cursor: (inputValue.trim() || imageFile) ? 'pointer' : 'not-allowed', color: '#fff', transition: 'background-color 0.15s',
+                  cursor: (inputValue.trim() || imageFile || attachedFile) ? 'pointer' : 'not-allowed', color: 'var(--on-brand-green)', transition: 'background-color 0.15s',
                 }}
               >
                 <Send style={{ width: '16px', height: '16px' }} />

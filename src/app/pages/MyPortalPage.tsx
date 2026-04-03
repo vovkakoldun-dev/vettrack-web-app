@@ -257,7 +257,6 @@ function GlowStatCard({
   color, shadowColor, icon: Icon, data, labels, unit, annotationStart, annotationEnd,
   onArrowClick,
 }: GlowCardData) {
-  const dark = useDarkMode();
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
 
   const VW = 320;
@@ -281,32 +280,32 @@ function GlowStatCard({
   const midY = VH / 2;
   const uid = title.replace(/\s+/g, '');
 
-  // ── Theme-aware tokens ──────────────────────────────────────
-  const cardBg = dark
-    ? 'linear-gradient(145deg, #0D1B2A 0%, #0A1520 60%, #0D1B2A 100%)'
-    : `linear-gradient(145deg, #ffffff 0%, #f8faff 60%, #ffffff 100%)`;
-  const cardBorder = dark ? 'rgba(255,255,255,0.07)' : `${color}28`;
-  const cardShadow = dark
-    ? `0 0 0 1px rgba(255,255,255,0.04), 0 20px 60px -10px ${shadowColor}`
-    : `0 4px 32px -6px ${shadowColor}, 0 0 0 1px ${color}18`;
-  const cornerGlow = dark ? `${color}18` : `${color}12`;
-  const subtitleColor = dark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.38)';
-  const titleColor = dark ? 'rgba(255,255,255,0.88)' : '#0F172A';
-  const metricLabelColor = dark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.35)';
-  const valueColor = dark ? '#ffffff' : '#0F172A';
-  const btnBorder = dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
-  const btnBg = dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)';
-  const btnIconColor = dark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.3)';
-  const dotHoleFill = dark ? '#0D1B2A' : '#ffffff';
-  const dotEndFill = dark ? '#ffffff' : '#ffffff';
-  const midLineStroke = dark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)';
-  const annoStartFill = dark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.4)';
-  const annoEndFill = dark ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.8)';
-  const areaOpacity = dark ? 0.22 : 0.14;
-  const lineWhiteStop = dark ? '#ffffff' : color;
-  const lineWhiteOpacity = dark ? 0.9 : 1;
-  const glowOpacity1 = dark ? 0.35 : 0.28;
-  const glowOpacity2 = dark ? 0.5 : 0.45;
+  // ── Read CSS custom properties for theme-aware tokens ──────
+  const cs = typeof window !== 'undefined' ? getComputedStyle(document.documentElement) : null;
+  const v = (name: string, fallback: string) => cs?.getPropertyValue(name).trim() || fallback;
+
+  const cardBg = `linear-gradient(145deg, ${v('--stat-card-bg-from','#0D1B2A')} 0%, ${v('--stat-card-bg-mid','#0A1520')} 60%, ${v('--stat-card-bg-to','#0D1B2A')} 100%)`;
+  const borderAlpha = parseFloat(v('--stat-card-border-alpha', '0.07'));
+  const cardBorder = `${color}${Math.round(borderAlpha * 255).toString(16).padStart(2, '0')}`;
+  const cardShadow = `0 0 0 1px ${cardBorder}, 0 20px 60px -10px ${shadowColor}`;
+  const cornerGlow = `${color}18`;
+  const subtitleColor = v('--stat-card-text-muted', 'rgba(255,255,255,0.35)');
+  const titleColor = v('--stat-card-text', '#ffffff');
+  const metricLabelColor = v('--stat-card-text-label', 'rgba(255,255,255,0.3)');
+  const valueColor = v('--stat-card-text', '#ffffff');
+  const btnBorder = v('--stat-card-btn-border', 'rgba(255,255,255,0.1)');
+  const btnBg = v('--stat-card-btn-bg', 'rgba(255,255,255,0.04)');
+  const btnIconColor = v('--stat-card-btn-icon', 'rgba(255,255,255,0.35)');
+  const dotHoleFill = v('--stat-card-dot-fill', '#0D1B2A');
+  const midLineStroke = v('--stat-card-midline', 'rgba(255,255,255,0.07)');
+  const annoStartFill = v('--stat-card-anno-start', 'rgba(255,255,255,0.45)');
+  const annoEndFill = v('--stat-card-anno-end', 'rgba(255,255,255,0.9)');
+  const areaOpacity = parseFloat(v('--stat-card-area-opacity', '0.22'));
+  const useAccentLine = parseFloat(v('--stat-card-use-accent-line', '0'));
+  const lineWhiteStop = useAccentLine ? color : '#ffffff';
+  const lineWhiteOpacity = parseFloat(v('--stat-card-line-white-opacity', '0.9'));
+  const glowOpacity1 = parseFloat(v('--stat-card-glow1', '0.35'));
+  const glowOpacity2 = parseFloat(v('--stat-card-glow2', '0.5'));
 
   return (
     <div
@@ -443,7 +442,7 @@ function GlowStatCard({
 
           {/* End dot (filled + glowing) */}
           <circle cx={last.x} cy={last.y} r="5" fill={color} filter={`url(#bloom-${uid})`} />
-          <circle cx={last.x} cy={last.y} r="4" fill={dotEndFill} opacity="0.9" />
+          <circle cx={last.x} cy={last.y} r="4" fill="#ffffff" opacity="0.9" />
 
           {/* Annotations */}
           {annotationStart && (
@@ -486,14 +485,12 @@ function GlowStatCard({
           const hy = pts[hoveredIdx].y;
           // SVG is exactly 100px tall with VH=100, so 1 unit = 1px
           const dotFromBottom = VH - hy; // px from bottom of SVG
-          const tooltipBg = dark ? '#1a2a3a' : '#ffffff';
+          const tooltipBg = v('--stat-card-dot-fill', '#0D1B2A');
           const tooltipBorder = `${color}55`;
-          const tooltipShadow = dark
-            ? `0 4px 20px rgba(0,0,0,0.5), 0 0 12px ${color}30`
-            : `0 4px 20px rgba(0,0,0,0.12), 0 0 10px ${color}20`;
-          const labelCol = dark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.4)';
+          const tooltipShadow = `0 4px 20px rgba(0,0,0,0.4), 0 0 12px ${color}30`;
+          const labelCol = v('--stat-card-text-muted', 'rgba(255,255,255,0.45)');
           const valCol = color;
-          const unitCol = dark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.35)';
+          const unitCol = v('--stat-card-text-label', 'rgba(255,255,255,0.4)');
 
           return (
             <div
@@ -711,8 +708,8 @@ export default function MyPortalPage() {
             const start = new Date(a.scheduled_at);
             const end = new Date(start.getTime() + (a.duration_minutes ?? 30) * 60000);
             const fmtLocal = (d: Date) => {
-              let h = d.getHours();
-              const m = d.getMinutes();
+              let h = d.getUTCHours();
+              const m = d.getUTCMinutes();
               const ampm = h >= 12 ? 'PM' : 'AM';
               if (h > 12) h -= 12;
               if (h === 0) h = 12;

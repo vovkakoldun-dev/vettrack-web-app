@@ -59,7 +59,7 @@ function formatShortDate(d: Date): string {
 }
 
 function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'UTC' });
 }
 
 function getInitials(first: string, last: string): string {
@@ -591,8 +591,8 @@ export default function SuperAdminAppointmentsPage() {
             {/* Appointments */}
             {filteredAppointments.map((appt) => {
               const d = new Date(appt.scheduled_at);
-              const h = d.getHours();
-              const m = d.getMinutes();
+              const h = d.getUTCHours();
+              const m = d.getUTCMinutes();
               const slotIndex = (h - 8) * 2 + (m >= 30 ? 1 : 0);
               if (slotIndex < 0 || slotIndex >= TIME_SLOTS.length) return null;
 
@@ -901,7 +901,7 @@ export default function SuperAdminAppointmentsPage() {
                     return (
                       <tr key={appt.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
                         <td style={{ padding: '12px 16px', fontSize: 14, color: 'var(--text-primary)', fontWeight: 500 }}>
-                          {d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', weekday: 'short' })}
+                          {d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', weekday: 'short', timeZone: 'UTC' })}
                         </td>
                         <td style={{ padding: '12px 16px', fontSize: 14, color: 'var(--text-primary)' }}>
                           {formatTime(appt.scheduled_at)}

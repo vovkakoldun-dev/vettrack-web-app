@@ -12,6 +12,7 @@ import {
   Users, Settings2, Database, Server, ToggleLeft,
   Crown, Activity, FileText, Download, AlertCircle,
   Plus, Minus, UserPlus, UserMinus,
+  Leaf, Sunrise,
 } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -20,6 +21,7 @@ import { Separator } from '../../components/ui/separator';
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '../../components/ui/select';
+import { useTheme as useThemeHook, LIGHT_THEMES, DARK_THEMES, type ThemeStyle } from '../../hooks/useTheme';
 
 // ─── Theme ────────────────────────────────────────────────────
 const ACCENT    = '#F4A261';
@@ -274,7 +276,7 @@ export default function SuperAdminSettingsPage() {
     setNotifs(p => ({ ...p, [k]: { ...p[k], [ch]: !p[k][ch] } }));
 
   // Appearance
-  const [themeMode,         setThemeMode]         = useState<'light'|'dark'|'system'>('light');
+  const { themeStyle: currentTheme, setThemeStyle: applyTheme, selectedLightTheme, selectedDarkTheme } = useThemeHook();
   const [dateFormat,        setDateFormat]         = useState('MM/DD/YYYY');
   const [timeFormat,        setTimeFormat]         = useState('12h');
   const [language,          setLanguage]           = useState('en-US');
@@ -709,24 +711,69 @@ export default function SuperAdminSettingsPage() {
             <>
               <SectionCard>
                 <h3 className="text-[var(--text-primary)] mb-1">Theme</h3>
-                <p className="text-[var(--text-secondary)] mb-5" style={{ fontSize: '14px' }}>Choose light, dark, or follow your system preference.</p>
-                <div className="grid grid-cols-3 gap-4">
-                  {([
-                    { value: 'light',  label: 'Light',  Icon: Sun,     preview: '#FFFFFF' },
-                    { value: 'dark',   label: 'Dark',   Icon: Moon,    preview: '#0F172A' },
-                    { value: 'system', label: 'System', Icon: Monitor, preview: 'linear-gradient(135deg, #FFFFFF 50%, #0F172A 50%)' },
-                  ] as const).map(({ value, label, Icon, preview }) => {
-                    const sel = themeMode === value;
+                <p className="text-[var(--text-secondary)] mb-4" style={{ fontSize: '14px' }}>
+                  Pick a theme for each mode. The sidebar toggle switches between them.
+                </p>
+
+                {/* ── Light Themes ── */}
+                <div className="flex items-center gap-2 mb-3">
+                  <Sun className="w-4 h-4 text-[var(--text-secondary)]" />
+                  <span className="text-[var(--text-primary)]" style={{ fontSize: '13px', fontWeight: 600 }}>Light Themes</span>
+                </div>
+                <div className="grid gap-3 mb-6" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }}>
+                  {LIGHT_THEMES.map(({ value, label, description, preview }) => {
+                    const isSelected = selectedLightTheme === value;
+                    const iconMap: Record<string, typeof Sun> = { light: Sun, pastel: Palette, sage: Leaf, sand: Sunrise };
+                    const Icon = iconMap[value] || Palette;
                     return (
-                      <button key={value} onClick={() => setThemeMode(value)} className="p-4 border transition-all text-left" style={{ borderRadius: '10px', borderColor: sel ? ACCENT : 'var(--border-color)', backgroundColor: sel ? ACCENT_BG : 'var(--surface-elevated)' }}>
-                        <div className="w-full h-16 mb-3 border border-[var(--border-color)]" style={{ borderRadius: '8px', background: preview }} />
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <Icon className="w-4 h-4" style={{ color: sel ? ACCENT : 'var(--text-secondary)' }} />
-                            <span style={{ fontSize: '14px', fontWeight: 600, color: sel ? ACCENT_D : 'var(--text-primary)' }}>{label}</span>
+                      <button key={value} onClick={() => applyTheme(value as ThemeStyle)} className="p-3 border transition-all text-left group" style={{ borderRadius: '12px', borderColor: isSelected ? ACCENT : 'var(--border-color)', backgroundColor: isSelected ? `${ACCENT}10` : 'var(--surface-elevated)', boxShadow: isSelected ? `0 0 0 1px ${ACCENT}` : 'none' }}>
+                        <div className="w-full mb-3 border border-[var(--border-color)] overflow-hidden" style={{ borderRadius: '8px', background: preview, height: 56, position: 'relative' }}>
+                          <div style={{ position: 'absolute', bottom: 6, left: 6, display: 'flex', gap: 3 }}>
+                            <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.4)' }} />
+                            <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.25)' }} />
+                            <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.15)' }} />
                           </div>
-                          {sel && <Check className="w-4 h-4" style={{ color: ACCENT }} />}
                         </div>
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-2">
+                            <Icon className="w-3.5 h-3.5" style={{ color: isSelected ? ACCENT : 'var(--text-secondary)' }} />
+                            <span style={{ fontSize: '13px', fontWeight: 600, color: isSelected ? ACCENT_D : 'var(--text-primary)' }}>{label}</span>
+                          </div>
+                          {isSelected && <Check className="w-3.5 h-3.5" style={{ color: ACCENT }} />}
+                        </div>
+                        <p style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.3, margin: 0 }}>{description}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* ── Dark Themes ── */}
+                <div className="flex items-center gap-2 mb-3">
+                  <Moon className="w-4 h-4 text-[var(--text-secondary)]" />
+                  <span className="text-[var(--text-primary)]" style={{ fontSize: '13px', fontWeight: 600 }}>Dark Themes</span>
+                </div>
+                <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }}>
+                  {DARK_THEMES.map(({ value, label, description, preview }) => {
+                    const isSelected = selectedDarkTheme === value;
+                    const iconMap: Record<string, typeof Sun> = { dark: Moon, midnight: Moon, glass: Zap, contrast: Eye };
+                    const Icon = iconMap[value] || Moon;
+                    return (
+                      <button key={value} onClick={() => applyTheme(value as ThemeStyle)} className="p-3 border transition-all text-left group" style={{ borderRadius: '12px', borderColor: isSelected ? ACCENT : 'var(--border-color)', backgroundColor: isSelected ? `${ACCENT}10` : 'var(--surface-elevated)', boxShadow: isSelected ? `0 0 0 1px ${ACCENT}` : 'none' }}>
+                        <div className="w-full mb-3 border border-[var(--border-color)] overflow-hidden" style={{ borderRadius: '8px', background: preview, height: 56, position: 'relative' }}>
+                          <div style={{ position: 'absolute', bottom: 6, left: 6, display: 'flex', gap: 3 }}>
+                            <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.4)' }} />
+                            <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.25)' }} />
+                            <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.15)' }} />
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-2">
+                            <Icon className="w-3.5 h-3.5" style={{ color: isSelected ? ACCENT : 'var(--text-secondary)' }} />
+                            <span style={{ fontSize: '13px', fontWeight: 600, color: isSelected ? ACCENT_D : 'var(--text-primary)' }}>{label}</span>
+                          </div>
+                          {isSelected && <Check className="w-3.5 h-3.5" style={{ color: ACCENT }} />}
+                        </div>
+                        <p style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.3, margin: 0 }}>{description}</p>
                       </button>
                     );
                   })}

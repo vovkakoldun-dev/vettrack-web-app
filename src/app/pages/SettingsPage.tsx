@@ -8,9 +8,11 @@ import {
   Smartphone, Mail, MessageSquare, Lock, Key,
   ChevronsUpDown, Check, Plug, RefreshCw, ExternalLink,
   Copy, RotateCcw, Webhook, Zap, FlaskConical,
+  Leaf, Sunrise,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { hashSessionToken } from '../../lib/hashToken';
+import { useTheme as useThemeHook, LIGHT_THEMES, DARK_THEMES, type ThemeStyle } from '../hooks/useTheme';
 import { updateProfile, uploadAvatar, removeAvatar } from '../hooks/useProfile';
 import { getOrgContext } from '../hooks/useOrgContext';
 import { Button } from '../components/ui/button';
@@ -868,12 +870,7 @@ export default function SettingsPage() {
   }, [user]);
 
   // ── Appearance state ───────────────────────────────────────────────────────
-  const [themeMode, setThemeMode] = useState<'light' | 'dark' | 'system'>(() => {
-    const stored = localStorage.getItem('vettrack-theme');
-    if (stored === 'dark') return 'dark';
-    if (stored === 'light') return 'light';
-    return 'system';
-  });
+  const { themeStyle: currentTheme, setThemeStyle: applyTheme, selectedLightTheme, selectedDarkTheme } = useThemeHook();
   const [dateFormat, setDateFormat] = useState('MM/DD/YYYY');
   const [timeFormat, setTimeFormat] = useState('12h');
   const [language, setLanguage] = useState('en-US');
@@ -1468,65 +1465,109 @@ export default function SettingsPage() {
               {/* Theme */}
               <SectionCard>
                 <h3 className="text-[var(--text-primary)] mb-1">Theme</h3>
-                <p className="text-[var(--text-secondary)] mb-5" style={{ fontSize: '14px' }}>
-                  Choose between light, dark, or follow your system preference.
+                <p className="text-[var(--text-secondary)] mb-4" style={{ fontSize: '14px' }}>
+                  Pick a theme for each mode. The sidebar toggle switches between them.
                 </p>
-                <div className="grid grid-cols-3 gap-4">
-                  {(
-                    [
-                      { value: 'light',  label: 'Light',  Icon: Sun,     preview: '#FFFFFF' },
-                      { value: 'dark',   label: 'Dark',   Icon: Moon,    preview: '#0F172A' },
-                      { value: 'system', label: 'System', Icon: Monitor, preview: 'linear-gradient(135deg, #FFFFFF 50%, #0F172A 50%)' },
-                    ] as const
-                  ).map(({ value, label, Icon, preview }) => {
-                    const isSelected = themeMode === value;
+
+                {/* ── Light Themes ── */}
+                <div className="flex items-center gap-2 mb-3">
+                  <Sun className="w-4 h-4 text-[var(--text-secondary)]" />
+                  <span className="text-[var(--text-primary)]" style={{ fontSize: '13px', fontWeight: 600 }}>Light Themes</span>
+                </div>
+                <div className="grid gap-3 mb-6" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }}>
+                  {LIGHT_THEMES.map(({ value, label, description, preview }) => {
+                    const isSelected = selectedLightTheme === value;
+                    const _isActive = currentTheme === value; void _isActive;
+                    const iconMap: Record<string, typeof Sun> = {
+                      light: Sun, pastel: Palette, sage: Leaf, sand: Sunrise,
+                    };
+                    const Icon = iconMap[value] || Palette;
                     return (
                       <button
                         key={value}
-                        onClick={() => {
-                          setThemeMode(value);
-                          let shouldBeDark: boolean;
-                          if (value === 'system') {
-                            shouldBeDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-                          } else {
-                            shouldBeDark = value === 'dark';
-                          }
-                          localStorage.setItem('vettrack-theme', shouldBeDark ? 'dark' : 'light');
-                          if (shouldBeDark) {
-                            document.documentElement.classList.add('dark');
-                          } else {
-                            document.documentElement.classList.remove('dark');
-                          }
-                          // Trigger re-render in useTheme hook instances
-                          window.dispatchEvent(new StorageEvent('storage', { key: 'vettrack-theme', newValue: shouldBeDark ? 'dark' : 'light' }));
-                        }}
-                        className="p-4 border transition-all text-left"
+                        onClick={() => applyTheme(value as ThemeStyle)}
+                        className="p-3 border transition-all text-left group"
                         style={{
-                          borderRadius: '10px',
+                          borderRadius: '12px',
                           borderColor: isSelected ? 'var(--brand-green-text)' : 'var(--border-color)',
-                          backgroundColor: isSelected ? '#2D6A4F10' : 'var(--surface-elevated)',
+                          backgroundColor: isSelected ? 'color-mix(in srgb, var(--brand-green-text) 6%, var(--surface-elevated))' : 'var(--surface-elevated)',
+                          boxShadow: isSelected ? '0 0 0 1px var(--brand-green-text)' : 'none',
                         }}
                       >
-                        {/* Preview swatch */}
                         <div
-                          className="w-full h-16 mb-3 border border-[var(--border-color)]"
-                          style={{ borderRadius: '8px', background: preview }}
-                        />
-                        <div className="flex items-center justify-between">
+                          className="w-full mb-3 border border-[var(--border-color)] overflow-hidden"
+                          style={{ borderRadius: '8px', background: preview, height: 56, position: 'relative' }}
+                        >
+                          <div style={{ position: 'absolute', bottom: 6, left: 6, display: 'flex', gap: 3 }}>
+                            <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.4)' }} />
+                            <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.25)' }} />
+                            <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.15)' }} />
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between mb-1">
                           <div className="flex items-center gap-2">
-                            <Icon className="w-4 h-4" style={{ color: isSelected ? 'var(--brand-green-text)' : 'var(--text-secondary)' }} />
-                            <span
-                              style={{
-                                fontSize: '14px',
-                                fontWeight: 600,
-                                color: isSelected ? 'var(--brand-green-text)' : 'var(--text-primary)',
-                              }}
-                            >
+                            <Icon className="w-3.5 h-3.5" style={{ color: isSelected ? 'var(--brand-green-text)' : 'var(--text-secondary)' }} />
+                            <span style={{ fontSize: '13px', fontWeight: 600, color: isSelected ? 'var(--brand-green-text)' : 'var(--text-primary)' }}>
                               {label}
                             </span>
                           </div>
-                          {isSelected && <Check className="w-4 h-4 text-[var(--brand-green-text)]" />}
+                          {isSelected && <Check className="w-3.5 h-3.5 text-[var(--brand-green-text)]" />}
                         </div>
+                        <p style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.3, margin: 0 }}>
+                          {description}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* ── Dark Themes ── */}
+                <div className="flex items-center gap-2 mb-3">
+                  <Moon className="w-4 h-4 text-[var(--text-secondary)]" />
+                  <span className="text-[var(--text-primary)]" style={{ fontSize: '13px', fontWeight: 600 }}>Dark Themes</span>
+                </div>
+                <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }}>
+                  {DARK_THEMES.map(({ value, label, description, preview }) => {
+                    const isSelected = selectedDarkTheme === value;
+                    const _isActive = currentTheme === value; void _isActive;
+                    const iconMap: Record<string, typeof Sun> = {
+                      dark: Moon, midnight: Moon, glass: Zap, contrast: Eye,
+                    };
+                    const Icon = iconMap[value] || Moon;
+                    return (
+                      <button
+                        key={value}
+                        onClick={() => applyTheme(value as ThemeStyle)}
+                        className="p-3 border transition-all text-left group"
+                        style={{
+                          borderRadius: '12px',
+                          borderColor: isSelected ? 'var(--brand-green-text)' : 'var(--border-color)',
+                          backgroundColor: isSelected ? 'color-mix(in srgb, var(--brand-green-text) 6%, var(--surface-elevated))' : 'var(--surface-elevated)',
+                          boxShadow: isSelected ? '0 0 0 1px var(--brand-green-text)' : 'none',
+                        }}
+                      >
+                        <div
+                          className="w-full mb-3 border border-[var(--border-color)] overflow-hidden"
+                          style={{ borderRadius: '8px', background: preview, height: 56, position: 'relative' }}
+                        >
+                          <div style={{ position: 'absolute', bottom: 6, left: 6, display: 'flex', gap: 3 }}>
+                            <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.4)' }} />
+                            <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.25)' }} />
+                            <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.15)' }} />
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-2">
+                            <Icon className="w-3.5 h-3.5" style={{ color: isSelected ? 'var(--brand-green-text)' : 'var(--text-secondary)' }} />
+                            <span style={{ fontSize: '13px', fontWeight: 600, color: isSelected ? 'var(--brand-green-text)' : 'var(--text-primary)' }}>
+                              {label}
+                            </span>
+                          </div>
+                          {isSelected && <Check className="w-3.5 h-3.5 text-[var(--brand-green-text)]" />}
+                        </div>
+                        <p style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.3, margin: 0 }}>
+                          {description}
+                        </p>
                       </button>
                     );
                   })}

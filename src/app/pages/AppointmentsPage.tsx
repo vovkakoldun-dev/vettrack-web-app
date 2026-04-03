@@ -30,18 +30,19 @@ type DisplayAppt = {
 function adaptAppt(a: AppointmentRow): DisplayAppt {
   const start = new Date(a.scheduled_at);
   const end = new Date(start.getTime() + (a.duration_minutes ?? 30) * 60000);
+  // Use UTC methods — scheduled_at is stored as UTC and represents clinic local time
   const fmtLocal = (d: Date) => {
-    let h = d.getHours();
-    const m = d.getMinutes();
+    let h = d.getUTCHours();
+    const m = d.getUTCMinutes();
     const ampm = h >= 12 ? 'PM' : 'AM';
     if (h > 12) h -= 12;
     if (h === 0) h = 12;
     return `${h}:${m.toString().padStart(2, '0')} ${ampm}`;
   };
   const validStatuses = ['Confirmed', 'Pending', 'Completed', 'Cancelled', 'In Progress'];
-  const y = start.getFullYear();
-  const mo = (start.getMonth() + 1).toString().padStart(2, '0');
-  const da = start.getDate().toString().padStart(2, '0');
+  const y = start.getUTCFullYear();
+  const mo = (start.getUTCMonth() + 1).toString().padStart(2, '0');
+  const da = start.getUTCDate().toString().padStart(2, '0');
   return {
     id: a.id,
     petName: a.pets?.name ?? '—',

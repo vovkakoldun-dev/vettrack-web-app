@@ -33,7 +33,7 @@ const NAV_SECTIONS: NavSection[] = [
       { name: 'My Portal',      icon: UserCircle,     path: '/admin/my-portal' },
       { name: 'Shifts',         icon: Clock,          path: '/admin/shifts' },
       { name: 'Team Chat',      icon: MessageCircle,  path: '/admin/chat' },
-      { name: 'Communications', icon: MessageSquare,  path: '/admin/communications', badge: 5 },
+      { name: 'Communications', icon: MessageSquare,  path: '/admin/communications' },
       { name: 'Notifications',  icon: Bell,           path: '/admin/notifications' },
     ],
   },
