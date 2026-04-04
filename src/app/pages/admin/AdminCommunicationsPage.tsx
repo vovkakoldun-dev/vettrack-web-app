@@ -412,14 +412,17 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
       }
     }
     setEmails(prev => prev.map(e => ids.has(e.id) ? { ...e, read: !e.read } : e));
+    setSelectedEmail(prev => prev && ids.has(prev.id) ? { ...prev, read: !prev.read } : prev);
     setSelectedIds(new Set());
   }, [emails, activeProvider]);
 
   const toggleStar = useCallback(async (id: string) => {
     const email = emails.find(e => e.id === id);
     if (!email) return;
-    // Optimistic update
-    setEmails(prev => prev.map(e => e.id === id ? { ...e, starred: !e.starred } : e));
+    const newStarred = !email.starred;
+    // Optimistic update — both list and detail view
+    setEmails(prev => prev.map(e => e.id === id ? { ...e, starred: newStarred } : e));
+    setSelectedEmail(prev => prev && prev.id === id ? { ...prev, starred: newStarred } : prev);
     try {
       if (activeProvider === 'gmail') {
         email.starred ? await gmailUnstarEmail(id) : await gmailStarEmail(id);
@@ -428,7 +431,8 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
       }
     } catch (err) {
       // Revert on failure
-      setEmails(prev => prev.map(e => e.id === id ? { ...e, starred: !e.starred } : e));
+      setEmails(prev => prev.map(e => e.id === id ? { ...e, starred: !newStarred } : e));
+      setSelectedEmail(prev => prev && prev.id === id ? { ...prev, starred: !newStarred } : prev);
       console.error('Failed to toggle star:', err);
     }
   }, [emails, activeProvider]);
