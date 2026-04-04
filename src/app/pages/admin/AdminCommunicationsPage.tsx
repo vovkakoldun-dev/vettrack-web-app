@@ -911,7 +911,7 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
                     color: 'var(--text-primary)', flex: 1,
                     whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                   }}>
-                    {email.from}
+                    {activeFolder === 'sent' || activeFolder === 'drafts' ? `To: ${email.to}` : email.from}
                   </span>
                   <span style={{ fontSize: 11, color: 'var(--text-secondary)', flexShrink: 0 }}>
                     {email.date}
