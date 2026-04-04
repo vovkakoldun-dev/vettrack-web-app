@@ -7,6 +7,7 @@ import {
   MailOpen, Bold, Italic, Underline, List, ListOrdered, Image, Link as LinkIcon,
   AlignLeft, Type, Users, ShoppingBag, Megaphone, RefreshCw, CheckSquare, Square,
   Minus, CornerUpLeft, CornerUpRight, ChevronUp, Maximize2, AlertTriangle, Loader2,
+  FileText, AlertCircle, MessageSquare, Bell, File,
 } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -26,8 +27,10 @@ import {
   unstarEmail as gmailUnstarEmail,
   archiveEmail as gmailArchiveEmail,
   trashEmail as gmailTrashEmail,
+  getLabels as gmailGetLabels,
   EmailAuthError,
   type GmailMessage,
+  type GmailLabel,
 } from '../../../lib/gmail';
 import {
   initiateOutlookAuth,
@@ -231,12 +234,19 @@ function normalizeOutlookMessage(msg: OutlookMessage): UnifiedEmail {
 }
 
 const SIDEBAR_ITEMS = [
-  { icon: Inbox, label: 'Inbox', id: 'inbox' },
-  { icon: Star, label: 'Starred', id: 'starred' },
-  { icon: Clock, label: 'Snoozed', id: 'snoozed' },
-  { icon: Send, label: 'Sent', id: 'sent' },
-  { icon: Archive, label: 'Archive', id: 'archive' },
-  { icon: Trash2, label: 'Trash', id: 'trash' },
+  { icon: Inbox, label: 'Inbox', id: 'inbox', gmailLabel: 'INBOX' },
+  { icon: Star, label: 'Starred', id: 'starred', gmailLabel: 'STARRED' },
+  { icon: Clock, label: 'Snoozed', id: 'snoozed', gmailLabel: null },
+  { icon: Tag, label: 'Important', id: 'important', gmailLabel: 'IMPORTANT' },
+  { icon: Send, label: 'Sent', id: 'sent', gmailLabel: 'SENT' },
+  { icon: FileText, label: 'Drafts', id: 'drafts', gmailLabel: 'DRAFT' },
+  { icon: Users, label: 'Social', id: 'social', gmailLabel: 'CATEGORY_SOCIAL' },
+  { icon: Bell, label: 'Updates', id: 'updates', gmailLabel: 'CATEGORY_UPDATES' },
+  { icon: MessageSquare, label: 'Forums', id: 'forums', gmailLabel: 'CATEGORY_FORUMS' },
+  { icon: Megaphone, label: 'Promotions', id: 'promotions', gmailLabel: 'CATEGORY_PROMOTIONS' },
+  { icon: Mail, label: 'All Mail', id: 'all', gmailLabel: null },
+  { icon: AlertCircle, label: 'Spam', id: 'spam', gmailLabel: 'SPAM' },
+  { icon: Trash2, label: 'Trash', id: 'trash', gmailLabel: 'TRASH' },
 ];
 
 // ─── Email Inbox View (Enhanced) ─────────────────────────────
@@ -263,6 +273,8 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
   const [loadError, setLoadError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [needsReauth, setNeedsReauth] = useState(false);
+  const [gmailLabels, setGmailLabels] = useState<GmailLabel[]>([]);
+  const [userLabels, setUserLabels] = useState<GmailLabel[]>([]);
 
   // Compose state
   const [composeTo, setComposeTo] = useState('');
@@ -281,13 +293,21 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
       let labelIds: string | undefined;
       let query = searchQuery || '';
 
-      switch (activeFolder) {
-        case 'inbox': labelIds = 'INBOX'; break;
-        case 'starred': labelIds = 'STARRED'; break;
-        case 'sent': labelIds = 'SENT'; break;
-        case 'trash': labelIds = 'TRASH'; break;
-        case 'snoozed': labelIds = 'INBOX'; query = query ? `is:snoozed ${query}` : 'is:snoozed'; break;
-        default: labelIds = 'INBOX';
+      // Map folder to Gmail label
+      const sidebarItem = SIDEBAR_ITEMS.find(i => i.id === activeFolder);
+      if (sidebarItem?.gmailLabel) {
+        labelIds = sidebarItem.gmailLabel;
+      } else if (activeFolder === 'snoozed') {
+        labelIds = 'INBOX';
+        query = query ? `is:snoozed ${query}` : 'is:snoozed';
+      } else if (activeFolder === 'all') {
+        // All Mail — no label filter, fetch everything
+        labelIds = undefined;
+      } else if (activeFolder.startsWith('label_')) {
+        // User-created Gmail label
+        labelIds = activeFolder.replace('label_', '');
+      } else {
+        labelIds = 'INBOX';
       }
 
       if (activeProvider === 'gmail') {
@@ -321,6 +341,17 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
   useEffect(() => {
     fetchEmails();
   }, [fetchEmails]);
+
+  // Fetch Gmail labels with counts
+  useEffect(() => {
+    if (activeProvider !== 'gmail') return;
+    gmailGetLabels().then((labels) => {
+      setGmailLabels(labels);
+      setUserLabels(labels.filter(l => l.type === 'user'));
+    }).catch((err) => {
+      console.error('Failed to fetch labels:', err);
+    });
+  }, [activeProvider]);
 
   const saveSelection = () => {
     const sel = window.getSelection();
@@ -358,16 +389,7 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
   const connectedProvider = integrations.find(i => connectedIds.has(i.id));
 
   const filteredEmails = emails.filter(e => {
-    // For non-inbox folders, emails are already fetched with the right labelIds — just show all
-    if (activeFolder === 'starred' || activeFolder === 'sent' || activeFolder === 'trash' || activeFolder === 'snoozed') {
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
-        return e.from.toLowerCase().includes(q) || e.subject.toLowerCase().includes(q) || e.preview.toLowerCase().includes(q);
-      }
-      return true;
-    }
-    // Inbox: filter by category
-    if (e.category !== activeCategory) return false;
+    // Emails are fetched with the correct label — just apply search filter
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       return e.from.toLowerCase().includes(q) || e.subject.toLowerCase().includes(q) || e.preview.toLowerCase().includes(q);
@@ -375,9 +397,11 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
     return true;
   });
 
-  const unreadCount = emails.filter(e => !e.read && e.folder === 'inbox' && e.category === 'primary').length;
-  const socialCount = emails.filter(e => !e.read && e.folder === 'inbox' && e.category === 'social').length;
-  const promoCount = emails.filter(e => !e.read && e.folder === 'inbox' && e.category === 'promotions').length;
+  // Get unread count from real Gmail label data
+  const getLabelCount = (gmailLabelId: string): number => {
+    const label = gmailLabels.find(l => l.id === gmailLabelId);
+    return label?.messagesUnread || 0;
+  };
 
   // Selection helpers
   const toggleSelect = (id: string) => {
@@ -576,7 +600,7 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
 
         <div style={{ flex: 1, padding: '0 8px', overflowY: 'auto' }}>
           {SIDEBAR_ITEMS.map(item => {
-            const count = item.id === 'inbox' ? unreadCount : item.id === 'snoozed' ? emails.filter(e => e.snoozed).length : 0;
+            const count = item.gmailLabel ? getLabelCount(item.gmailLabel) : 0;
             return (
               <button
                 key={item.id}
@@ -604,25 +628,40 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
             );
           })}
 
-          {/* Labels section */}
-          <div style={{ padding: '16px 12px 6px', fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Labels
-          </div>
-          {LABELS.map(label => (
-            <button
-              key={label.id}
-              onClick={() => {}}
-              style={{
-                width: '100%', display: 'flex', alignItems: 'center', gap: 10,
-                padding: '6px 12px', borderRadius: 8, border: 'none',
-                background: 'transparent', color: 'var(--text-secondary)',
-                cursor: 'pointer', fontSize: 12, textAlign: 'left',
-              }}
-            >
-              <div style={{ width: 10, height: 10, borderRadius: 3, background: label.color, flexShrink: 0 }} />
-              <span>{label.label}</span>
-            </button>
-          ))}
+          {/* Gmail user labels */}
+          {userLabels.length > 0 && (
+            <>
+              <div style={{ padding: '16px 12px 6px', fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Labels
+              </div>
+              {userLabels.map(label => {
+                const folderId = `label_${label.id}`;
+                const bgColor = label.color?.backgroundColor || '#6B7280';
+                return (
+                  <button
+                    key={label.id}
+                    onClick={() => { setActiveFolder(folderId); setSelectedEmail(null); setSelectedIds(new Set()); }}
+                    style={{
+                      width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '6px 12px', borderRadius: 8, border: 'none',
+                      background: activeFolder === folderId ? 'var(--surface-elevated)' : 'transparent',
+                      color: activeFolder === folderId ? 'var(--text-primary)' : 'var(--text-secondary)',
+                      cursor: 'pointer', fontSize: 12, textAlign: 'left',
+                      fontWeight: activeFolder === folderId ? 600 : 400,
+                    }}
+                  >
+                    <div style={{ width: 10, height: 10, borderRadius: 3, background: bgColor, flexShrink: 0 }} />
+                    <span style={{ flex: 1 }}>{label.name}</span>
+                    {(label.messagesUnread || 0) > 0 && (
+                      <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)' }}>
+                        {label.messagesUnread}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </>
+          )}
         </div>
 
         {/* Connected account badge */}
@@ -782,32 +821,16 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
             )}
           </div>
 
-          {/* Category tabs (only when in inbox) */}
-          {activeFolder === 'inbox' && (
-            <div style={{ display: 'flex', borderTop: '1px solid var(--border-color)' }}>
-              {CATEGORIES.map(cat => (
-                <button
-                  key={cat.id}
-                  onClick={() => { setActiveCategory(cat.id); setSelectedEmail(null); setSelectedIds(new Set()); }}
-                  style={{
-                    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                    padding: '10px 12px', border: 'none',
-                    borderBottom: activeCategory === cat.id ? `2px solid ${cat.color}` : '2px solid transparent',
-                    background: 'transparent',
-                    color: activeCategory === cat.id ? cat.color : 'var(--text-secondary)',
-                    cursor: 'pointer', fontSize: 12, fontWeight: activeCategory === cat.id ? 600 : 400,
-                    transition: 'all 0.15s',
-                  }}
-                >
-                  <cat.icon style={{ width: 14, height: 14 }} />
-                  {cat.label}
-                  {cat.id === 'primary' && unreadCount > 0 && <span style={{ fontSize: 10, background: `${cat.color}20`, color: cat.color, padding: '1px 5px', borderRadius: 9999, fontWeight: 600 }}>{unreadCount}</span>}
-                  {cat.id === 'social' && socialCount > 0 && <span style={{ fontSize: 10, background: `${cat.color}20`, color: cat.color, padding: '1px 5px', borderRadius: 9999, fontWeight: 600 }}>{socialCount}</span>}
-                  {cat.id === 'promotions' && promoCount > 0 && <span style={{ fontSize: 10, background: `${cat.color}20`, color: cat.color, padding: '1px 5px', borderRadius: 9999, fontWeight: 600 }}>{promoCount}</span>}
-                </button>
-              ))}
-            </div>
-          )}
+          {/* Current folder indicator */}
+          <div style={{
+            padding: '8px 16px', borderTop: '1px solid var(--border-color)',
+            fontSize: 12, fontWeight: 600, color: 'var(--text-primary)',
+            textTransform: 'capitalize',
+          }}>
+            {SIDEBAR_ITEMS.find(i => i.id === activeFolder)?.label ||
+             userLabels.find(l => `label_${l.id}` === activeFolder)?.name ||
+             'Inbox'}
+          </div>
         </div>
 
         {/* Email list */}

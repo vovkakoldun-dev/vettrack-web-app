@@ -96,6 +96,17 @@ export interface ThreadResponse {
   messages: GmailMessage[];
 }
 
+export interface GmailLabel {
+  id: string;
+  name: string;
+  type: 'system' | 'user';
+  messagesTotal?: number;
+  messagesUnread?: number;
+  threadsTotal?: number;
+  threadsUnread?: number;
+  color?: { textColor: string; backgroundColor: string } | null;
+}
+
 // ─── OAuth Flow ─────────────────────────────────────
 
 /**
@@ -132,6 +143,16 @@ export async function disconnectIntegration(provider: string): Promise<void> {
     body: JSON.stringify({ provider }),
   });
   await handleResponse(response);
+}
+
+// ─── Labels ───────────────────────────────────────
+
+/** Fetch all Gmail labels with unread counts */
+export async function getLabels(): Promise<GmailLabel[]> {
+  const headers = await getAuthHeaders();
+  const response = await fetch(`${FUNCTIONS_BASE}/gmail-api?action=labels`, { headers });
+  const data = await handleResponse<{ labels: GmailLabel[] }>(response);
+  return data.labels || [];
 }
 
 // ─── Email Operations ──────────────────────────────

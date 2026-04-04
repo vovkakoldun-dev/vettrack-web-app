@@ -263,6 +263,38 @@ serve(async (req: Request) => {
       return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
+    // ─── LABELS ───
+    if (action === 'labels') {
+      const { response: r } = await gmailFetch(`${GMAIL_API_BASE}/labels`, undefined, 'labels');
+      if (r.status === 401) return r;
+      const d = await r.json();
+      if (d.error) return new Response(JSON.stringify({ error: d.error.message }), { status: d.error.code || 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
+      // Fetch details for each label to get counts
+      const labels = d.labels || [];
+      const detailed = await Promise.all(
+        labels.map(async (l: any) => {
+          try {
+            const { response: lr } = await gmailFetch(`${GMAIL_API_BASE}/labels/${l.id}`, undefined, 'label-detail');
+            if (!lr.ok) return { id: l.id, name: l.name, type: l.type };
+            const ld = await lr.json();
+            return {
+              id: ld.id,
+              name: ld.name,
+              type: ld.type,
+              messagesTotal: ld.messagesTotal || 0,
+              messagesUnread: ld.messagesUnread || 0,
+              threadsTotal: ld.threadsTotal || 0,
+              threadsUnread: ld.threadsUnread || 0,
+              color: ld.color || null,
+            };
+          } catch { return { id: l.id, name: l.name, type: l.type }; }
+        })
+      );
+
+      return new Response(JSON.stringify({ labels: detailed }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
     return new Response(JSON.stringify({ error: 'Unknown action' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (error: any) {
     console.error('[GMAIL-API] Error:', error);
