@@ -1,101 +1,42 @@
 // supabase/functions/gmail-api/index.ts
 // Proxies Gmail API calls — list, get, send, modify emails
 //
-// Handles token refresh automatically when access_token expires
-//
-// Endpoints (via ?action= query param):
-//   GET  ?action=list       — List emails (inbox, sent, etc.)
-//   GET  ?action=get&id=X   — Get single email with full body
-//   POST ?action=send        — Send an email
-//   POST ?action=modify      — Modify labels (read/unread, archive, trash, star)
-//   GET  ?action=status      — Check integration status
-//   POST ?action=disconnect  — Disconnect integration
+// Deployed with verify_jwt: false — function handles auth internally via getUser(token)
 
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
-import { withTokenRetry } from '../_shared/token-refresh.ts';
-import { getCorsHeaders, safeErrorResponse } from '../_shared/oauth-security.ts';
+import { withTokenRetry } from './token-refresh.ts';
 
 const GMAIL_API_BASE = 'https://gmail.googleapis.com/gmail/v1/users/me';
 
-/**
- * Diagnose common Gmail API error responses and return actionable log messages.
- */
-function diagnoseGmailApiError(
-  status: number,
-  errorData: { error?: { code?: number; message?: string; errors?: { reason?: string; domain?: string }[] } },
-  action: string,
-): string {
-  const reason = errorData.error?.errors?.[0]?.reason || '';
-  const message = errorData.error?.message || '';
-
-  if (status === 403) {
-    if (reason === 'insufficientPermissions') {
-      return (
-        `Gmail API returned 403 insufficientPermissions for action="${action}". ` +
-        `The access token lacks the required scope. Check that the user granted all requested scopes ` +
-        `(gmail.readonly, gmail.send, gmail.modify) during OAuth. The user may need to reconnect.`
-      );
-    }
-    if (reason === 'accessNotConfigured' || message.includes('has not been used') || message.includes('it is disabled')) {
-      return (
-        `Gmail API is NOT ENABLED in Google Cloud Console. ` +
-        `Go to APIs & Services → Library → search "Gmail API" → Enable. ` +
-        `This must be done in the same project as your OAuth credentials.`
-      );
-    }
-    if (reason === 'rateLimitExceeded' || reason === 'userRateLimitExceeded') {
-      return `Gmail API rate limit exceeded for action="${action}". Retry after a delay.`;
-    }
-    return `Gmail API 403 for action="${action}": ${reason || message}`;
-  }
-
-  if (status === 400) {
-    return `Gmail API 400 bad request for action="${action}": ${message}. Check request parameters.`;
-  }
-
-  if (status === 404) {
-    return `Gmail API 404 for action="${action}": ${message}. The resource (message/thread/label) may have been deleted.`;
-  }
-
-  if (status === 429) {
-    return `Gmail API 429 too many requests for action="${action}". Implement exponential backoff.`;
-  }
-
-  if (status >= 500) {
-    return `Gmail API server error (${status}) for action="${action}": ${message}. This is a Google-side issue — retry later.`;
-  }
-
-  return `Gmail API error (${status}) for action="${action}": ${message}`;
+function getCorsHeaders(origin: string | null): Record<string, string> {
+  return {
+    'Access-Control-Allow-Origin': origin || '*',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Vary': 'Origin',
+  };
 }
 
-// Parse Gmail message into clean format
 function parseGmailMessage(msg: any): any {
   const headers = msg.payload?.headers || [];
   const getHeader = (name: string) => headers.find((h: any) => h.name.toLowerCase() === name.toLowerCase())?.value || '';
 
-  // Extract body
   let body = '';
   if (msg.payload?.body?.data) {
     body = atob(msg.payload.body.data.replace(/-/g, '+').replace(/_/g, '/'));
   } else if (msg.payload?.parts) {
-    const textPart = msg.payload.parts.find((p: any) => p.mimeType === 'text/plain');
     const htmlPart = msg.payload.parts.find((p: any) => p.mimeType === 'text/html');
+    const textPart = msg.payload.parts.find((p: any) => p.mimeType === 'text/plain');
     const part = htmlPart || textPart;
     if (part?.body?.data) {
       body = atob(part.body.data.replace(/-/g, '+').replace(/_/g, '/'));
     }
   }
 
-  // Extract attachments info
   const attachments = (msg.payload?.parts || [])
     .filter((p: any) => p.filename && p.filename.length > 0)
-    .map((p: any) => ({
-      id: p.body?.attachmentId,
-      filename: p.filename,
-      mimeType: p.mimeType,
-      size: p.body?.size || 0,
-    }));
+    .map((p: any) => ({ id: p.body?.attachmentId, filename: p.filename, mimeType: p.mimeType, size: p.body?.size || 0 }));
 
   const labelIds = msg.labelIds || [];
 
@@ -105,7 +46,6 @@ function parseGmailMessage(msg: any): any {
     from: getHeader('From'),
     to: getHeader('To'),
     cc: getHeader('Cc'),
-    bcc: getHeader('Bcc'),
     subject: getHeader('Subject'),
     date: getHeader('Date'),
     snippet: msg.snippet,
@@ -119,7 +59,6 @@ function parseGmailMessage(msg: any): any {
   };
 }
 
-// Create MIME message for sending
 function createMimeMessage(to: string, subject: string, body: string, cc?: string, bcc?: string): string {
   const boundary = `boundary_${crypto.randomUUID()}`;
   const lines = [
@@ -133,7 +72,7 @@ function createMimeMessage(to: string, subject: string, body: string, cc?: strin
     `--${boundary}`,
     'Content-Type: text/plain; charset="UTF-8"',
     '',
-    body.replace(/<[^>]*>/g, ''), // Strip HTML for plain text version
+    body.replace(/<[^>]*>/g, ''),
     '',
     `--${boundary}`,
     'Content-Type: text/html; charset="UTF-8"',
@@ -142,9 +81,7 @@ function createMimeMessage(to: string, subject: string, body: string, cc?: strin
     '',
     `--${boundary}--`,
   ];
-
-  const raw = lines.join('\r\n');
-  return btoa(raw).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return btoa(lines.join('\r\n')).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 serve(async (req: Request) => {
@@ -155,33 +92,28 @@ serve(async (req: Request) => {
   }
 
   try {
-    // Verify authentication
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      return safeErrorResponse('Unauthorized', 401, corsHeaders);
+    // Extract Bearer token
+    const authHeader = req.headers.get('Authorization') || '';
+    const token = authHeader.replace('Bearer ', '');
+    if (!token) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    const supabaseAuth = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_ANON_KEY')!,
-      { global: { headers: { Authorization: authHeader } } }
-    );
-
-    const { data: { user } } = await supabaseAuth.auth.getUser();
-    if (!user) {
-      return safeErrorResponse('Unauthorized', 401, corsHeaders);
-    }
-
-    // Service role client for token management
+    // Use SERVICE_ROLE client + pass token directly to getUser
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
+    const { data: { user }, error: userError } = await supabase.auth.getUser(token);
+    if (userError || !user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized', detail: userError?.message }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
     const url = new URL(req.url);
     const action = url.searchParams.get('action');
 
-    // ─── STATUS ───────────────────────────────────
+    // ─── STATUS ───
     if (action === 'status') {
       const { data: integrations } = await supabase
         .from('email_integrations')
@@ -195,21 +127,16 @@ serve(async (req: Request) => {
       );
     }
 
-    // ─── DISCONNECT ──────────────────────────────
+    // ─── DISCONNECT ───
     if (action === 'disconnect') {
       const body = await req.json();
-      const { provider } = body;
-
       await supabase
         .from('email_integrations')
         .update({ status: 'disconnected', access_token: null, refresh_token: null })
         .eq('user_id', user.id)
-        .eq('provider', provider);
+        .eq('provider', body.provider);
 
-      return new Response(
-        JSON.stringify({ success: true }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     // Get active Gmail integration
@@ -228,25 +155,14 @@ serve(async (req: Request) => {
       );
     }
 
-    // Helper: make a Gmail API call with automatic token refresh + retry on 401
-    async function gmailFetch(
-      urlOrPath: string,
-      init?: RequestInit,
-      actionLabel?: string,
-    ): Promise<{ response: Response; token: string }> {
-      const label = actionLabel || action || 'unknown';
-      console.info(`[GMAIL-API] ${label}: Making API call`);
-
+    // Helper: Gmail API call with token refresh + retry
+    async function gmailFetch(apiUrl: string, init?: RequestInit, label?: string): Promise<{ response: Response; token: string }> {
       const { response, accessToken } = await withTokenRetry(
         supabase, integration!, 'google',
-        (token) => fetch(urlOrPath, {
-          ...init,
-          headers: { ...init?.headers, Authorization: `Bearer ${token}` },
-        }),
+        (t) => fetch(apiUrl, { ...init, headers: { ...init?.headers, Authorization: `Bearer ${t}` } }),
       );
 
       if (response.status === 401) {
-        console.error(`[GMAIL-API] ${label}: Token expired and refresh failed — REAUTH_REQUIRED`);
         return {
           response: new Response(
             JSON.stringify({ error: 'Token expired, please reconnect', code: 'REAUTH_REQUIRED' }),
@@ -255,264 +171,102 @@ serve(async (req: Request) => {
           token: '',
         };
       }
-
-      if (!response.ok && response.status !== 401) {
-        // Try to parse and diagnose the error — clone to avoid consuming the body
-        try {
-          const errClone = response.clone();
-          const errData = await errClone.json();
-          const diagnosis = diagnoseGmailApiError(response.status, errData, label);
-          console.error(`[GMAIL-API] ${label}: ${diagnosis}`);
-        } catch {
-          console.error(`[GMAIL-API] ${label}: Non-OK response (${response.status}), body not parseable`);
-        }
-      }
-
       return { response, token: accessToken };
     }
 
-    // ─── LIST EMAILS ─────────────────────────────
+    // ─── LIST ───
     if (action === 'list') {
       const labelIds = url.searchParams.get('labelIds') || 'INBOX';
       const maxResults = url.searchParams.get('maxResults') || '20';
       const pageToken = url.searchParams.get('pageToken') || '';
       const query = url.searchParams.get('q') || '';
 
-      const params = new URLSearchParams({
-        labelIds,
-        maxResults,
-        ...(pageToken ? { pageToken } : {}),
-        ...(query ? { q: query } : {}),
-      });
-
-      const { response: listResponse, token } = await gmailFetch(`${GMAIL_API_BASE}/messages?${params}`, undefined, 'list');
+      const params = new URLSearchParams({ labelIds, maxResults, ...(pageToken ? { pageToken } : {}), ...(query ? { q: query } : {}) });
+      const { response: listResponse, token: gmailToken } = await gmailFetch(`${GMAIL_API_BASE}/messages?${params}`, undefined, 'list');
       if (listResponse.status === 401) return listResponse;
       const listData = await listResponse.json();
 
       if (listData.error) {
-        const diagnosis = diagnoseGmailApiError(listData.error.code || 400, { error: listData.error }, 'list');
-        console.error(`[GMAIL-API] list: ${diagnosis}`);
-        return new Response(
-          JSON.stringify({ error: listData.error.message }),
-          { status: listData.error.code, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
+        return new Response(JSON.stringify({ error: listData.error.message }), { status: listData.error.code || 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
-      console.info(`[GMAIL-API] list: Found ${(listData.messages || []).length} messages, fetching details`);
 
-      // Fetch full message details using the same (refreshed) token
       const messages = listData.messages || [];
       const detailed = await Promise.all(
         messages.map(async (m: { id: string }) => {
-          const msgResponse = await fetch(
+          const r = await fetch(
             `${GMAIL_API_BASE}/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject&metadataHeaders=Date`,
-            { headers: { Authorization: `Bearer ${token}` } }
+            { headers: { Authorization: `Bearer ${gmailToken}` } }
           );
-          const msgData = await msgResponse.json();
-          return parseGmailMessage(msgData);
+          return parseGmailMessage(await r.json());
         })
       );
 
-      // Update last synced
-      await supabase
-        .from('email_integrations')
-        .update({ last_synced_at: new Date().toISOString() })
-        .eq('id', integration.id);
+      await supabase.from('email_integrations').update({ last_synced_at: new Date().toISOString() }).eq('id', integration.id);
 
       return new Response(
-        JSON.stringify({
-          messages: detailed,
-          nextPageToken: listData.nextPageToken || null,
-          resultSizeEstimate: listData.resultSizeEstimate || 0,
-        }),
+        JSON.stringify({ messages: detailed, nextPageToken: listData.nextPageToken || null, resultSizeEstimate: listData.resultSizeEstimate || 0 }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // ─── GET SINGLE EMAIL ────────────────────────
+    // ─── GET ───
     if (action === 'get') {
       const messageId = url.searchParams.get('id');
-      if (!messageId) {
-        return new Response(
-          JSON.stringify({ error: 'Missing message id' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      const { response: msgResponse } = await gmailFetch(`${GMAIL_API_BASE}/messages/${messageId}?format=full`, undefined, 'get');
-      if (msgResponse.status === 401) return msgResponse;
-      const msgData = await msgResponse.json();
-
-      if (msgData.error) {
-        const diagnosis = diagnoseGmailApiError(msgData.error.code || 400, { error: msgData.error }, 'get');
-        console.error(`[GMAIL-API] get: ${diagnosis}`);
-        return new Response(
-          JSON.stringify({ error: msgData.error.message }),
-          { status: msgData.error.code || 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      return new Response(
-        JSON.stringify({ message: parseGmailMessage(msgData) }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      if (!messageId) return new Response(JSON.stringify({ error: 'Missing id' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      const { response: r } = await gmailFetch(`${GMAIL_API_BASE}/messages/${messageId}?format=full`, undefined, 'get');
+      if (r.status === 401) return r;
+      const d = await r.json();
+      if (d.error) return new Response(JSON.stringify({ error: d.error.message }), { status: d.error.code || 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify({ message: parseGmailMessage(d) }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // ─── GET THREAD ──────────────────────────────
+    // ─── THREAD ───
     if (action === 'thread') {
       const threadId = url.searchParams.get('threadId');
-      if (!threadId) {
-        return new Response(
-          JSON.stringify({ error: 'Missing thread id' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      const { response: threadResponse } = await gmailFetch(`${GMAIL_API_BASE}/threads/${threadId}?format=full`, undefined, 'thread');
-      if (threadResponse.status === 401) return threadResponse;
-      const threadData = await threadResponse.json();
-
-      if (threadData.error) {
-        const diagnosis = diagnoseGmailApiError(threadData.error.code || 400, { error: threadData.error }, 'thread');
-        console.error(`[GMAIL-API] thread: ${diagnosis}`);
-        return new Response(
-          JSON.stringify({ error: threadData.error.message }),
-          { status: threadData.error.code || 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      const messages = (threadData.messages || []).map(parseGmailMessage);
-
-      return new Response(
-        JSON.stringify({ threadId: threadData.id, messages }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      if (!threadId) return new Response(JSON.stringify({ error: 'Missing threadId' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      const { response: r } = await gmailFetch(`${GMAIL_API_BASE}/threads/${threadId}?format=full`, undefined, 'thread');
+      if (r.status === 401) return r;
+      const d = await r.json();
+      if (d.error) return new Response(JSON.stringify({ error: d.error.message }), { status: d.error.code || 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify({ threadId: d.id, messages: (d.messages || []).map(parseGmailMessage) }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // ─── SEND EMAIL ──────────────────────────────
+    // ─── SEND ───
     if (action === 'send') {
       const body = await req.json();
-      const { to, subject, body: emailBody, cc, bcc } = body;
-
-      if (!to || !subject) {
-        return new Response(
-          JSON.stringify({ error: 'Missing required fields: to, subject' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      const raw = createMimeMessage(to, subject, emailBody || '', cc, bcc);
-
-      const { response: sendResponse } = await gmailFetch(`${GMAIL_API_BASE}/messages/send`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ raw }),
-      }, 'send');
-      if (sendResponse.status === 401) return sendResponse;
-
-      const sendData = await sendResponse.json();
-
-      if (sendData.error) {
-        const diagnosis = diagnoseGmailApiError(sendData.error.code || 400, { error: sendData.error }, 'send');
-        console.error(`[GMAIL-API] send: ${diagnosis}`);
-        return new Response(
-          JSON.stringify({ error: sendData.error.message }),
-          { status: sendData.error.code, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-      console.info(`[GMAIL-API] send: Email sent successfully (id: ${sendData.id})`);
-
-      // Log send
-      await supabase.from('email_sync_log').insert({
-        integration_id: integration.id,
-        organization_id: integration.organization_id,
-        sync_type: 'send',
-        status: 'completed',
-        messages_synced: 1,
-        completed_at: new Date().toISOString(),
-      });
-
-      return new Response(
-        JSON.stringify({ success: true, messageId: sendData.id, threadId: sendData.threadId }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      if (!body.to || !body.subject) return new Response(JSON.stringify({ error: 'Missing to or subject' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      const raw = createMimeMessage(body.to, body.subject, body.body || '', body.cc, body.bcc);
+      const { response: r } = await gmailFetch(`${GMAIL_API_BASE}/messages/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ raw }) }, 'send');
+      if (r.status === 401) return r;
+      const d = await r.json();
+      if (d.error) return new Response(JSON.stringify({ error: d.error.message }), { status: d.error.code, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify({ success: true, messageId: d.id, threadId: d.threadId }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // ─── MODIFY EMAIL ────────────────────────────
+    // ─── MODIFY ───
     if (action === 'modify') {
       const body = await req.json();
-      const { messageId, addLabelIds, removeLabelIds } = body;
-
-      if (!messageId) {
-        return new Response(
-          JSON.stringify({ error: 'Missing messageId' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      const { response: modifyResponse } = await gmailFetch(
-        `${GMAIL_API_BASE}/messages/${messageId}/modify`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            addLabelIds: addLabelIds || [],
-            removeLabelIds: removeLabelIds || [],
-          }),
-        },
-        'modify',
-      );
-      if (modifyResponse.status === 401) return modifyResponse;
-
-      const modifyData = await modifyResponse.json();
-
-      if (modifyData.error) {
-        const diagnosis = diagnoseGmailApiError(modifyData.error.code || 400, { error: modifyData.error }, 'modify');
-        console.error(`[GMAIL-API] modify: ${diagnosis}`);
-        return new Response(
-          JSON.stringify({ error: modifyData.error.message }),
-          { status: modifyData.error.code, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      return new Response(
-        JSON.stringify({ success: true, labelIds: modifyData.labelIds }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      if (!body.messageId) return new Response(JSON.stringify({ error: 'Missing messageId' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      const { response: r } = await gmailFetch(`${GMAIL_API_BASE}/messages/${body.messageId}/modify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ addLabelIds: body.addLabelIds || [], removeLabelIds: body.removeLabelIds || [] }) }, 'modify');
+      if (r.status === 401) return r;
+      const d = await r.json();
+      if (d.error) return new Response(JSON.stringify({ error: d.error.message }), { status: d.error.code, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify({ success: true, labelIds: d.labelIds }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // ─── TRASH / UNTRASH ─────────────────────────
+    // ─── TRASH / UNTRASH ───
     if (action === 'trash' || action === 'untrash') {
       const body = await req.json();
-      const { messageId } = body;
-
-      const { response: trashResponse } = await gmailFetch(
-        `${GMAIL_API_BASE}/messages/${messageId}/${action}`,
-        { method: 'POST' },
-        action,
-      );
-      if (trashResponse.status === 401) return trashResponse;
-
-      if (!trashResponse.ok) {
-        const errData = await trashResponse.json();
-        const diagnosis = diagnoseGmailApiError(trashResponse.status, errData, action);
-        console.error(`[GMAIL-API] ${action}: ${diagnosis}`);
-        return new Response(
-          JSON.stringify({ error: errData.error?.message || 'Failed' }),
-          { status: trashResponse.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      return new Response(
-        JSON.stringify({ success: true }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      const { response: r } = await gmailFetch(`${GMAIL_API_BASE}/messages/${body.messageId}/${action}`, { method: 'POST' }, action);
+      if (r.status === 401) return r;
+      if (!r.ok) { const e = await r.json(); return new Response(JSON.stringify({ error: e.error?.message || 'Failed' }), { status: r.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }); }
+      return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    return new Response(
-      JSON.stringify({ error: 'Unknown action', validActions: ['list', 'get', 'thread', 'send', 'modify', 'trash', 'untrash', 'status', 'disconnect'] }),
-      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
-  } catch (error) {
-    return safeErrorResponse('Internal server error', 500, corsHeaders, error);
+    return new Response(JSON.stringify({ error: 'Unknown action' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  } catch (error: any) {
+    console.error('[GMAIL-API] Error:', error);
+    const corsHeaders = getCorsHeaders(req.headers.get('Origin'));
+    return new Response(JSON.stringify({ error: 'Internal server error' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 });

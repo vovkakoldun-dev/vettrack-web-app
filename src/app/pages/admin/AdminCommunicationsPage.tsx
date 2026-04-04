@@ -6,13 +6,43 @@ import {
   Reply, Forward, ChevronDown, Clock, Settings, Tag, FolderInput, BellOff,
   MailOpen, Bold, Italic, Underline, List, ListOrdered, Image, Link as LinkIcon,
   AlignLeft, Type, Users, ShoppingBag, Megaphone, RefreshCw, CheckSquare, Square,
-  Minus, CornerUpLeft, CornerUpRight, ChevronUp, Maximize2, AlertTriangle,
+  Minus, CornerUpLeft, CornerUpRight, ChevronUp, Maximize2, AlertTriangle, Loader2,
 } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '../../components/ui/dialog';
+import {
+  initiateGmailAuth,
+  getIntegrationStatus,
+  disconnectIntegration,
+  listEmails as gmailListEmails,
+  getEmail as gmailGetEmail,
+  sendEmail as gmailSendEmail,
+  markAsRead as gmailMarkAsRead,
+  markAsUnread as gmailMarkAsUnread,
+  starEmail as gmailStarEmail,
+  unstarEmail as gmailUnstarEmail,
+  archiveEmail as gmailArchiveEmail,
+  trashEmail as gmailTrashEmail,
+  EmailAuthError,
+  type GmailMessage,
+} from '../../../lib/gmail';
+import {
+  initiateOutlookAuth,
+  listEmails as outlookListEmails,
+  getEmail as outlookGetEmail,
+  sendEmail as outlookSendEmail,
+  markAsRead as outlookMarkAsRead,
+  markAsUnread as outlookMarkAsUnread,
+  flagEmail as outlookFlagEmail,
+  unflagEmail as outlookUnflagEmail,
+  archiveEmail as outlookArchiveEmail,
+  trashEmail as outlookTrashEmail,
+  disconnectOutlook,
+  type OutlookMessage,
+} from '../../../lib/outlook';
 
 // ─── Integration definitions ──────────────────────────────────
 
@@ -90,19 +120,11 @@ const LABELS: { id: EmailLabel; label: string; color: string }[] = [
   { id: 'lab-results', label: 'Lab Results', color: '#1ABC9C' },
 ];
 
-// ─── Mock Email Data (Enhanced with categories, labels, threads) ──
+// ─── Unified Email type (normalized from Gmail/Outlook API) ──
 
-interface ThreadMessage {
+interface UnifiedEmail {
   id: string;
-  from: string;
-  fromEmail: string;
-  body: string;
-  date: string;
-  time: string;
-}
-
-interface MockEmail {
-  id: string;
+  threadId: string;
   from: string;
   fromEmail: string;
   to: string;
@@ -114,107 +136,99 @@ interface MockEmail {
   read: boolean;
   starred: boolean;
   hasAttachment: boolean;
+  attachments: { id?: string; filename: string; mimeType?: string; size?: number }[];
   folder: string;
   category: EmailCategory;
-  labels: EmailLabel[];
+  labels: string[];
   snoozed: boolean;
-  thread: ThreadMessage[];
+  thread: { id: string; from: string; fromEmail: string; body: string; date: string; time: string }[];
 }
 
-const MOCK_EMAILS: MockEmail[] = [
-  {
-    id: '1', from: 'Sarah Johnson', fromEmail: 'sarah.johnson@email.com', to: 'clinic@hugoit.com',
-    subject: 'Re: Max\'s follow-up appointment',
-    preview: 'Hi, just wanted to confirm that Max is doing much better after the medication change.',
-    body: 'Hi Dr. Cross,\n\nJust wanted to confirm that Max is doing much better after the medication change. His appetite has returned and he\'s more active now. The swelling in his leg has gone down significantly.\n\nShould we schedule a follow-up in two weeks or wait a month?\n\nThank you for the wonderful care!',
-    date: 'Mar 31', time: '9:42 AM', read: false, starred: true, hasAttachment: false,
-    folder: 'inbox', category: 'primary', labels: ['clients'], snoozed: false,
-    thread: [
-      { id: '1a', from: 'Dr. Victoria Cross', fromEmail: 'clinic@hugoit.com', body: 'Hi Sarah,\n\nThank you for the update on Max! I\'m glad to hear he\'s improving. Let\'s schedule a follow-up in two weeks to check on the leg.\n\nPlease call the front desk to book a slot.\n\nBest regards,\nDr. Cross', date: 'Mar 30', time: '2:15 PM' },
-      { id: '1b', from: 'Sarah Johnson', fromEmail: 'sarah.johnson@email.com', body: 'Hi Dr. Cross,\n\nMax has been favoring his left leg since yesterday. He\'s still eating well but seems uncomfortable.\n\nShould I bring him in sooner?\n\nThanks,\nSarah', date: 'Mar 29', time: '10:30 AM' },
-    ],
-  },
-  {
-    id: '2', from: 'PetMeds Supply', fromEmail: 'orders@petmedssupply.com', to: 'clinic@hugoit.com',
-    subject: 'Order #PM-4521 Shipped - Rimadyl 75mg',
-    preview: 'Your order has been shipped and is expected to arrive within 2-3 business days.',
-    body: 'Dear Customer,\n\nYour order #PM-4521 has been shipped!\n\nItems:\n- Rimadyl 75mg (60 tablets) x 3\n- Apoquel 16mg (30 tablets) x 2\n\nTracking: 1Z999AA10123456784\nEstimated delivery: April 2-3, 2026\n\nThank you for your order!\nPetMeds Supply Team',
-    date: 'Mar 31', time: '8:15 AM', read: false, starred: false, hasAttachment: true,
-    folder: 'inbox', category: 'primary', labels: ['work'], snoozed: false, thread: [],
-  },
-  {
-    id: '3', from: 'Dr. Emily Carter', fromEmail: 'emily.carter@hugoit.com', to: 'clinic@hugoit.com',
-    subject: 'Lab results for Cooper - Blood Panel',
-    preview: 'Hi team, Cooper\'s blood panel results came back. Liver enzymes are slightly elevated.',
-    body: 'Hi team,\n\nCooper\'s blood panel results came back from VetLab. Here are the key findings:\n\n- ALT: 142 U/L (elevated, normal 10-125)\n- ALP: 215 U/L (elevated, normal 23-212)\n- BUN: 28 mg/dL (normal)\n- Creatinine: 1.2 mg/dL (normal)\n\nLiver enzymes are slightly elevated. I recommend scheduling a follow-up ultrasound within the next two weeks to rule out any hepatic issues.\n\nPlease let me know when we can get Cooper in.\n\nDr. Carter',
-    date: 'Mar 30', time: '4:30 PM', read: false, starred: false, hasAttachment: true,
-    folder: 'inbox', category: 'primary', labels: ['work', 'lab-results'], snoozed: false, thread: [],
-  },
-  {
-    id: '4', from: 'Michael Torres', fromEmail: 'mtorres@email.com', to: 'clinic@hugoit.com',
-    subject: 'Bella\'s vaccination schedule question',
-    preview: 'Hello, I\'d like to know when Bella is due for her next round of vaccinations.',
-    body: 'Hello,\n\nI\'d like to know when Bella is due for her next round of vaccinations. She had her last booster in January and I want to make sure we stay on schedule.\n\nAlso, do you offer the Leptospirosis vaccine? Our dog park recently had an advisory.\n\nThanks,\nMichael Torres',
-    date: 'Mar 30', time: '2:12 PM', read: true, starred: false, hasAttachment: false,
-    folder: 'inbox', category: 'primary', labels: ['clients'], snoozed: false, thread: [],
-  },
-  {
-    id: '5', from: 'VetLab Diagnostics', fromEmail: 'results@vetlabdiag.com', to: 'clinic@hugoit.com',
-    subject: 'Diagnostic Report Ready - Case #VL-8834',
-    preview: 'Your requested diagnostic report for patient Milo (Feline, DSH) is now available.',
-    body: 'Dear Doctor,\n\nThe diagnostic report for Case #VL-8834 is now available.\n\nPatient: Milo (Feline, Domestic Shorthair)\nTest: Complete Blood Count + Chemistry Panel\nStatus: Results Ready\n\nPlease log into the VetLab portal to download the full report, or see the attached summary.\n\nVetLab Diagnostics',
-    date: 'Mar 29', time: '11:00 AM', read: true, starred: true, hasAttachment: true,
-    folder: 'inbox', category: 'primary', labels: ['lab-results'], snoozed: false, thread: [],
-  },
-  {
-    id: '6', from: 'Jessica Williams', fromEmail: 'jwilliams@email.com', to: 'clinic@hugoit.com',
-    subject: 'Thank you for Daisy\'s surgery',
-    preview: 'Dear Dr. Cross, I wanted to express my sincere gratitude for the wonderful care Daisy received.',
-    body: 'Dear Dr. Cross,\n\nI wanted to express my sincere gratitude for the wonderful care Daisy received during her surgery last week. She is recovering beautifully at home and is already back to her playful self.\n\nYour team was incredibly compassionate and kept us informed throughout the entire process. We couldn\'t be more thankful.\n\nBest regards,\nJessica Williams',
-    date: 'Mar 28', time: '6:45 PM', read: true, starred: false, hasAttachment: false,
-    folder: 'inbox', category: 'primary', labels: ['clients', 'personal'], snoozed: false, thread: [],
-  },
-  {
-    id: '7', from: 'Clinic Insurance Co.', fromEmail: 'noreply@clinicinsurance.com', to: 'clinic@hugoit.com',
-    subject: 'Policy Renewal Reminder - Due April 15',
-    preview: 'This is a reminder that your clinic insurance policy #CI-220145 is due for renewal.',
-    body: 'Dear Policyholder,\n\nThis is a reminder that your clinic insurance policy #CI-220145 is due for renewal on April 15, 2026.\n\nCurrent coverage:\n- General Liability: $2,000,000\n- Professional Liability: $1,000,000\n- Property Coverage: $500,000\n\nPlease review the attached renewal documents and contact us at 1-800-555-0123 if you have questions.\n\nClinic Insurance Co.',
-    date: 'Mar 28', time: '10:30 AM', read: true, starred: false, hasAttachment: true,
-    folder: 'inbox', category: 'primary', labels: ['finance', 'important'], snoozed: false, thread: [],
-  },
-  {
-    id: '8', from: 'Robert Chen', fromEmail: 'rchen@email.com', to: 'clinic@hugoit.com',
-    subject: 'Appointment request for new puppy',
-    preview: 'Hi, we just adopted a 10-week-old Golden Retriever and would like to schedule his first exam.',
-    body: 'Hi,\n\nWe just adopted a 10-week-old Golden Retriever named Biscuit! We would like to schedule his first wellness exam and get started on his vaccination schedule.\n\nWe\'re available most mornings next week. What times do you have open?\n\nThanks!\nRobert Chen',
-    date: 'Mar 27', time: '3:20 PM', read: true, starred: false, hasAttachment: false,
-    folder: 'inbox', category: 'primary', labels: ['clients'], snoozed: false, thread: [],
-  },
-  {
-    id: '9', from: 'Pet Lovers Community', fromEmail: 'newsletter@petlovers.social', to: 'clinic@hugoit.com',
-    subject: 'New followers and activity on your page',
-    preview: '5 new followers this week! See what\'s trending in the pet care community.',
-    body: 'Hi HugoIT Veterinary Clinic,\n\nHere\'s your weekly summary:\n\n- 5 new followers\n- 12 post engagements\n- 3 new reviews (all 5 stars!)\n\nKeep sharing great content with the pet community!\n\nPet Lovers Social Team',
-    date: 'Mar 27', time: '9:00 AM', read: true, starred: false, hasAttachment: false,
-    folder: 'inbox', category: 'social', labels: [], snoozed: false, thread: [],
-  },
-  {
-    id: '10', from: 'VetSupply Pro', fromEmail: 'deals@vetsupplypro.com', to: 'clinic@hugoit.com',
-    subject: '30% Off Spring Sale - Surgical Supplies & Equipment',
-    preview: 'Don\'t miss our biggest spring sale! Save 30% on top surgical brands.',
-    body: 'Spring Sale Event!\n\nSave 30% on select surgical supplies and equipment:\n\n- Surgical drapes & gowns\n- Suture kits\n- Monitoring equipment\n- Dental instruments\n\nUse code SPRING30 at checkout.\nSale ends April 15, 2026.\n\nShop now at vetsupplypro.com',
-    date: 'Mar 26', time: '7:30 AM', read: true, starred: false, hasAttachment: false,
-    folder: 'inbox', category: 'promotions', labels: [], snoozed: false, thread: [],
-  },
-  {
-    id: '11', from: 'PetConference 2026', fromEmail: 'info@petconf2026.com', to: 'clinic@hugoit.com',
-    subject: 'Early Bird Registration - National Veterinary Conference',
-    preview: 'Register now and save $200! Early bird pricing ends April 30.',
-    body: 'Dear Veterinary Professional,\n\nThe National Veterinary Conference 2026 is coming to San Diego, July 15-18!\n\nEarly bird registration: $599 (save $200)\nRegular price after April 30: $799\n\nFeatured topics:\n- Advanced Surgical Techniques\n- Emergency & Critical Care\n- Practice Management\n- Veterinary Technology\n\nRegister at petconf2026.com',
-    date: 'Mar 25', time: '11:15 AM', read: true, starred: false, hasAttachment: false,
-    folder: 'inbox', category: 'promotions', labels: ['work'], snoozed: false, thread: [],
-  },
-];
+function parseFrom(raw: string): { name: string; email: string } {
+  const match = raw?.match(/^(.+?)\s*<(.+?)>$/);
+  if (match) return { name: match[1].replace(/"/g, '').trim(), email: match[2] };
+  return { name: raw || 'Unknown', email: raw || '' };
+}
+
+function formatEmailDate(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso || '';
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffDays = Math.floor(diffMs / 86400000);
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7) return d.toLocaleDateString('en-US', { weekday: 'short' });
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function formatEmailTime(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+}
+
+function gmailCategoryFromLabels(labels: string[]): EmailCategory {
+  if (labels?.includes('CATEGORY_SOCIAL')) return 'social';
+  if (labels?.includes('CATEGORY_PROMOTIONS')) return 'promotions';
+  return 'primary';
+}
+
+const GMAIL_SYSTEM_LABELS = new Set([
+  'INBOX', 'UNREAD', 'STARRED', 'SENT', 'DRAFT', 'TRASH', 'SPAM', 'IMPORTANT',
+  'CATEGORY_PERSONAL', 'CATEGORY_SOCIAL', 'CATEGORY_PROMOTIONS', 'CATEGORY_UPDATES', 'CATEGORY_FORUMS',
+]);
+
+function normalizeGmailMessage(msg: GmailMessage): UnifiedEmail {
+  const parsed = parseFrom(msg.from);
+  const dateStr = msg.date || msg.internalDate;
+  return {
+    id: msg.id,
+    threadId: msg.threadId,
+    from: parsed.name,
+    fromEmail: parsed.email,
+    to: msg.to || '',
+    subject: msg.subject || '(no subject)',
+    preview: msg.snippet || '',
+    body: msg.body || '',
+    date: formatEmailDate(dateStr),
+    time: formatEmailTime(dateStr),
+    read: msg.read,
+    starred: msg.starred,
+    hasAttachment: msg.hasAttachment,
+    attachments: msg.attachments || [],
+    folder: msg.labels?.includes('TRASH') ? 'trash' : msg.labels?.includes('SENT') ? 'sent' : 'inbox',
+    category: gmailCategoryFromLabels(msg.labels),
+    labels: (msg.labels || []).filter(l => !GMAIL_SYSTEM_LABELS.has(l)),
+    snoozed: false,
+    thread: [],
+  };
+}
+
+function normalizeOutlookMessage(msg: OutlookMessage): UnifiedEmail {
+  const dateStr = msg.date || msg.internalDate;
+  return {
+    id: msg.id,
+    threadId: msg.threadId,
+    from: msg.fromName || parseFrom(msg.from).name,
+    fromEmail: msg.fromEmail || parseFrom(msg.from).email,
+    to: msg.to || '',
+    subject: msg.subject || '(no subject)',
+    preview: msg.snippet || '',
+    body: msg.body || '',
+    date: formatEmailDate(dateStr),
+    time: formatEmailTime(dateStr),
+    read: msg.read,
+    starred: msg.starred,
+    hasAttachment: msg.hasAttachment,
+    attachments: msg.attachments || [],
+    folder: 'inbox',
+    category: 'primary',
+    labels: msg.labels || [],
+    snoozed: false,
+    thread: [],
+  };
+}
 
 const SIDEBAR_ITEMS = [
   { icon: Inbox, label: 'Inbox', id: 'inbox' },
@@ -227,13 +241,14 @@ const SIDEBAR_ITEMS = [
 
 // ─── Email Inbox View (Enhanced) ─────────────────────────────
 
-function EmailInboxView({ connectedIds, integrations, onManageIntegrations }: {
+function EmailInboxView({ connectedIds, integrations, onManageIntegrations, activeProvider }: {
   connectedIds: Set<string>;
   integrations: Integration[];
   onManageIntegrations: () => void;
+  activeProvider: 'gmail' | 'outlook' | null;
 }) {
-  const [emails, setEmails] = useState<MockEmail[]>(MOCK_EMAILS);
-  const [selectedEmail, setSelectedEmail] = useState<MockEmail | null>(null);
+  const [emails, setEmails] = useState<UnifiedEmail[]>([]);
+  const [selectedEmail, setSelectedEmail] = useState<UnifiedEmail | null>(null);
   const [activeFolder, setActiveFolder] = useState('inbox');
   const [activeCategory, setActiveCategory] = useState<EmailCategory>('primary');
   const [searchQuery, setSearchQuery] = useState('');
@@ -243,12 +258,54 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations }: {
   const [showLabelMenu, setShowLabelMenu] = useState(false);
   const [showMoveMenu, setShowMoveMenu] = useState(false);
   const [expandedThreads, setExpandedThreads] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const [needsReauth, setNeedsReauth] = useState(false);
 
   // Compose state
   const [composeTo, setComposeTo] = useState('');
   const [composeSubject, setComposeSubject] = useState('');
   const composeRef = useRef<HTMLDivElement>(null);
   const savedSelection = useRef<Range | null>(null);
+
+  // ── Fetch real emails from API ��─
+  const fetchEmails = useCallback(async () => {
+    if (!activeProvider) return;
+    setLoading(true);
+    setLoadError(null);
+    setNeedsReauth(false);
+    try {
+      if (activeProvider === 'gmail') {
+        const result = await gmailListEmails({
+          maxResults: 50,
+          query: searchQuery || undefined,
+        });
+        setEmails(result.messages.map(normalizeGmailMessage));
+      } else {
+        const result = await outlookListEmails({
+          top: 50,
+          search: searchQuery || undefined,
+        });
+        setEmails(result.messages.map(normalizeOutlookMessage));
+      }
+    } catch (err) {
+      if (err instanceof EmailAuthError) {
+        setNeedsReauth(true);
+        setLoadError('Your email connection has expired. Please reconnect.');
+      } else if (err instanceof TypeError && err.message === 'Failed to fetch') {
+        setLoadError('Could not reach the email service. Please check that the backend is deployed and try again.');
+      } else {
+        setLoadError(err instanceof Error ? err.message : 'Failed to load emails');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [activeProvider, searchQuery]);
+
+  useEffect(() => {
+    fetchEmails();
+  }, [fetchEmails]);
 
   const saveSelection = () => {
     const sel = window.getSelection();
@@ -318,32 +375,82 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations }: {
     }
   };
 
-  // Actions
-  const toggleRead = useCallback((ids: Set<string>) => {
+  // Actions — call real API then update local state optimistically
+  const toggleRead = useCallback(async (ids: Set<string>) => {
+    for (const id of ids) {
+      const email = emails.find(e => e.id === id);
+      if (!email) continue;
+      try {
+        if (activeProvider === 'gmail') {
+          email.read ? await gmailMarkAsUnread(id) : await gmailMarkAsRead(id);
+        } else if (activeProvider === 'outlook') {
+          email.read ? await outlookMarkAsUnread(id) : await outlookMarkAsRead(id);
+        }
+      } catch (err) {
+        console.error('Failed to toggle read:', err);
+      }
+    }
     setEmails(prev => prev.map(e => ids.has(e.id) ? { ...e, read: !e.read } : e));
     setSelectedIds(new Set());
-  }, []);
+  }, [emails, activeProvider]);
 
-  const toggleStar = useCallback((id: string) => {
+  const toggleStar = useCallback(async (id: string) => {
+    const email = emails.find(e => e.id === id);
+    if (!email) return;
+    // Optimistic update
     setEmails(prev => prev.map(e => e.id === id ? { ...e, starred: !e.starred } : e));
-  }, []);
+    try {
+      if (activeProvider === 'gmail') {
+        email.starred ? await gmailUnstarEmail(id) : await gmailStarEmail(id);
+      } else if (activeProvider === 'outlook') {
+        email.starred ? await outlookUnflagEmail(id) : await outlookFlagEmail(id);
+      }
+    } catch (err) {
+      // Revert on failure
+      setEmails(prev => prev.map(e => e.id === id ? { ...e, starred: !e.starred } : e));
+      console.error('Failed to toggle star:', err);
+    }
+  }, [emails, activeProvider]);
 
   const snoozeEmails = useCallback((ids: Set<string>) => {
+    // Snooze is not supported via API — hide locally for now
     setEmails(prev => prev.map(e => ids.has(e.id) ? { ...e, snoozed: true } : e));
     setSelectedIds(new Set());
   }, []);
 
-  const moveToTrash = useCallback((ids: Set<string>) => {
+  const moveToTrash = useCallback(async (ids: Set<string>) => {
     setEmails(prev => prev.map(e => ids.has(e.id) ? { ...e, folder: 'trash' } : e));
     setSelectedIds(new Set());
     setSelectedEmail(null);
-  }, []);
+    for (const id of ids) {
+      try {
+        if (activeProvider === 'gmail') {
+          await gmailTrashEmail(id);
+        } else if (activeProvider === 'outlook') {
+          await outlookTrashEmail(id);
+        }
+      } catch (err) {
+        console.error('Failed to trash email:', err);
+      }
+    }
+  }, [activeProvider]);
 
-  const archiveEmails = useCallback((ids: Set<string>) => {
+  const archiveEmails = useCallback(async (ids: Set<string>) => {
     setEmails(prev => prev.map(e => ids.has(e.id) ? { ...e, folder: 'archive' } : e));
     setSelectedIds(new Set());
     setSelectedEmail(null);
-  }, []);
+    for (const id of ids) {
+      try {
+        if (activeProvider === 'gmail') {
+          await gmailArchiveEmail(id);
+        } else if (activeProvider === 'outlook') {
+          await outlookArchiveEmail(id);
+        }
+      } catch (err) {
+        console.error('Failed to archive email:', err);
+      }
+    }
+  }, [activeProvider]);
 
   const addLabel = useCallback((ids: Set<string>, label: EmailLabel) => {
     setEmails(prev => prev.map(e => ids.has(e.id) && !e.labels.includes(label) ? { ...e, labels: [...e.labels, label] } : e));
@@ -358,11 +465,35 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations }: {
     });
   };
 
-  const handleSelectEmail = (email: MockEmail) => {
+  const handleSelectEmail = async (email: UnifiedEmail) => {
+    // Show immediately with what we have, then fetch full body
     setSelectedEmail(email);
-    // Mark as read
     if (!email.read) {
       setEmails(prev => prev.map(e => e.id === email.id ? { ...e, read: true } : e));
+      try {
+        if (activeProvider === 'gmail') await gmailMarkAsRead(email.id);
+        else if (activeProvider === 'outlook') await outlookMarkAsRead(email.id);
+      } catch (err) {
+        console.error('Failed to mark as read:', err);
+      }
+    }
+    // Fetch full email body (list only returns metadata/snippet)
+    try {
+      if (activeProvider === 'gmail') {
+        const full = await gmailGetEmail(email.id);
+        const fullEmail = normalizeGmailMessage(full);
+        fullEmail.read = true; // already marked
+        setSelectedEmail(fullEmail);
+        setEmails(prev => prev.map(e => e.id === email.id ? fullEmail : e));
+      } else if (activeProvider === 'outlook') {
+        const full = await outlookGetEmail(email.id);
+        const fullEmail = normalizeOutlookMessage(full);
+        fullEmail.read = true;
+        setSelectedEmail(fullEmail);
+        setEmails(prev => prev.map(e => e.id === email.id ? fullEmail : e));
+      }
+    } catch (err) {
+      console.error('Failed to fetch full email:', err);
     }
   };
 
@@ -512,7 +643,7 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations }: {
                 background: 'transparent', color: 'var(--text-primary)',
               }}
             />
-            {toolbarBtn({ onClick: () => {}, title: 'Refresh', children: <RefreshCw style={{ width: 15, height: 15 }} /> })}
+            {toolbarBtn({ onClick: () => fetchEmails(), title: 'Refresh', children: <RefreshCw style={{ width: 15, height: 15, ...(loading ? { animation: 'spin 0.8s linear infinite' } : {}) }} /> })}
           </div>
 
           {/* Bulk actions toolbar */}
@@ -647,7 +778,34 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations }: {
 
         {/* Email list */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
-          {filteredEmails.map(email => (
+          {/* Loading state */}
+          {loading && emails.length === 0 && (
+            <div style={{ padding: 60, textAlign: 'center' }}>
+              <Loader2 style={{ width: 28, height: 28, color: 'var(--text-secondary)', margin: '0 auto 12px', animation: 'spin 0.8s linear infinite' }} />
+              <p style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-secondary)' }}>Loading emails...</p>
+            </div>
+          )}
+
+          {/* Error state */}
+          {loadError && !loading && (
+            <div style={{ padding: 40, textAlign: 'center' }}>
+              <AlertTriangle style={{ width: 28, height: 28, color: '#EF4444', margin: '0 auto 12px' }} />
+              <p style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 4 }}>
+                {needsReauth ? 'Connection Expired' : 'Failed to Load Emails'}
+              </p>
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16, maxWidth: 360, margin: '0 auto 16px' }}>{loadError}</p>
+              <Button
+                onClick={needsReauth ? onManageIntegrations : () => fetchEmails()}
+                variant="outline"
+                style={{ fontSize: 13, borderRadius: 8 }}
+              >
+                {needsReauth ? 'Reconnect' : 'Try Again'}
+              </Button>
+            </div>
+          )}
+
+          {/* Email list */}
+          {!loading && !loadError && filteredEmails.map(email => (
             <div
               key={email.id}
               style={{
@@ -735,7 +893,7 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations }: {
               </button>
             </div>
           ))}
-          {filteredEmails.length === 0 && (
+          {!loading && !loadError && filteredEmails.length === 0 && (
             <div style={{ padding: 60, textAlign: 'center' }}>
               <Mail style={{ width: 36, height: 36, color: 'var(--text-secondary)', margin: '0 auto 12px' }} />
               <p style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-secondary)' }}>No emails in this category</p>
@@ -878,32 +1036,37 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations }: {
                 </button>
               </div>
 
-              <div style={{ fontSize: 14, color: 'var(--text-primary)', lineHeight: 1.8, whiteSpace: 'pre-line' }}>
-                {selectedEmail.body}
-              </div>
+              {selectedEmail.body && selectedEmail.body.includes('<') ? (
+                <div
+                  style={{ fontSize: 14, color: 'var(--text-primary)', lineHeight: 1.8 }}
+                  dangerouslySetInnerHTML={{ __html: selectedEmail.body }}
+                />
+              ) : (
+                <div style={{ fontSize: 14, color: 'var(--text-primary)', lineHeight: 1.8, whiteSpace: 'pre-line' }}>
+                  {selectedEmail.body}
+                </div>
+              )}
 
-              {selectedEmail.hasAttachment && (
-                <div style={{
-                  marginTop: 20, padding: '12px 16px',
-                  border: '1px solid var(--border-color)', borderRadius: 10,
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  background: 'var(--surface-elevated)',
-                }}>
-                  <Paperclip style={{ width: 16, height: 16, color: 'var(--text-secondary)' }} />
-                  <div style={{ flex: 1 }}>
-                    <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)' }}>
-                      {selectedEmail.id === '3' ? 'cooper_blood_panel.pdf' : selectedEmail.id === '5' ? 'VL-8834_report.pdf' : selectedEmail.id === '7' ? 'policy_renewal_CI-220145.pdf' : 'attachment.pdf'}
-                    </p>
-                    <p style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-                      {selectedEmail.id === '3' ? '1.2 MB' : selectedEmail.id === '5' ? '890 KB' : selectedEmail.id === '7' ? '2.4 MB' : '245 KB'}
-                    </p>
-                  </div>
-                  <button style={{
-                    fontSize: 12, fontWeight: 600, color: 'var(--brand-green-text)',
-                    background: 'none', border: 'none', cursor: 'pointer',
-                  }}>
-                    Download
-                  </button>
+              {selectedEmail.hasAttachment && selectedEmail.attachments && selectedEmail.attachments.length > 0 && (
+                <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {selectedEmail.attachments.map((att: any, idx: number) => (
+                    <div key={att.id || idx} style={{
+                      padding: '12px 16px',
+                      border: '1px solid var(--border-color)', borderRadius: 10,
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      background: 'var(--surface-elevated)',
+                    }}>
+                      <Paperclip style={{ width: 16, height: 16, color: 'var(--text-secondary)' }} />
+                      <div style={{ flex: 1 }}>
+                        <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)' }}>
+                          {att.filename || 'attachment'}
+                        </p>
+                        <p style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                          {att.size ? (att.size > 1024 * 1024 ? `${(att.size / (1024 * 1024)).toFixed(1)} MB` : `${Math.round(att.size / 1024)} KB`) : ''}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -1063,21 +1226,37 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations }: {
             display: 'flex', alignItems: 'center', gap: 8,
           }}>
             <Button
-              onClick={() => {
-                setShowCompose(false);
-                setComposeExpanded(false);
-                setComposeTo('');
-                setComposeSubject('');
-                if (composeRef.current) composeRef.current.innerHTML = '';
+              disabled={sending || !composeTo}
+              onClick={async () => {
+                if (!composeTo || !activeProvider) return;
+                setSending(true);
+                try {
+                  const bodyHtml = composeRef.current?.innerHTML || '';
+                  if (activeProvider === 'gmail') {
+                    await gmailSendEmail({ to: composeTo, subject: composeSubject, body: bodyHtml });
+                  } else {
+                    await outlookSendEmail({ to: composeTo, subject: composeSubject, body: bodyHtml, bodyType: 'HTML' });
+                  }
+                  setShowCompose(false);
+                  setComposeExpanded(false);
+                  setComposeTo('');
+                  setComposeSubject('');
+                  if (composeRef.current) composeRef.current.innerHTML = '';
+                } catch (err) {
+                  console.error('Failed to send email:', err);
+                  alert(err instanceof Error ? err.message : 'Failed to send email');
+                } finally {
+                  setSending(false);
+                }
               }}
               style={{
                 padding: '8px 20px', fontSize: 13, fontWeight: 600,
                 borderRadius: 8, background: 'var(--brand-green-text)', color: 'var(--on-brand-green)',
-                gap: 6,
+                gap: 6, opacity: sending || !composeTo ? 0.6 : 1,
               }}
             >
-              <Send style={{ width: 14, height: 14 }} />
-              Send
+              {sending ? <Loader2 style={{ width: 14, height: 14, animation: 'spin 0.8s linear infinite' }} /> : <Send style={{ width: 14, height: 14 }} />}
+              {sending ? 'Sending...' : 'Send'}
             </Button>
             <div style={{ flex: 1 }} />
             <button
@@ -1166,17 +1345,7 @@ const OAUTH_ERROR_MESSAGES: Record<string, { title: string; message: string; sev
   },
   user_not_found: {
     title: 'Account Error',
-    message: 'Your user profile could not be found. Please contact your administrator.',
-    severity: 'error',
-  },
-  user_not_found: {
-    title: 'Account Error',
     message: 'Your user profile could not be found. Please log out and log back in.',
-    severity: 'error',
-  },
-  db_error: {
-    title: 'Storage Error',
-    message: 'Failed to save the email integration. Please try again or contact support.',
     severity: 'error',
   },
   server_error: {
@@ -1191,6 +1360,8 @@ export default function AdminCommunicationsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [connectedIds, setConnectedIds] = useState<Set<string>>(new Set());
   const [connecting, setConnecting] = useState<string | null>(null);
+  const [activeProvider, setActiveProvider] = useState<'gmail' | 'outlook' | null>(null);
+  const [statusLoading, setStatusLoading] = useState(true);
 
   // ── OAuth callback result (read from URL params set by callback redirect) ──
   const [oauthError, setOauthError] = useState<{ title: string; message: string; severity: 'error' | 'warning' } | null>(null);
@@ -1208,13 +1379,33 @@ export default function AdminCommunicationsPage() {
         message: `OAuth error: ${error}. Please try again or contact your administrator.`,
         severity: 'error',
       });
-      // Clean URL params
       setSearchParams({}, { replace: true });
     } else if (connected && email) {
       setOauthSuccess({ provider: connected, email });
       setConnectedIds(prev => new Set([...prev, connected]));
+      setActiveProvider(connected as 'gmail' | 'outlook');
       setSearchParams({}, { replace: true });
     }
+
+    // Load real integration status from Supabase
+    getIntegrationStatus().then((integrations) => {
+      const active = new Set<string>();
+      let provider: 'gmail' | 'outlook' | null = null;
+      for (const i of integrations) {
+        if (i.status === 'active') {
+          active.add(i.provider);
+          if (!provider) provider = i.provider as 'gmail' | 'outlook';
+        }
+      }
+      if (active.size > 0) {
+        setConnectedIds(active);
+        setActiveProvider(provider);
+      }
+    }).catch((err) => {
+      console.error('Failed to load integration status:', err);
+    }).finally(() => {
+      setStatusLoading(false);
+    });
   }, []);
 
   const integrations: Integration[] = [
@@ -1249,21 +1440,69 @@ export default function AdminCommunicationsPage() {
     setDialogOpen(false);
   };
 
-  const handleAuthorize = () => {
+  const handleAuthorize = async () => {
+    if (!setupId) return;
     setSetupAuthorizing(true);
-    setTimeout(() => {
+    try {
+      const result = setupId === 'gmail'
+        ? await initiateGmailAuth()
+        : await initiateOutlookAuth();
+
+      if (result.auth_url) {
+        // Redirect the browser to Google/Microsoft consent screen
+        window.location.href = result.auth_url;
+      } else if (result.error) {
+        setOauthError({
+          title: 'Connection Failed',
+          message: result.error,
+          severity: 'error',
+        });
+        setSetupAuthorizing(false);
+        setSetupId(null);
+      } else if (result.setup_instructions) {
+        setOauthError({
+          title: 'Not Configured',
+          message: `${setupId === 'gmail' ? 'Gmail' : 'Outlook'} integration is not configured. Contact your administrator.`,
+          severity: 'error',
+        });
+        setSetupAuthorizing(false);
+        setSetupId(null);
+      }
+    } catch (err) {
+      const isNetworkError = err instanceof TypeError && err.message === 'Failed to fetch';
+      setOauthError({
+        title: isNetworkError ? 'Service Unavailable' : 'Connection Failed',
+        message: isNetworkError
+          ? 'Could not reach the email service. The backend edge functions may not be deployed yet. Please ensure Supabase edge functions are deployed and try again.'
+          : (err instanceof Error ? err.message : 'Failed to start authorization'),
+        severity: 'error',
+      });
       setSetupAuthorizing(false);
-      setSetupStep(2);
-      setConnectedIds(prev => new Set([...prev, setupId!]));
-    }, 2200);
+      setSetupId(null);
+    }
   };
 
-  const handleDisconnect = (id: string) => {
-    setConnectedIds(prev => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
+  const handleDisconnect = async (id: string) => {
+    try {
+      if (id === 'outlook') {
+        await disconnectOutlook();
+      } else {
+        await disconnectIntegration(id);
+      }
+      setConnectedIds(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    } catch (err) {
+      console.error('Failed to disconnect:', err);
+      // Still remove from UI — the user intends to disconnect
+      setConnectedIds(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
   };
 
   const hasAnyConnection = connectedIds.size > 0;
@@ -1387,11 +1626,27 @@ export default function AdminCommunicationsPage() {
         )}
       </div>
 
-      {hasAnyConnection ? (
+      {statusLoading ? (
+        <div
+          className="flex flex-col items-center justify-center"
+          style={{
+            background: 'var(--surface-white)',
+            border: '1px solid var(--border-color)',
+            borderRadius: 16,
+            padding: '80px 40px',
+            minHeight: 480,
+          }}
+        >
+          <div style={{ width: 32, height: 32, border: '3px solid var(--border-color)', borderTopColor: 'var(--brand-green-text)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+          <p style={{ marginTop: 16, fontSize: 14, color: 'var(--text-secondary)' }}>Loading email...</p>
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      ) : hasAnyConnection ? (
         <EmailInboxView
           connectedIds={connectedIds}
           integrations={integrations}
           onManageIntegrations={() => setDialogOpen(true)}
+          activeProvider={activeProvider}
         />
       ) : (
         <div
