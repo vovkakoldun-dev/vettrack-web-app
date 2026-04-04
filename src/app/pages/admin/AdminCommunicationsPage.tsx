@@ -276,10 +276,24 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
     setLoadError(null);
     setNeedsReauth(false);
     try {
+      // Map active folder to Gmail label and/or search query
+      let labelIds: string | undefined;
+      let query = searchQuery || '';
+
+      switch (activeFolder) {
+        case 'inbox': labelIds = 'INBOX'; break;
+        case 'starred': labelIds = 'STARRED'; break;
+        case 'sent': labelIds = 'SENT'; break;
+        case 'trash': labelIds = 'TRASH'; break;
+        case 'snoozed': labelIds = 'INBOX'; query = query ? `is:snoozed ${query}` : 'is:snoozed'; break;
+        default: labelIds = 'INBOX';
+      }
+
       if (activeProvider === 'gmail') {
         const result = await gmailListEmails({
+          labelIds,
           maxResults: 50,
-          query: searchQuery || undefined,
+          query: query || undefined,
         });
         setEmails(result.messages.map(normalizeGmailMessage));
       } else {
@@ -301,7 +315,7 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
     } finally {
       setLoading(false);
     }
-  }, [activeProvider, searchQuery]);
+  }, [activeProvider, activeFolder, searchQuery]);
 
   useEffect(() => {
     fetchEmails();
@@ -343,9 +357,15 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
   const connectedProvider = integrations.find(i => connectedIds.has(i.id));
 
   const filteredEmails = emails.filter(e => {
-    if (activeFolder === 'starred') return e.starred;
-    if (activeFolder === 'snoozed') return e.snoozed;
-    if (activeFolder !== 'inbox') return false;
+    // For non-inbox folders, emails are already fetched with the right labelIds — just show all
+    if (activeFolder === 'starred' || activeFolder === 'sent' || activeFolder === 'trash' || activeFolder === 'snoozed') {
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        return e.from.toLowerCase().includes(q) || e.subject.toLowerCase().includes(q) || e.preview.toLowerCase().includes(q);
+      }
+      return true;
+    }
+    // Inbox: filter by category
     if (e.category !== activeCategory) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
@@ -719,8 +739,15 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
                     <button
                       key={folder}
                       onClick={() => {
-                        setEmails(prev => prev.map(e => selectedIds.has(e.id) ? { ...e, folder } : e));
-                        setSelectedIds(new Set());
+                        if (folder === 'trash') {
+                          moveToTrash(selectedIds);
+                        } else if (folder === 'archive') {
+                          archiveEmails(selectedIds);
+                        } else {
+                          // Move back to inbox — just update locally (untrash not yet wired)
+                          setEmails(prev => prev.map(e => selectedIds.has(e.id) ? { ...e, folder } : e));
+                          setSelectedIds(new Set());
+                        }
                         setShowMoveMenu(false);
                       }}
                       style={{
@@ -896,8 +923,16 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
           {!loading && !loadError && filteredEmails.length === 0 && (
             <div style={{ padding: 60, textAlign: 'center' }}>
               <Mail style={{ width: 36, height: 36, color: 'var(--text-secondary)', margin: '0 auto 12px' }} />
-              <p style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-secondary)' }}>No emails in this category</p>
-              <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>Messages will appear here when they arrive</p>
+              <p style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-secondary)' }}>
+                {activeFolder === 'inbox' ? 'No emails in this category' :
+                 activeFolder === 'starred' ? 'No starred emails' :
+                 activeFolder === 'sent' ? 'No sent emails' :
+                 activeFolder === 'trash' ? 'Trash is empty' :
+                 'No emails found'}
+              </p>
+              <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>
+                {activeFolder === 'trash' ? 'Deleted emails will appear here' : 'Messages will appear here when they arrive'}
+              </p>
             </div>
           )}
         </div>
@@ -921,8 +956,16 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
 
             <div style={{ width: 1, height: 18, background: 'var(--border-color)', margin: '0 4px' }} />
 
-            {toolbarBtn({ onClick: () => {}, title: 'Reply', children: <Reply style={{ width: 16, height: 16 }} /> })}
-            {toolbarBtn({ onClick: () => {}, title: 'Forward', children: <Forward style={{ width: 16, height: 16 }} /> })}
+            {toolbarBtn({ onClick: () => {
+              setComposeTo(selectedEmail.fromEmail);
+              setComposeSubject(selectedEmail.subject.startsWith('Re:') ? selectedEmail.subject : `Re: ${selectedEmail.subject}`);
+              setShowCompose(true);
+            }, title: 'Reply', children: <Reply style={{ width: 16, height: 16 }} /> })}
+            {toolbarBtn({ onClick: () => {
+              setComposeTo('');
+              setComposeSubject(selectedEmail.subject.startsWith('Fwd:') ? selectedEmail.subject : `Fwd: ${selectedEmail.subject}`);
+              setShowCompose(true);
+            }, title: 'Forward', children: <Forward style={{ width: 16, height: 16 }} /> })}
             {toolbarBtn({ onClick: () => {}, title: 'More', children: <MoreHorizontal style={{ width: 16, height: 16 }} /> })}
           </div>
 
@@ -1074,7 +1117,11 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
             {/* Quick reply buttons */}
             <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
               <button
-                onClick={() => setShowCompose(true)}
+                onClick={() => {
+                  setComposeTo(selectedEmail.fromEmail);
+                  setComposeSubject(selectedEmail.subject.startsWith('Re:') ? selectedEmail.subject : `Re: ${selectedEmail.subject}`);
+                  setShowCompose(true);
+                }}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6,
                   padding: '8px 16px', border: '1px solid var(--border-color)',
@@ -1088,7 +1135,11 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
                 Reply
               </button>
               <button
-                onClick={() => setShowCompose(true)}
+                onClick={() => {
+                  setComposeTo('');
+                  setComposeSubject(selectedEmail.subject.startsWith('Fwd:') ? selectedEmail.subject : `Fwd: ${selectedEmail.subject}`);
+                  setShowCompose(true);
+                }}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6,
                   padding: '8px 16px', border: '1px solid var(--border-color)',
