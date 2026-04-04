@@ -241,11 +241,12 @@ const SIDEBAR_ITEMS = [
 
 // ─── Email Inbox View (Enhanced) ─────────────────────────────
 
-function EmailInboxView({ connectedIds, integrations, onManageIntegrations, activeProvider }: {
+function EmailInboxView({ connectedIds, integrations, onManageIntegrations, activeProvider, connectedEmail }: {
   connectedIds: Set<string>;
   integrations: Integration[];
   onManageIntegrations: () => void;
   activeProvider: 'gmail' | 'outlook' | null;
+  connectedEmail: string | null;
 }) {
   const [emails, setEmails] = useState<UnifiedEmail[]>([]);
   const [selectedEmail, setSelectedEmail] = useState<UnifiedEmail | null>(null);
@@ -633,9 +634,11 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
             {connectedProvider && <div style={{ width: 24, height: 24, flexShrink: 0, overflow: 'hidden', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ transform: 'scale(0.6)', transformOrigin: 'center center' }}>{connectedProvider.icon}</div></div>}
             <div style={{ flex: 1, textAlign: 'left', minWidth: 0 }}>
               <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {connectedProvider?.name || 'Email'}
+                {connectedEmail || connectedProvider?.name || 'Email'}
               </p>
-              <p style={{ fontSize: 10, color: 'var(--brand-green-text)' }}>Connected</p>
+              <p style={{ fontSize: 10, color: 'var(--brand-green-text)' }}>
+                {connectedProvider?.name || 'Email'} &middot; Connected
+              </p>
             </div>
             <Settings style={{ width: 14, height: 14, color: 'var(--text-secondary)', flexShrink: 0 }} />
           </button>
@@ -1063,7 +1066,7 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
                     </span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                    <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>to me</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>to {connectedEmail || 'me'}</span>
                     <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>|</span>
                     <Clock style={{ width: 11, height: 11, color: 'var(--text-secondary)' }} />
                     <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
@@ -1412,6 +1415,7 @@ export default function AdminCommunicationsPage() {
   const [connectedIds, setConnectedIds] = useState<Set<string>>(new Set());
   const [connecting, setConnecting] = useState<string | null>(null);
   const [activeProvider, setActiveProvider] = useState<'gmail' | 'outlook' | null>(null);
+  const [connectedEmail, setConnectedEmail] = useState<string | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
 
   // ── OAuth callback result (read from URL params set by callback redirect) ──
@@ -1435,6 +1439,7 @@ export default function AdminCommunicationsPage() {
       setOauthSuccess({ provider: connected, email });
       setConnectedIds(prev => new Set([...prev, connected]));
       setActiveProvider(connected as 'gmail' | 'outlook');
+      setConnectedEmail(email);
       setSearchParams({}, { replace: true });
     }
 
@@ -1442,15 +1447,20 @@ export default function AdminCommunicationsPage() {
     getIntegrationStatus().then((integrations) => {
       const active = new Set<string>();
       let provider: 'gmail' | 'outlook' | null = null;
+      let email: string | null = null;
       for (const i of integrations) {
         if (i.status === 'active') {
           active.add(i.provider);
-          if (!provider) provider = i.provider as 'gmail' | 'outlook';
+          if (!provider) {
+            provider = i.provider as 'gmail' | 'outlook';
+            email = i.email_address;
+          }
         }
       }
       if (active.size > 0) {
         setConnectedIds(active);
         setActiveProvider(provider);
+        setConnectedEmail(email);
       }
     }).catch((err) => {
       console.error('Failed to load integration status:', err);
@@ -1698,6 +1708,7 @@ export default function AdminCommunicationsPage() {
           integrations={integrations}
           onManageIntegrations={() => setDialogOpen(true)}
           activeProvider={activeProvider}
+          connectedEmail={connectedEmail}
         />
       ) : (
         <div
