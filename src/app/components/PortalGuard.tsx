@@ -33,14 +33,14 @@ export function PortalGuard({ children, portal }: PortalGuardProps) {
   const { identity } = useTenant();
   const location = useLocation();
   const navigate = useNavigate();
-  const [validated, setValidated] = useState(false);
   const lastPortalRef = useRef<PortalId | null>(null);
+
+  // Compute access synchronously — don't rely only on async navigate
+  const role = identity?.role || '';
+  const { allowed, userPortal, urlPortal, redirectTo } = validatePortalAccess(role, location.pathname);
 
   useEffect(() => {
     if (!user || !identity) return;
-
-    const role = identity.role;
-    const { allowed, userPortal, urlPortal, redirectTo } = validatePortalAccess(role, location.pathname);
 
     if (!allowed) {
       // Log the unauthorized access attempt
@@ -58,11 +58,13 @@ export function PortalGuard({ children, portal }: PortalGuardProps) {
       lastPortalRef.current = portal;
       setSessionPortal(user.id, portal);
     }
+  }, [user, identity, location.pathname, portal, navigate, allowed, redirectTo, role, userPortal, urlPortal]);
 
-    setValidated(true);
-  }, [user, identity, location.pathname, portal, navigate]);
+  // Block rendering until identity is loaded
+  if (!user || !identity) return null;
 
-  if (!validated) return null;
+  // Block rendering if access is denied (redirect will happen via effect)
+  if (!allowed) return null;
 
   return <>{children}</>;
 }

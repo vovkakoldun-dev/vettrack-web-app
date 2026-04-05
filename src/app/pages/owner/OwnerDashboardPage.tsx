@@ -8,23 +8,13 @@ import { Avatar, AvatarImage, AvatarFallback } from '../../components/ui/avatar'
 import { Badge } from '../../components/ui/badge';
 import { usePets } from '../../hooks/usePets';
 import { useAppointments } from '../../hooks/useAppointments';
+import { useOwnerClient } from '../../hooks/useOwnerClient';
 
 // ─── Brand ────────────────────────────────────────────────────
 
 const BRAND = '#2D6A4F';
 // For text/icon use — adapts to bright green in dark mode
 const BRAND_TEXT = 'var(--brand-green-text)';
-
-// ─── Mock Data ───────────────────────────────────────────────
-
-const mockOwner = {
-  name: 'John Smith',
-  email: 'john.smith@email.com',
-  phone: '(555) 123-4567',
-  address: '742 Evergreen Terrace, Springfield, IL 62704',
-  emergencyContact: 'Jane Smith',
-  emergencyPhone: '(555) 123-4568',
-};
 
 const mockInsurance = {
   provider: 'PetPlan',
@@ -192,10 +182,17 @@ const RECOMMENDED_SERVICES: RecommendedService[] = []
 export default function OwnerDashboardPage() {
   const navigate = useNavigate();
   const [_selectedPet] = useState(0);
-  const { pets: supaPets } = usePets();
+  const { pets: allPets } = usePets();
   const { appointments: supaAppts } = useAppointments();
+  const { client: ownerClient, clientId } = useOwnerClient();
 
-  const mockPets: Pet[] = useMemo(() =>
+  // Filter pets to only show the logged-in owner's pets
+  const supaPets = useMemo(() =>
+    clientId ? allPets.filter(p => p.client_id === clientId) : allPets,
+    [allPets, clientId],
+  );
+
+  const mockPets: (Pet & { supaId: string })[] = useMemo(() =>
     supaPets.map((p, idx) => {
       const age = p.date_of_birth
         ? `${Math.floor((Date.now() - new Date(p.date_of_birth).getTime()) / (365.25 * 24 * 60 * 60 * 1000))} years`
@@ -203,6 +200,7 @@ export default function OwnerDashboardPage() {
       // Find upcoming appointments for this pet
       const petAppts = supaAppts
         .filter(a => a.pet_id === p.id && new Date(a.scheduled_at) >= new Date())
+        .sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime())
         .map((a, i) => {
           const dt = new Date(a.scheduled_at);
           return {
@@ -212,14 +210,28 @@ export default function OwnerDashboardPage() {
             reason: a.reason ?? a.services?.name ?? 'Checkup',
           };
         });
+      // Past appointments for visits
+      const pastAppts = supaAppts
+        .filter(a => a.pet_id === p.id && new Date(a.scheduled_at) < new Date())
+        .sort((a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime())
+        .map((a, i) => ({
+          id: i + 1,
+          date: new Date(a.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }),
+          reason: a.reason ?? a.services?.name ?? 'Visit',
+          vet: a.staff?.profiles ? `Dr. ${a.staff.profiles.last_name}` : '—',
+          summary: a.notes ?? 'Visit completed.',
+          notes: a.reason ?? '',
+          status: 'Completed' as VisitStatus,
+        }));
       return {
         id: idx + 1,
+        supaId: p.id,
         name: p.name,
         species: p.species,
         breed: p.breed ?? '—',
         dob: p.date_of_birth ?? '—',
         age,
-        sex: '—',
+        sex: p.sex ?? '—',
         weight: p.weight_kg ? `${p.weight_kg} kg` : '—',
         microchip: p.microchip_no ?? '—',
         color: '—',
@@ -228,9 +240,9 @@ export default function OwnerDashboardPage() {
         conditions: [],
         treatments: [],
         allergies: [],
-        visits: [],
+        visits: pastAppts,
         vetNotes: '',
-        clientNotes: '',
+        clientNotes: pastAppts.length > 0 ? pastAppts[0].summary : '',
         upcomingAppointments: petAppts,
         vaccinations: [],
       };
@@ -262,10 +274,12 @@ export default function OwnerDashboardPage() {
           <div className="p-6 md:p-8" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
             <div>
               <h1 style={{ fontSize: '28px', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '6px' }}>
-                Welcome back, John! 👋
+                Welcome back, {ownerClient.firstName || 'there'}! 👋
               </h1>
               <p style={{ fontSize: '15px', color: 'var(--text-secondary)' }}>
-                Here's an overview of Max & Hugo
+                {supaPets.length > 0
+                  ? `Here's an overview of ${supaPets.map(p => p.name).join(' & ')}`
+                  : 'Here\'s your pet overview'}
               </p>
             </div>
             <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
@@ -310,29 +324,35 @@ export default function OwnerDashboardPage() {
             icon={Calendar}
             color={BRAND}
             label="Next Appointment"
-            value="Mar 15 · 2:30 PM"
-            sub="Dental Cleaning – Max"
+            value={(() => {
+              const next = mockPets.flatMap(p => p.upcomingAppointments).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0];
+              return next ? `${next.date.replace(/,\s*\d{4}$/, '')} · ${next.time}` : 'None scheduled';
+            })()}
+            sub={(() => {
+              const next = mockPets.flatMap(p => p.upcomingAppointments)[0];
+              return next ? next.reason : 'Book an appointment';
+            })()}
           />
           <StatCard
             icon={Clock}
             color="#3B82F6"
             label="Last Visit"
-            value="Mar 10, 2026"
-            sub="Annual Checkup"
+            value={allVisits.length > 0 ? allVisits[0].date : 'No visits yet'}
+            sub={allVisits.length > 0 ? allVisits[0].reason : '—'}
           />
           <StatCard
             icon={AlertCircle}
             color="#F59E0B"
             label="Active Conditions"
             value={String(allConditionsCount)}
-            sub="Across both pets"
+            sub={allConditionsCount > 0 ? `Across ${mockPets.length > 1 ? 'all pets' : 'your pet'}` : 'None recorded'}
           />
           <StatCard
             icon={Syringe}
             color="#EF4444"
             label="Vaccines Due"
             value={String(allVaxDueSoon.length)}
-            sub="Bordetella, FeLV"
+            sub={allVaxDueSoon.length > 0 ? allVaxDueSoon.map(v => v.vax.name).join(', ') : 'All up to date'}
           />
         </div>
 
@@ -432,7 +452,7 @@ export default function OwnerDashboardPage() {
 
                       {/* View full record */}
                       <button
-                        onClick={() => navigate(`/owner/pets/${pet.id}`)}
+                        onClick={() => navigate(`/owner/pets/${pet.supaId}`)}
                         style={{
                           width: '100%', padding: '8px', borderRadius: '8px',
                           border: `1.5px solid ${PET_COLORS[idx]}`,
@@ -505,34 +525,38 @@ export default function OwnerDashboardPage() {
             </Card>
 
             {/* Message from Vet */}
-            <Card>
-              <CardHeader title="Message from Dr. Chen" />
-              <div style={{ padding: '0 20px 20px' }}>
-                <div style={{
-                  padding: '16px', borderRadius: '10px',
-                  backgroundColor: `${BRAND}08`,
-                  border: `1px solid ${BRAND}30`,
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-                    <div style={{
-                      width: '32px', height: '32px', borderRadius: '50%',
-                      background: 'linear-gradient(135deg, #2D6A4F, #52B788)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      flexShrink: 0,
-                    }}>
-                      <span style={{ fontSize: '12px', fontWeight: 700, color: '#fff' }}>DC</span>
+            {allVisits.length > 0 && (
+              <Card>
+                <CardHeader title={`Message from ${allVisits[0].vet}`} />
+                <div style={{ padding: '0 20px 20px' }}>
+                  <div style={{
+                    padding: '16px', borderRadius: '10px',
+                    backgroundColor: `${BRAND}08`,
+                    border: `1px solid ${BRAND}30`,
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                      <div style={{
+                        width: '32px', height: '32px', borderRadius: '50%',
+                        background: 'linear-gradient(135deg, #2D6A4F, #52B788)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        flexShrink: 0,
+                      }}>
+                        <span style={{ fontSize: '12px', fontWeight: 700, color: '#fff' }}>
+                          {allVisits[0].vet.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
+                        </span>
+                      </div>
+                      <div>
+                        <p style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{allVisits[0].vet}</p>
+                        <p style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{allVisits[0].date}</p>
+                      </div>
                     </div>
-                    <div>
-                      <p style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>Dr. Chen</p>
-                      <p style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Mar 10, 2026</p>
-                    </div>
+                    <p style={{ fontSize: '14px', color: 'var(--text-primary)', lineHeight: 1.6 }}>
+                      {allVisits[0].summary || 'No notes from this visit.'}
+                    </p>
                   </div>
-                  <p style={{ fontSize: '14px', color: 'var(--text-primary)', lineHeight: 1.6 }}>
-                    {mockPets[0]?.clientNotes ?? ''}
-                  </p>
                 </div>
-              </div>
-            </Card>
+              </Card>
+            )}
           </div>
 
           {/* ── RIGHT COLUMN ── */}
@@ -666,7 +690,7 @@ export default function OwnerDashboardPage() {
                       </div>
                       <div>
                         <p style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                          {mockOwner.name.split(' ')[0]}'s Pets
+                          {ownerClient.firstName || 'My'}'s Pets
                         </p>
                         <p style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Pet Insurance</p>
                       </div>

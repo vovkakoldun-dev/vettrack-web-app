@@ -60,12 +60,22 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   // ── Resolve identity from the database (not from frontend state) ──
   const resolveIdentity = useCallback(async (userId: string) => {
     try {
-      // Fetch from profiles (the identity source of truth, per multi-tenant rules)
-      const { data: profile, error: profileErr } = await supabase
-        .from('profiles')
-        .select('organization_id, role')
-        .eq('id', userId)
-        .single();
+      // Fetch profile + staff in parallel (profile is source of truth, staff has clinic_id)
+      const [profileResult, staffResult] = await Promise.all([
+        supabase
+          .from('profiles')
+          .select('organization_id, role')
+          .eq('id', userId)
+          .single(),
+        supabase
+          .from('staff')
+          .select('clinic_id')
+          .eq('id', userId)
+          .single(),
+      ]);
+
+      const { data: profile, error: profileErr } = profileResult;
+      const { data: staff } = staffResult;
 
       if (profileErr || !profile?.organization_id) {
         const msg = 'Tenant identity resolution failed: no profile found';
@@ -75,12 +85,25 @@ export function TenantProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      // Fetch clinic_id from staff table
-      const { data: staff } = await supabase
-        .from('staff')
-        .select('clinic_id')
-        .eq('id', userId)
-        .single();
+      // Validate organization exists (needs org_id from profile, so runs after)
+      const { count } = await supabase
+        .from('organizations')
+        .select('id', { count: 'exact', head: true })
+        .eq('id', profile.organization_id);
+
+      if (!count || count === 0) {
+        const ident: TenantIdentity = {
+          organizationId: profile.organization_id,
+          clinicId: staff?.clinic_id || '',
+          userId,
+          role: profile.role || '',
+        };
+        const msg = 'Invalid organization_id in profile';
+        setError(msg);
+        logSecurityEvent(ident, 'INVALID_ORG', `org_id ${ident.organizationId} does not exist`);
+        setLoading(false);
+        return;
+      }
 
       const ident: TenantIdentity = {
         organizationId: profile.organization_id,
@@ -88,20 +111,6 @@ export function TenantProvider({ children }: { children: ReactNode }) {
         userId,
         role: profile.role || '',
       };
-
-      // Validate organization exists
-      const { count } = await supabase
-        .from('organizations')
-        .select('id', { count: 'exact', head: true })
-        .eq('id', ident.organizationId);
-
-      if (!count || count === 0) {
-        const msg = 'Invalid organization_id in profile';
-        setError(msg);
-        logSecurityEvent(ident, 'INVALID_ORG', `org_id ${ident.organizationId} does not exist`);
-        setLoading(false);
-        return;
-      }
 
       setIdentity(ident);
       setTenantDb(createTenantClient(ident));

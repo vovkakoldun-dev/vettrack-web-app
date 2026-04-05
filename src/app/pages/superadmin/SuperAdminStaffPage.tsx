@@ -3,7 +3,7 @@ import {
   Search, Plus, X, Edit2, Mail, Phone, MapPin, Calendar,
   Briefcase, Award, Shield, ChevronDown, ChevronRight,
   MoreHorizontal, Download, UserCheck, UserX, MessageSquare,
-  Star, Clock, Building2, Users, UserPlus, AlertCircle, Loader2,
+  Star, Clock, Building2, Users, UserPlus, AlertCircle, Loader2, TreePalm, ThermometerSun,
 } from 'lucide-react';
 import { Input } from '../../components/ui/input';
 import { Button } from '../../components/ui/button';
@@ -50,6 +50,8 @@ interface StaffMember {
   notes?: string;
   appointments?: number;
   rating?: number;
+  ptoAllowance: number;
+  sickAllowance: number;
 }
 
 // ─── Config ───────────────────────────────────────────────────
@@ -213,6 +215,28 @@ function StaffDetailDrawer({
   const statusCfg = STATUS_CONFIG[staff.status];
   const isActive  = staff.status === 'Active' || staff.status === 'Probation';
 
+  // Fetch PTO/sick usage from staff_time_blocks
+  const [ptoUsed, setPtoUsed] = useState(0);
+  const [sickUsed, setSickUsed] = useState(0);
+  const [ptoPending, setPtoPending] = useState(0);
+  const [sickPending, setSickPending] = useState(0);
+  useEffect(() => {
+    (async () => {
+      const { organizationId } = await getOrgContext();
+      const { data } = await supabase
+        .from('staff_time_blocks')
+        .select('type, status')
+        .eq('organization_id', organizationId)
+        .eq('staff_id', staff.id);
+      if (data) {
+        setPtoUsed(data.filter((b: any) => b.type === 'PTO' && (b.status === 'Approved' || b.status === 'Confirmed')).length);
+        setSickUsed(data.filter((b: any) => b.type === 'Sick Day' && (b.status === 'Approved' || b.status === 'Confirmed')).length);
+        setPtoPending(data.filter((b: any) => b.type === 'PTO' && b.status === 'Pending').length);
+        setSickPending(data.filter((b: any) => b.type === 'Sick Day' && b.status === 'Pending').length);
+      }
+    })();
+  }, [staff.id]);
+
   return (
     <>
       {/* Overlay */}
@@ -366,6 +390,52 @@ function StaffDetailDrawer({
             <p style={{ fontSize: 13, color: 'var(--text-primary)', margin: 0 }}>{staff.emergencyContact}</p>
           </div>
 
+          {/* Time Off */}
+          <div style={{
+            backgroundColor: 'var(--surface-elevated)', borderRadius: 12, padding: '16px',
+            marginBottom: 16,
+          }}>
+            <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-secondary)', margin: '0 0 12px' }}>Time Off</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {/* PTO */}
+              <div style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-white)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <TreePalm style={{ width: 14, height: 14, color: '#1D4ED8' }} />
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>PTO</span>
+                  </div>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
+                    {staff.ptoAllowance - ptoUsed} <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-secondary)' }}>/ {staff.ptoAllowance} days left</span>
+                  </span>
+                </div>
+                <div style={{ width: '100%', height: 6, backgroundColor: 'var(--border-color)', borderRadius: 9999, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', backgroundColor: '#3B82F6', borderRadius: 9999, width: `${staff.ptoAllowance > 0 ? (ptoUsed / staff.ptoAllowance) * 100 : 0}%`, transition: 'width 0.3s' }} />
+                </div>
+                <p style={{ fontSize: 11, color: 'var(--text-secondary)', margin: '4px 0 0' }}>
+                  {ptoUsed} used{ptoPending > 0 ? ` · ${ptoPending} pending` : ' · none pending'}
+                </p>
+              </div>
+              {/* Sick Days */}
+              <div style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-white)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <ThermometerSun style={{ width: 14, height: 14, color: '#d4183d' }} />
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Sick Days</span>
+                  </div>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
+                    {staff.sickAllowance - sickUsed} <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-secondary)' }}>/ {staff.sickAllowance} days left</span>
+                  </span>
+                </div>
+                <div style={{ width: '100%', height: 6, backgroundColor: 'var(--border-color)', borderRadius: 9999, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', backgroundColor: '#d4183d', borderRadius: 9999, width: `${staff.sickAllowance > 0 ? (sickUsed / staff.sickAllowance) * 100 : 0}%`, transition: 'width 0.3s' }} />
+                </div>
+                <p style={{ fontSize: 11, color: 'var(--text-secondary)', margin: '4px 0 0' }}>
+                  {sickUsed} used{sickPending > 0 ? ` · ${sickPending} pending` : ' · none pending'}
+                </p>
+              </div>
+            </div>
+          </div>
+
           {/* Notes */}
           {staff.notes && (
             <div style={{
@@ -427,6 +497,7 @@ type FormState = {
   clinic: string; email: string; phone: string; status: StaffStatus;
   startDate: string; licenseNo: string; schedule: string; bio: string; emergencyContact: string; notes: string;
   portal: Portal; tempPassword: string;
+  ptoAllowance: string; sickAllowance: string;
 };
 
 const EMPTY_FORM: FormState = {
@@ -434,6 +505,7 @@ const EMPTY_FORM: FormState = {
   clinic: '', email: '', phone: '', status: 'Active',
   startDate: '', licenseNo: '', schedule: 'Mon–Fri, 9–6', bio: '', emergencyContact: '', notes: '',
   portal: 'doctor', tempPassword: '',
+  ptoAllowance: '20', sickAllowance: '10',
 };
 
 function StaffFormDrawer({
@@ -451,6 +523,7 @@ function StaffFormDrawer({
     licenseNo: initial.licenseNo ?? '', schedule: initial.schedule, bio: initial.bio,
     emergencyContact: initial.emergencyContact, notes: initial.notes ?? '',
     portal: 'doctor', tempPassword: '',
+    ptoAllowance: String(initial.ptoAllowance ?? 20), sickAllowance: String(initial.sickAllowance ?? 10),
   } : { ...EMPTY_FORM, clinic: availableClinics[0] || '' });
 
   const set = (k: keyof FormState, v: string) => setForm(p => ({ ...p, [k]: v }));
@@ -563,6 +636,21 @@ function StaffFormDrawer({
           <div style={{ marginBottom: 16 }}>
             <p style={labelStyle}>Emergency Contact</p>
             <Input placeholder="Name — (555) 000-0000" value={form.emergencyContact} onChange={e => set('emergencyContact', e.target.value)} />
+          </div>
+
+          {/* Time Off Allowance */}
+          <div style={{ marginTop: 8, marginBottom: 4, borderTop: '1px solid var(--border-color)', paddingTop: 16 }}>
+            <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 12px' }}>Time Off Allowance</p>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+            <div>
+              <p style={labelStyle}><TreePalm style={{ width: 13, height: 13, display: 'inline', verticalAlign: -2, marginRight: 4, color: '#1D4ED8' }} />PTO Days / Year</p>
+              <Input type="number" min="0" value={form.ptoAllowance} onChange={e => set('ptoAllowance', e.target.value)} />
+            </div>
+            <div>
+              <p style={labelStyle}><ThermometerSun style={{ width: 13, height: 13, display: 'inline', verticalAlign: -2, marginRight: 4, color: '#d4183d' }} />Sick Days / Year</p>
+              <Input type="number" min="0" value={form.sickAllowance} onChange={e => set('sickAllowance', e.target.value)} />
+            </div>
           </div>
 
           {/* Portal + Temporary Password */}
@@ -701,6 +789,8 @@ export default function SuperAdminStaffPage() {
         specializations: undefined,
         appointments: undefined,
         rating: undefined,
+        ptoAllowance: row.pto_allowance ?? 20,
+        sickAllowance: row.sick_allowance ?? 10,
       };
     });
     setStaff(mapped);
@@ -774,6 +864,8 @@ export default function SuperAdminStaffPage() {
       schedule: form.schedule || null,
       license_no: form.licenseNo || null,
       bio: form.bio || null,
+      pto_allowance: parseInt(form.ptoAllowance) || 20,
+      sick_allowance: parseInt(form.sickAllowance) || 10,
     };
 
     if (isEdit && editStaff) {

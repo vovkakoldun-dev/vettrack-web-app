@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router';
 import {
   CalendarDays, CheckCircle2, DollarSign, MessageSquare,
   TrendingUp, Clock, MoreHorizontal, Search, X, Users, ArrowRight, ArrowUpRight, UserCheck,
-  Receipt, CreditCard, Banknote, Terminal, Plus, Trash2, Pencil, Lock, ChevronRight,
+  Receipt, CreditCard, Banknote, Terminal, Plus, Trash2, Pencil, Lock, ChevronRight, PawPrint,
 } from 'lucide-react';
 import { useAppointmentStatus } from '../../context/AppointmentStatusContext';
 import { getOrgContext } from '../../hooks/useOrgContext';
@@ -17,6 +17,115 @@ import { supabase } from '../../../lib/supabase';
 import { useProfile } from '../../hooks/useProfile';
 import { ConnectionStatusBadge } from '../../components/ConnectionStatusBadge';
 
+// ─── Global Search ───────────────────────────────────────────
+
+interface SearchResultClient {
+  id: string;
+  first_name: string;
+  last_name: string;
+  email: string | null;
+  phone: string | null;
+}
+
+interface SearchResultPet {
+  id: string;
+  name: string;
+  species: string;
+  breed: string | null;
+  photo_url: string | null;
+  client_id: string;
+  clients: { id: string; first_name: string; last_name: string } | null;
+}
+
+interface SearchResultAppointment {
+  id: string;
+  scheduled_at: string;
+  status: string;
+  reason: string | null;
+  pets: { id: string; name: string } | null;
+  clients: { id: string; first_name: string; last_name: string } | null;
+  services: { id: string; name: string } | null;
+}
+
+interface SearchResults {
+  clients: SearchResultClient[];
+  pets: SearchResultPet[];
+  appointments: SearchResultAppointment[];
+}
+
+function useGlobalSearch(query: string, debounceMs = 300) {
+  const [results, setResults] = useState<SearchResults>({ clients: [], pets: [], appointments: [] });
+  const [loading, setLoading] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const search = useCallback(async (q: string) => {
+    const term = q.trim();
+    if (!term) {
+      setResults({ clients: [], pets: [], appointments: [] });
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    const pattern = `%${term}%`;
+
+    // Step 1: Search clients and pets in parallel
+    const [clientsRes, petsRes] = await Promise.all([
+      supabase
+        .from('clients')
+        .select('id, first_name, last_name, email, phone')
+        .or(`first_name.ilike.${pattern},last_name.ilike.${pattern},email.ilike.${pattern},phone.ilike.${pattern}`)
+        .limit(6),
+      supabase
+        .from('pets')
+        .select('id, name, species, breed, photo_url, client_id, clients(id, first_name, last_name)')
+        .or(`name.ilike.${pattern},species.ilike.${pattern},breed.ilike.${pattern}`)
+        .limit(6),
+    ]);
+
+    const matchedClients = (clientsRes.data as SearchResultClient[]) ?? [];
+    const matchedPets = (petsRes.data as SearchResultPet[]) ?? [];
+
+    // Step 2: Search appointments by reason, OR by matched client/pet IDs
+    const clientIds = matchedClients.map(c => c.id);
+    const petIds = matchedPets.map(p => p.id);
+
+    // Build OR filter for appointments: reason match + client_id match + pet_id match
+    const orParts: string[] = [`reason.ilike.${pattern}`];
+    if (clientIds.length > 0) orParts.push(`client_id.in.(${clientIds.join(',')})`);
+    if (petIds.length > 0) orParts.push(`pet_id.in.(${petIds.join(',')})`);
+
+    const appointmentsRes = await supabase
+      .from('appointments')
+      .select('id, scheduled_at, status, reason, pets(id, name), clients(id, first_name, last_name), services(id, name)')
+      .or(orParts.join(','))
+      .order('scheduled_at', { ascending: false })
+      .limit(6);
+
+    setResults({
+      clients: matchedClients,
+      pets: matchedPets,
+      appointments: (appointmentsRes.data as SearchResultAppointment[]) ?? [],
+    });
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    const term = query.trim();
+    if (!term) {
+      setResults({ clients: [], pets: [], appointments: [] });
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    timerRef.current = setTimeout(() => search(term), debounceMs);
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+  }, [query, debounceMs, search]);
+
+  const totalResults = results.clients.length + results.pets.length + results.appointments.length;
+  return { results, loading, totalResults };
+}
+
 // ─── Types ────────────────────────────────────────────────────
 
 type ApptStatus = 'Confirmed' | 'Patient Arrived' | 'Waiting for Doctor' | 'In Progress' | 'Ready for Billing' | 'Completed' | 'Cancelled' | 'Pending' | 'Late';
@@ -27,8 +136,8 @@ type PaymentStatus = 'Paid' | 'Pending' | 'Overdue';
 // ─── Status Badge ─────────────────────────────────────────────
 
 const STATUS_STYLES: Record<ApptStatus, { bg: string; color: string }> = {
-  'Confirmed':          { bg: '#2D6A4F15', color: '#2D6A4F' },
-  'Patient Arrived':    { bg: '#2D6A4F15', color: '#2D6A4F' },
+  'Confirmed':          { bg: 'rgba(34,197,94,0.12)', color: '#22C55E' },
+  'Patient Arrived':    { bg: 'rgba(34,197,94,0.12)', color: '#22C55E' },
   'Waiting for Doctor': { bg: '#F4A26115', color: '#D97706' },
   'In Progress':        { bg: '#3B82F615', color: '#3B82F6' },
   'Ready for Billing':  { bg: '#8B5CF615', color: '#8B5CF6' },
@@ -39,7 +148,7 @@ const STATUS_STYLES: Record<ApptStatus, { bg: string; color: string }> = {
 };
 
 const PAYMENT_STYLES: Record<PaymentStatus, { bg: string; color: string }> = {
-  Paid:    { bg: '#2D6A4F15', color: '#2D6A4F' },
+  Paid:    { bg: 'rgba(34,197,94,0.12)', color: '#22C55E' },
   Pending: { bg: '#F4A26115', color: '#F4A261' },
   Overdue: { bg: '#d4183d15', color: '#d4183d' },
 };
@@ -288,12 +397,12 @@ function GlowStatCard({
           <path d={areaPath} fill={`url(#area-${uid})`} />
 
           {/* Outer glow halo */}
-          <path d={linePath} fill="none" stroke={color} strokeWidth="10"
-            strokeLinecap="round" opacity={glowOpacity1} filter={`url(#bloom-${uid})`} />
+          {glowOpacity1 > 0 && <path d={linePath} fill="none" stroke={color} strokeWidth="10"
+            strokeLinecap="round" opacity={glowOpacity1} filter={`url(#bloom-${uid})`} />}
 
           {/* Inner tight glow */}
-          <path d={linePath} fill="none" stroke={color} strokeWidth="5"
-            strokeLinecap="round" opacity={glowOpacity2} filter={`url(#bloom-${uid})`} />
+          {glowOpacity2 > 0 && <path d={linePath} fill="none" stroke={color} strokeWidth="5"
+            strokeLinecap="round" opacity={glowOpacity2} filter={`url(#bloom-${uid})`} />}
 
           {/* Sharp line */}
           <path d={linePath} fill="none" stroke={`url(#line-${uid})`} strokeWidth="2.5"
@@ -303,7 +412,7 @@ function GlowStatCard({
           <circle cx={first.x} cy={first.y} r="4.5" fill={dotHoleFill} stroke={color} strokeWidth="2" />
 
           {/* End dot (filled + glowing) */}
-          <circle cx={last.x} cy={last.y} r="5" fill={color} filter={`url(#bloom-${uid})`} />
+          <circle cx={last.x} cy={last.y} r="5" fill={color} filter={glowOpacity1 > 0 ? `url(#bloom-${uid})` : undefined} />
           <circle cx={last.x} cy={last.y} r="4" fill="#ffffff" opacity="0.9" />
 
           {/* Annotations */}
@@ -329,7 +438,7 @@ function GlowStatCard({
                 <line x1={hx} y1={0} x2={hx} y2={VH}
                   stroke={color} strokeWidth="1" strokeDasharray="3 3" opacity="0.5" />
                 <circle cx={hx} cy={hy} r="8" fill={color} opacity="0.18" />
-                <circle cx={hx} cy={hy} r="5" fill={color} filter={`url(#bloom-${uid})`} opacity="0.8" />
+                <circle cx={hx} cy={hy} r="5" fill={color} filter={glowOpacity1 > 0 ? `url(#bloom-${uid})` : undefined} opacity="0.8" />
                 <circle cx={hx} cy={hy} r="4" fill={color} />
                 <circle cx={hx} cy={hy} r="2" fill="#fff" />
               </>
@@ -493,14 +602,26 @@ export default function AdminDashboardPage() {
     const vaccData = buildSparkData(dashStats.vaccinesDueThisWeek, false);
     vaccData[vaccData.length - 1] = dashStats.vaccinesDueThisWeek;
 
+    const pctChange = (current: number, previous: number): { label: string; positive: boolean } => {
+      if (previous === 0) return current > 0 ? { label: '+100%', positive: true } : { label: 'No change', positive: true };
+      const pct = Math.round(((current - previous) / previous) * 100);
+      if (pct === 0) return { label: 'No change', positive: true };
+      return { label: `${pct > 0 ? '+' : ''}${pct}%`, positive: pct > 0 };
+    };
+
+    const apptTrend = pctChange(dashStats.appointmentsToday, dashStats.appointmentsYesterday);
+    const clientTrend = pctChange(dashStats.totalClients, dashStats.clientsLastMonth);
+    const petTrend = pctChange(dashStats.activePets, dashStats.petsLastMonth);
+    const vaccTrend = pctChange(dashStats.vaccinesDueThisWeek, dashStats.vaccinesLastWeek);
+
     return [
       {
         title: "Today's Appts",
         subtitle: 'Today',
         metricLabel: 'Daily Volume',
         value: String(dashStats.appointmentsToday),
-        trendLabel: `${dashStats.appointmentsToday} today`,
-        trendPositive: true,
+        trendLabel: `${apptTrend.label} vs yesterday`,
+        trendPositive: apptTrend.positive,
         color: '#4ADE80',
         shadowColor: 'rgba(74,222,128,0.35)',
         icon: CalendarDays,
@@ -516,8 +637,8 @@ export default function AdminDashboardPage() {
         subtitle: 'Clients',
         metricLabel: 'Client Count',
         value: String(dashStats.totalClients),
-        trendLabel: `${dashStats.totalClients} total`,
-        trendPositive: true,
+        trendLabel: `${clientTrend.label} vs last month`,
+        trendPositive: clientTrend.positive,
         color: '#38BDF8',
         shadowColor: 'rgba(56,189,248,0.35)',
         icon: CheckCircle2,
@@ -530,14 +651,14 @@ export default function AdminDashboardPage() {
       },
       {
         title: 'Active Pets',
-        subtitle: 'Pets',
-        metricLabel: 'Pet Count',
+        subtitle: 'Registered',
+        metricLabel: 'Total Active',
         value: String(dashStats.activePets),
-        trendLabel: `${dashStats.activePets} active`,
-        trendPositive: true,
-        color: '#F4A261',
-        shadowColor: 'rgba(244,162,97,0.35)',
-        icon: DollarSign,
+        trendLabel: `${petTrend.label} vs last month`,
+        trendPositive: petTrend.positive,
+        color: '#818CF8',
+        shadowColor: 'rgba(129,140,248,0.35)',
+        icon: PawPrint,
         data: petData,
         labels: dayLabels,
         unit: 'pets',
@@ -548,13 +669,13 @@ export default function AdminDashboardPage() {
       {
         title: 'Vaccines Due',
         subtitle: 'This Week',
-        metricLabel: 'Due This Week',
+        metricLabel: 'Due Within 7 Days',
         value: String(dashStats.vaccinesDueThisWeek),
-        trendLabel: `${dashStats.vaccinesDueThisWeek} due`,
-        trendPositive: false,
-        color: '#818CF8',
-        shadowColor: 'rgba(129,140,248,0.35)',
-        icon: MessageSquare,
+        trendLabel: `${vaccTrend.label} vs last week`,
+        trendPositive: !vaccTrend.positive,
+        color: '#FB7185',
+        shadowColor: 'rgba(251,113,133,0.35)',
+        icon: Clock,
         data: vaccData,
         labels: dayLabels,
         unit: 'vaccines',
@@ -569,6 +690,7 @@ export default function AdminDashboardPage() {
   const [now, setNow] = useState(() => new Date());
   const [searchQuery, setSearchQuery] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
+  const { results: searchResults, loading: searchLoading, totalResults } = useGlobalSearch(searchQuery);
   const [arrivedToast, setArrivedToast] = useState<{ pet: string; vet: string } | null>(null);
   const [billModal, setBillModal] = useState<{ id: number; pet: string; owner: string; service: string; vet: string } | null>(null);
   const [payMethod, setPayMethod] = useState<'card' | 'terminal' | 'cash'>('card');
@@ -653,9 +775,11 @@ export default function AdminDashboardPage() {
     if (!adminProfile?.id) return;
     (async () => {
       try {
+        const { organizationId: orgId } = await getOrgContext();
         const { data: parts } = await supabase
           .from('conversation_participants')
           .select('conversation_id, last_read_at')
+          .eq('organization_id', orgId)
           .eq('profile_id', adminProfile.id);
         if (!parts || parts.length === 0) { setUnreadCount(0); return; }
 
@@ -665,6 +789,7 @@ export default function AdminDashboardPage() {
           const { data: msgs } = await supabase
             .from('messages')
             .select('id, content, created_at, sender_id, profiles:profiles!messages_sender_id_fkey(first_name, last_name)')
+            .eq('organization_id', orgId)
             .eq('conversation_id', part.conversation_id)
             .gt('created_at', lastRead)
             .neq('sender_id', adminProfile.id)
@@ -739,26 +864,8 @@ export default function AdminDashboardPage() {
   }
 
   // ── Search ──────────────────────────────────────────────────
-  const q = searchQuery.trim().toLowerCase();
-  const matchedClients = q
-    ? ALL_CLIENTS.filter(
-        (c) =>
-          c.name.toLowerCase().includes(q) ||
-          c.pet.toLowerCase().includes(q) ||
-          c.petType.toLowerCase().includes(q)
-      )
-    : [];
-  const matchedBookings = q
-    ? ALL_BOOKINGS.filter(
-        (a) =>
-          a.pet.toLowerCase().includes(q) ||
-          a.owner.toLowerCase().includes(q) ||
-          a.service.toLowerCase().includes(q) ||
-          a.vet.toLowerCase().includes(q)
-      )
-    : [];
-  const hasResults = matchedClients.length > 0 || matchedBookings.length > 0;
-  const isSearching = q.length > 0;
+  const isSearching = searchQuery.trim().length > 0;
+  const hasResults = totalResults > 0;
 
   return (
     <div style={{ maxWidth: '1440px', margin: '0 auto', padding: '32px' }}>
@@ -820,19 +927,31 @@ export default function AdminDashboardPage() {
       {/* ── Search Results ── */}
       {isSearching ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          {!hasResults ? (
+          {searchLoading ? (
+            <div
+              className="bg-[var(--surface-white)] border border-[var(--border-color)]"
+              style={{ borderRadius: '12px', padding: '48px', textAlign: 'center' }}
+            >
+              <div style={{
+                width: 28, height: 28, border: '3px solid var(--border-color)',
+                borderTopColor: 'var(--brand-green-text)', borderRadius: '50%',
+                animation: 'spin 0.7s linear infinite', margin: '0 auto 12px',
+              }} />
+              <p style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>Searching…</p>
+            </div>
+          ) : !hasResults ? (
             <div
               className="bg-[var(--surface-white)] border border-[var(--border-color)]"
               style={{ borderRadius: '12px', padding: '48px', textAlign: 'center' }}
             >
               <Search style={{ width: '40px', height: '40px', color: 'var(--border-color)', margin: '0 auto 12px' }} />
               <p style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>No results found</p>
-              <p style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>Try searching for a client name, pet, service, or vet</p>
+              <p style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>Try searching for a client name, pet, breed, or appointment reason</p>
             </div>
           ) : (
             <>
               {/* Client results */}
-              {matchedClients.length > 0 && (
+              {searchResults.clients.length > 0 && (
                 <div
                   className="bg-[var(--surface-white)] border border-[var(--border-color)]"
                   style={{ borderRadius: '12px', overflow: 'hidden' }}
@@ -843,60 +962,42 @@ export default function AdminDashboardPage() {
                   >
                     <Users style={{ width: '14px', height: '14px', color: 'var(--brand-green-text)' }} />
                     <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-                      Clients · {matchedClients.length}
+                      Clients · {searchResults.clients.length}
                     </span>
                   </div>
-                  {matchedClients.map((c, i) => (
+                  {searchResults.clients.map((c, i) => (
                     <div
                       key={c.id}
-                      onClick={() => navigate(`/admin/clients/${c.clientId}`)}
+                      onClick={() => navigate(`/admin/clients/${c.id}`)}
                       className="flex items-center gap-4 cursor-pointer hover:bg-[var(--surface-elevated)] transition-colors"
                       style={{
                         padding: '14px 20px',
                         borderTop: i > 0 ? '1px solid var(--border-color)' : undefined,
                       }}
                     >
-                      {c.petPhoto ? (
-                        <img
-                          src={c.petPhoto}
-                          alt={c.pet}
-                          className="flex-shrink-0 object-cover"
-                          style={{ width: '40px', height: '40px', borderRadius: '9999px' }}
-                        />
-                      ) : (
-                        <div
-                          className="flex items-center justify-center text-white font-bold flex-shrink-0"
-                          style={{
-                            width: '40px', height: '40px', borderRadius: '9999px',
-                            background: 'linear-gradient(135deg, #2D6A4F, #74C69D)',
-                            fontSize: '13px',
-                          }}
-                        >
-                          {c.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
-                        </div>
-                      )}
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <p style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>{c.name}</p>
-                        <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{c.pet} · {c.petType}</p>
+                      <div
+                        className="flex items-center justify-center text-white font-bold flex-shrink-0"
+                        style={{
+                          width: '40px', height: '40px', borderRadius: '9999px',
+                          background: 'linear-gradient(135deg, #2D6A4F, #74C69D)',
+                          fontSize: '13px',
+                        }}
+                      >
+                        {(c.first_name?.[0] || '') + (c.last_name?.[0] || '')}
                       </div>
-                      <span style={{ fontSize: '13px', color: 'var(--text-secondary)', flexShrink: 0 }}>{c.phone}</span>
-                      {parseFloat(c.balance.replace('$', '')) > 0 && (
-                        <span style={{
-                          padding: '3px 10px', borderRadius: '9999px',
-                          fontSize: '12px', fontWeight: 600,
-                          backgroundColor: '#d4183d15', color: '#d4183d', flexShrink: 0,
-                        }}>
-                          Owes {c.balance}
-                        </span>
-                      )}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>{c.first_name} {c.last_name}</p>
+                        <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{c.email || '—'}</p>
+                      </div>
+                      <span style={{ fontSize: '13px', color: 'var(--text-secondary)', flexShrink: 0 }}>{c.phone || '—'}</span>
                       <ArrowRight style={{ width: '14px', height: '14px', color: 'var(--text-secondary)', flexShrink: 0 }} />
                     </div>
                   ))}
                 </div>
               )}
 
-              {/* Booking results */}
-              {matchedBookings.length > 0 && (
+              {/* Pet results */}
+              {searchResults.pets.length > 0 && (
                 <div
                   className="bg-[var(--surface-white)] border border-[var(--border-color)]"
                   style={{ borderRadius: '12px', overflow: 'hidden' }}
@@ -905,20 +1006,73 @@ export default function AdminDashboardPage() {
                     className="border-b border-[var(--border-color)] flex items-center gap-2"
                     style={{ padding: '12px 20px' }}
                   >
-                    <CalendarDays style={{ width: '14px', height: '14px', color: '#F4A261' }} />
+                    <PawPrint style={{ width: '14px', height: '14px', color: '#F4A261' }} />
                     <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-                      Today's Bookings · {matchedBookings.length}
+                      Pets · {searchResults.pets.length}
                     </span>
                   </div>
-                  {matchedBookings.map((a, i) => {
-                    const contextStatus2 = overrides[a.id] as ApptStatus | undefined;
-                    const effectiveStatus: ApptStatus =
-                      billPaid.has(a.id) ? 'Completed'
-                      : contextStatus2 ?? (
-                          a.status === 'Confirmed' && isApptLate(a.time) ? 'Late'
-                          : a.status
-                        );
-                    const s = STATUS_STYLES[effectiveStatus];
+                  {searchResults.pets.map((p, i) => (
+                    <div
+                      key={p.id}
+                      onClick={() => p.client_id ? navigate(`/admin/clients/${p.client_id}`) : undefined}
+                      className="flex items-center gap-4 cursor-pointer hover:bg-[var(--surface-elevated)] transition-colors"
+                      style={{
+                        padding: '14px 20px',
+                        borderTop: i > 0 ? '1px solid var(--border-color)' : undefined,
+                      }}
+                    >
+                      {p.photo_url ? (
+                        <img
+                          src={p.photo_url}
+                          alt={p.name}
+                          className="flex-shrink-0 object-cover"
+                          style={{ width: '40px', height: '40px', borderRadius: '9999px' }}
+                        />
+                      ) : (
+                        <div
+                          className="flex items-center justify-center text-white font-bold flex-shrink-0"
+                          style={{
+                            width: '40px', height: '40px', borderRadius: '9999px',
+                            background: 'linear-gradient(135deg, #F4A261, #E76F51)',
+                            fontSize: '13px',
+                          }}
+                        >
+                          {p.name.slice(0, 2)}
+                        </div>
+                      )}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>{p.name}</p>
+                        <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                          {p.species}{p.breed ? ` · ${p.breed}` : ''}
+                          {p.clients ? ` — ${p.clients.first_name} ${p.clients.last_name}` : ''}
+                        </p>
+                      </div>
+                      <ArrowRight style={{ width: '14px', height: '14px', color: 'var(--text-secondary)', flexShrink: 0 }} />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Appointment results */}
+              {searchResults.appointments.length > 0 && (
+                <div
+                  className="bg-[var(--surface-white)] border border-[var(--border-color)]"
+                  style={{ borderRadius: '12px', overflow: 'hidden' }}
+                >
+                  <div
+                    className="border-b border-[var(--border-color)] flex items-center gap-2"
+                    style={{ padding: '12px 20px' }}
+                  >
+                    <CalendarDays style={{ width: '14px', height: '14px', color: '#3B82F6' }} />
+                    <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                      Appointments · {searchResults.appointments.length}
+                    </span>
+                  </div>
+                  {searchResults.appointments.map((a, i) => {
+                    const dt = new Date(a.scheduled_at);
+                    const dateStr = dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                    const timeStr = dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+                    const s = STATUS_STYLES[(a.status as ApptStatus)] || STATUS_STYLES['Pending'];
                     return (
                       <div
                         key={a.id}
@@ -937,22 +1091,27 @@ export default function AdminDashboardPage() {
                             fontSize: '13px',
                           }}
                         >
-                          {a.pet.slice(0, 2)}
+                          {a.pets?.name?.slice(0, 2) || '??'}
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <p style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>{a.pet}</p>
-                          <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{a.owner} · {a.service}</p>
+                          <p style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                            {a.pets?.name || 'Unknown Pet'}
+                            {a.clients ? ` — ${a.clients.first_name} ${a.clients.last_name}` : ''}
+                          </p>
+                          <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                            {a.services?.name || a.reason || 'Appointment'}
+                          </p>
                         </div>
                         <div className="flex items-center gap-1.5 flex-shrink-0" style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>
                           <Clock style={{ width: '13px', height: '13px' }} />
-                          {a.time} · {a.vet}
+                          {dateStr} · {timeStr}
                         </div>
                         <span style={{
                           padding: '3px 10px', borderRadius: '9999px',
                           fontSize: '12px', fontWeight: 600,
                           backgroundColor: s.bg, color: s.color, flexShrink: 0,
                         }}>
-                          {effectiveStatus}
+                          {a.status}
                         </span>
                         <ArrowRight style={{ width: '14px', height: '14px', color: 'var(--text-secondary)', flexShrink: 0 }} />
                       </div>
@@ -967,7 +1126,7 @@ export default function AdminDashboardPage() {
         <>
 
       {/* Glow Stat Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '20px', marginBottom: '28px' }}>
+      <div className="grid grid-cols-2 lg:grid-cols-4" style={{ gap: '20px', marginBottom: '28px' }}>
         {glowCards.map(card => (
           <GlowStatCard key={card.title} {...card} />
         ))}
@@ -1072,7 +1231,7 @@ export default function AdminDashboardPage() {
                           onClick={() => handleCheckIn(appt.id)}
                           style={{
                             padding: '6px 12px', borderRadius: '7px',
-                            backgroundColor: '#2D6A4F', color: '#fff',
+                            backgroundColor: '#2D6A4F', color: 'var(--on-brand-green)',
                             border: 'none', cursor: 'pointer',
                             fontSize: '13px', fontWeight: 600,
                             display: 'flex', alignItems: 'center', gap: '5px',
@@ -1127,7 +1286,7 @@ export default function AdminDashboardPage() {
       </div>
 
       {/* Bottom row: Recent Payments + Unread Messages */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+      <div className="grid grid-cols-1 md:grid-cols-2" style={{ gap: '24px' }}>
 
         {/* Recent Payments */}
         <div

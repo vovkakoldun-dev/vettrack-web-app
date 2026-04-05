@@ -78,7 +78,7 @@ const STATUS_OPTIONS: {
 
 // ─── Page ─────────────────────────────────────────────────────
 
-export default function AdminClientsPage() {
+export default function SuperAdminClientsPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const { clients: supabaseClients, loading, addClient, deleteClient, refetch } = useClients();
@@ -224,7 +224,7 @@ export default function AdminClientsPage() {
                 <TableRow
                   key={client.id}
                   className="hover:bg-[var(--surface-elevated)] cursor-pointer transition-colors"
-                  onClick={() => navigate(`/admin/clients/${(client as Client & { _supaId: string })._supaId}`)}
+                  onClick={() => navigate(`/superadmin/clients/${(client as Client & { _supaId: string })._supaId}`)}
                 >
                   {/* Pet */}
                   <TableCell className="py-4 px-4">
@@ -283,12 +283,6 @@ export default function AdminClientsPage() {
                                 onClick={() => copyToClipboard(client.ownerEmail)}
                               >
                                 <Copy className="w-3.5 h-3.5" /> Copy Email
-                              </div>
-                              <div
-                                className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-[var(--surface-elevated)]"
-                                onClick={() => { setEmailMenuOpen(null); navigate('/admin/communications', { state: { composeTo: client.ownerEmail, composeBody: `Hi ${client.ownerName.split(' ')[0]},<br><br>` } }); }}
-                              >
-                                <Send className="w-3.5 h-3.5" /> Send Email
                               </div>
                             </div>
                           </>

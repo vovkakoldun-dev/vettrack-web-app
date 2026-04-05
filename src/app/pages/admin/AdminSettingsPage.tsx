@@ -44,7 +44,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { id: 'profile',       label: 'Profile',       icon: User },
-  { id: 'notifications', label: 'Notifications',  icon: Bell, badge: '3' },
+  { id: 'notifications', label: 'Notifications',  icon: Bell },
   { id: 'appearance',    label: 'Appearance',     icon: Palette },
   { id: 'security',      label: 'Security',       icon: Shield },
 ];

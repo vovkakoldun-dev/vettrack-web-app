@@ -7,7 +7,7 @@ import {
   Crown, PawPrint, Calendar, DollarSign, Users,
   AlertTriangle, MoreHorizontal, Plus, FileText, Settings, BarChart2,
   CheckCircle2, ClipboardList, BookOpen, Lock, UserPlus, RefreshCw,
-  ArrowUpRight, Bell, Umbrella, AlertCircle, X, Check, ChevronLeft, ChevronRight,
+  ArrowUpRight, Bell, Umbrella, AlertCircle, X, Check, ChevronLeft, ChevronRight, Clock,
 } from 'lucide-react';
 
 // ─── Sparkline helpers ────────────────────────────────────────
@@ -44,13 +44,14 @@ type NotifStatus = 'pending' | 'approved' | 'declined';
 
 interface Notification {
   id: string;
-  type: 'pto' | 'shift_swap' | 'overdue' | 'reassign';
+  type: 'pto' | 'shift_swap' | 'overtime' | 'overdue' | 'reassign';
   avatar: string;
   avatarColor: string;
   title: string;
   detail: string;
   meta: string;
   status: NotifStatus;
+  requesterId?: string;
 }
 
 const NOTIF_TYPE_CFG = {
@@ -58,6 +59,7 @@ const NOTIF_TYPE_CFG = {
   shift_swap: { icon: RefreshCw,    color: '#3B82F6', bg: '#3B82F615', label: 'Shift Swap' },
   reassign:   { icon: Calendar,     color: '#F4A261', bg: '#F4A26115', label: 'Coverage Needed' },
   overdue:    { icon: AlertCircle,  color: '#EF4444', bg: '#EF444415', label: 'Finance Alert' },
+  overtime:   { icon: Clock,        color: '#F4A261', bg: '#F4A26115', label: 'Overtime Request' },
 };
 
 function NotificationsPanel() {
@@ -90,6 +92,7 @@ function NotificationsPanel() {
             detail: r.detail || '',
             meta: r.meta || '',
             status: 'pending',
+            requesterId: r.requester_id || undefined,
           }));
         }
 
@@ -177,16 +180,39 @@ function NotificationsPanel() {
   }, []);
 
   async function approve(id: string) {
+    const notif = notifs.find(n => n.id === id);
     setNotifs(prev => prev.map(n => n.id === id ? { ...n, status: 'approved' } : n));
-    // Only persist for real pending_requests rows (UUIDs)
     if (!id.includes('-invoices') && !id.startsWith('task-')) {
       await supabase.from('pending_requests').update({ status: 'approved', resolved_at: new Date().toISOString() }).eq('id', id);
+      // Notify the requester
+      if (notif?.requesterId) {
+        const { organizationId } = await getOrgContext();
+        await supabase.from('notification_events').upsert({
+          id: `req-approved-${id}`,
+          type: 'request_resolved',
+          timestamp: new Date().toISOString(),
+          data: { decision: 'approved', requestType: notif.type, title: notif.title, detail: notif.detail, vetId: notif.requesterId },
+          organization_id: organizationId,
+        });
+      }
     }
   }
   async function decline(id: string) {
+    const notif = notifs.find(n => n.id === id);
     setNotifs(prev => prev.map(n => n.id === id ? { ...n, status: 'declined' } : n));
     if (!id.includes('-invoices') && !id.startsWith('task-')) {
       await supabase.from('pending_requests').update({ status: 'declined', resolved_at: new Date().toISOString() }).eq('id', id);
+      // Notify the requester
+      if (notif?.requesterId) {
+        const { organizationId } = await getOrgContext();
+        await supabase.from('notification_events').upsert({
+          id: `req-declined-${id}`,
+          type: 'request_resolved',
+          timestamp: new Date().toISOString(),
+          data: { decision: 'declined', requestType: notif.type, title: notif.title, detail: notif.detail, vetId: notif.requesterId },
+          organization_id: organizationId,
+        });
+      }
     }
   }
   async function dismiss(id: string) {
@@ -380,68 +406,68 @@ const GLOW_CARDS = [
     title: 'Total Patients',
     subtitle: 'Active',
     metricLabel: 'Patient Growth',
-    value: '0',
-    trendLabel: '+12 this week',
+    value: '—',
+    trendLabel: '',
     trendPositive: true,
     color: '#818CF8',
     shadowColor: 'rgba(129,140,248,0.35)',
     icon: PawPrint,
-    data: [1080, 1110, 1140, 1175, 1210, 1240, 1265, 1284],
-    labels: ['Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'],
+    data: [0, 0, 0, 0, 0, 0, 0, 0],
+    labels: ['', '', '', '', '', '', '', ''],
     unit: 'patients',
-    annotationStart: '1,080',
-    annotationEnd: '1,284',
+    annotationStart: '',
+    annotationEnd: '',
     path: '/superadmin/staff',
   },
   {
     title: 'Appointments',
     subtitle: 'Today',
     metricLabel: 'Daily Volume',
-    value: '0',
-    trendLabel: '6 in progress',
+    value: '—',
+    trendLabel: '',
     trendPositive: true,
     color: '#F4A261',
     shadowColor: 'rgba(244,162,97,0.35)',
     icon: Calendar,
-    data: [28, 31, 26, 34, 29, 36, 33, 38],
-    labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Mon', 'Tue', 'Today'],
+    data: [0, 0, 0, 0, 0, 0, 0, 0],
+    labels: ['', '', '', '', '', '', '', ''],
     unit: 'appts',
-    annotationStart: '28',
-    annotationEnd: '38',
+    annotationStart: '',
+    annotationEnd: '',
     path: '/superadmin/appointments',
   },
   {
     title: 'Monthly Revenue',
     subtitle: '',
     metricLabel: 'Revenue Growth',
-    value: '$48,920',
-    trendLabel: '+8% vs last month',
+    value: '—',
+    trendLabel: '',
     trendPositive: true,
     color: '#4ADE80',
     shadowColor: 'rgba(74,222,128,0.35)',
     icon: DollarSign,
-    data: [38200, 40100, 42800, 41500, 43900, 45200, 47300, 48920],
-    labels: ['Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'],
+    data: [0, 0, 0, 0, 0, 0, 0, 0],
+    labels: ['', '', '', '', '', '', '', ''],
     unit: 'USD',
-    annotationStart: '$38k',
-    annotationEnd: '$48.9k',
+    annotationStart: '',
+    annotationEnd: '',
     path: '/superadmin/billing',
   },
   {
     title: 'Active Staff',
     subtitle: 'On Roster',
     metricLabel: 'Headcount',
-    value: '0',
-    trendLabel: '3 doctors, 9 admin',
+    value: '—',
+    trendLabel: '',
     trendPositive: true,
     color: '#38BDF8',
     shadowColor: 'rgba(56,189,248,0.35)',
     icon: Users,
-    data: [8, 9, 9, 10, 10, 11, 12, 12],
-    labels: ['Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'],
+    data: [0, 0, 0, 0, 0, 0, 0, 0],
+    labels: ['', '', '', '', '', '', '', ''],
     unit: 'staff',
-    annotationStart: '8',
-    annotationEnd: '12',
+    annotationStart: '',
+    annotationEnd: '',
     path: '/superadmin/staff',
   },
 ];
@@ -463,11 +489,12 @@ function GlowStatCard({
 
   const min = Math.min(...data);
   const max = Math.max(...data);
+  const isFlat = max === min;
   const range = max - min || 1;
 
   const pts = data.map((val, i) => ({
     x: PX + (i / (data.length - 1)) * (VW - PX * 2),
-    y: VH - PY - ((val - min) / range) * (VH - PY * 2),
+    y: isFlat ? VH * 0.55 : VH - PY - ((val - min) / range) * (VH - PY * 2),
   }));
 
   const linePath = buildSplinePath(pts);
@@ -475,7 +502,7 @@ function GlowStatCard({
   const last  = pts[pts.length - 1];
   const areaPath = linePath + ` L ${last.x} ${VH} L ${first.x} ${VH} Z`;
   const midY = VH / 2;
-  const uid  = title.replace(/\s+/g, '');
+  const uid  = title.replace(/[^a-zA-Z0-9]/g, '');
 
   const cs = typeof window !== 'undefined' ? getComputedStyle(document.documentElement) : null;
   const v = (name: string, fallback: string) => cs?.getPropertyValue(name).trim() || fallback;
@@ -599,6 +626,7 @@ function GlowStatCard({
           <span style={{ fontSize: '32px', fontWeight: 800, color: valueColor, letterSpacing: '-0.02em', lineHeight: 1 }}>
             {value}
           </span>
+          {trendLabel && (
           <span style={{
             display: 'inline-flex', alignItems: 'center', gap: '4px',
             padding: '4px 9px', borderRadius: '7px',
@@ -609,6 +637,7 @@ function GlowStatCard({
           }}>
             {trendPositive ? '↑' : '↓'} {trendLabel}
           </span>
+          )}
         </div>
       </div>
 
@@ -649,22 +678,22 @@ function GlowStatCard({
           <line x1={PX} y1={midY} x2={VW - PX} y2={midY}
             stroke={midLineStroke} strokeWidth="1" strokeDasharray="5 5" />
           <path d={areaPath} fill={`url(#area-${uid})`} />
-          <path d={linePath} fill="none" stroke={color} strokeWidth="10"
-            strokeLinecap="round" opacity={glowOpacity1} filter={`url(#bloom-${uid})`} />
-          <path d={linePath} fill="none" stroke={color} strokeWidth="5"
-            strokeLinecap="round" opacity={glowOpacity2} filter={`url(#bloom-${uid})`} />
+          {glowOpacity1 > 0 && <path d={linePath} fill="none" stroke={color} strokeWidth="10"
+            strokeLinecap="round" opacity={glowOpacity1} filter={`url(#bloom-${uid})`} />}
+          {glowOpacity2 > 0 && <path d={linePath} fill="none" stroke={color} strokeWidth="5"
+            strokeLinecap="round" opacity={glowOpacity2} filter={`url(#bloom-${uid})`} />}
           <path d={linePath} fill="none" stroke={`url(#line-${uid})`} strokeWidth="2.5"
             strokeLinecap="round" strokeLinejoin="round" />
           <circle cx={first.x} cy={first.y} r="4.5" fill={dotHoleFill} stroke={color} strokeWidth="2" />
-          <circle cx={last.x}  cy={last.y}  r="5"   fill={color} filter={`url(#bloom-${uid})`} />
+          <circle cx={last.x}  cy={last.y}  r="5"   fill={color} filter={glowOpacity1 > 0 ? `url(#bloom-${uid})` : undefined} />
           <circle cx={last.x}  cy={last.y}  r="4"   fill="#ffffff" opacity="0.9" />
-          {annotationStart && (
+          {annotationStart && !(isFlat && annotationStart === annotationEnd) && annotationStart !== '0' && annotationStart !== '$0' && (
             <text x={first.x + 8} y={first.y - 9}
               fill={annoStartFill} fontSize="9.5" fontWeight="700" fontFamily="system-ui">
               {annotationStart}
             </text>
           )}
-          {annotationEnd && (
+          {annotationEnd && annotationEnd !== '0' && annotationEnd !== '$0' && (
             <text x={last.x - 8} y={last.y - 9}
               fill={annoEndFill} fontSize="9.5" fontWeight="700" fontFamily="system-ui" textAnchor="end">
               {annotationEnd}
@@ -678,7 +707,7 @@ function GlowStatCard({
                 <line x1={hx} y1={0} x2={hx} y2={VH}
                   stroke={color} strokeWidth="1" strokeDasharray="3 3" opacity="0.5" />
                 <circle cx={hx} cy={hy} r="8" fill={color} opacity="0.18" />
-                <circle cx={hx} cy={hy} r="5" fill={color} filter={`url(#bloom-${uid})`} opacity="0.8" />
+                <circle cx={hx} cy={hy} r="5" fill={color} filter={glowOpacity1 > 0 ? `url(#bloom-${uid})` : undefined} opacity="0.8" />
                 <circle cx={hx} cy={hy} r="4" fill={color} />
                 <circle cx={hx} cy={hy} r="2" fill="#fff" />
               </>
@@ -826,6 +855,11 @@ export default function SuperAdminDashboardPage() {
   });
   const [finSnap, setFinSnap] = useState({ thisMonth: 0, lastMonth: 0, paid: 0, pending: 0, overdue: 0 });
   const [activityFeed, setActivityFeed] = useState<ActivityItem[]>([]);
+  const [sparkPatients, setSparkPatients] = useState<{ data: number[]; labels: string[]; loaded: boolean }>({ data: [0,0,0,0,0,0,0,0], labels: ['','','','','','','',''], loaded: false });
+  const [sparkAppts, setSparkAppts] = useState<{ data: number[]; labels: string[]; loaded: boolean }>({ data: [0,0,0,0,0,0,0,0], labels: ['','','','','','','',''], loaded: false });
+  const [sparkRevenue, setSparkRevenue] = useState<{ data: number[]; labels: string[]; loaded: boolean }>({ data: [0,0,0,0,0,0,0,0], labels: ['','','','','','','',''], loaded: false });
+  const [sparkStaff, setSparkStaff] = useState<{ data: number[]; labels: string[]; loaded: boolean }>({ data: [0,0,0,0,0,0,0,0], labels: ['','','','','','','',''], loaded: false });
+  const [greetingName, setGreetingName] = useState('');
 
   // ── Fetch Today's Activity Feed ──
   useEffect(() => {
@@ -1132,6 +1166,94 @@ export default function SuperAdminDashboardPage() {
     })();
   }, []);
 
+  // ── Sparkline: fetch historical data for charts ──
+  useEffect(() => {
+    (async () => {
+      try {
+        const { organizationId } = await getOrgContext();
+        const now = new Date();
+        const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+        // ── Greeting name from profile ──
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (authUser) {
+          const { data: prof } = await supabase.from('profiles').select('first_name').eq('id', authUser.id).single();
+          if (prof?.first_name) setGreetingName(prof.first_name);
+        }
+
+        // ── Patients: count created before end of each of last 8 months ──
+        const patientData: number[] = [];
+        const patientLabels: string[] = [];
+        for (let i = 7; i >= 0; i--) {
+          const d = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59);
+          patientLabels.push(monthNames[d.getMonth()]);
+          const { count } = await supabase
+            .from('pets')
+            .select('id', { count: 'exact', head: true })
+            .eq('organization_id', organizationId)
+            .lte('created_at', d.toISOString());
+          patientData.push(count || 0);
+        }
+        setSparkPatients({ data: patientData, labels: patientLabels, loaded: true });
+
+        // ── Appointments: count per day for last 8 days ──
+        const apptData: number[] = [];
+        const apptLabels: string[] = [];
+        const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+        for (let i = 7; i >= 0; i--) {
+          const d = new Date(now);
+          d.setDate(d.getDate() - i);
+          const dayStr = d.toISOString().slice(0, 10);
+          apptLabels.push(i === 0 ? 'Today' : dayNames[d.getDay()]);
+          const { count } = await supabase
+            .from('appointments')
+            .select('id', { count: 'exact', head: true })
+            .eq('organization_id', organizationId)
+            .gte('scheduled_at', `${dayStr}T00:00:00`)
+            .lt('scheduled_at', `${dayStr}T23:59:59`);
+          apptData.push(count || 0);
+        }
+        setSparkAppts({ data: apptData, labels: apptLabels, loaded: true });
+
+        // ── Revenue: total invoices per month for last 8 months ──
+        const revData: number[] = [];
+        const revLabels: string[] = [];
+        for (let i = 7; i >= 0; i--) {
+          const mDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
+          const mStart = mDate.toISOString();
+          const mEnd = new Date(mDate.getFullYear(), mDate.getMonth() + 1, 0, 23, 59, 59).toISOString();
+          revLabels.push(monthNames[mDate.getMonth()]);
+          const { data: inv } = await supabase
+            .from('invoices')
+            .select('total')
+            .eq('organization_id', organizationId)
+            .gte('created_at', mStart)
+            .lte('created_at', mEnd)
+            .in('status', ['Paid', 'Sent', 'Overdue']);
+          const total = (inv || []).reduce((s: number, r: any) => s + (Number(r.total) || 0), 0);
+          revData.push(total);
+        }
+        setSparkRevenue({ data: revData, labels: revLabels, loaded: true });
+
+        // ── Staff: count active staff created before end of each of last 8 months ──
+        const staffData: number[] = [];
+        const staffLabels: string[] = [];
+        for (let i = 7; i >= 0; i--) {
+          const d = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59);
+          staffLabels.push(monthNames[d.getMonth()]);
+          const { count } = await supabase
+            .from('staff')
+            .select('id', { count: 'exact', head: true })
+            .eq('organization_id', organizationId)
+            .neq('status', 'Inactive')
+            .lte('created_at', d.toISOString());
+          staffData.push(count || 0);
+        }
+        setSparkStaff({ data: staffData, labels: staffLabels, loaded: true });
+      } catch {}
+    })();
+  }, []);
+
   // ── KPI: Monthly Revenue (re-fetches on month change) ──
   useEffect(() => {
     (async () => {
@@ -1206,17 +1328,50 @@ export default function SuperAdminDashboardPage() {
                 color: 'var(--text-primary)', margin: 0,
               }}
             >
-              Good morning, Victoria 👋
+              Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}{greetingName ? `, ${greetingName}` : ''} 👋
             </h1>
           </div>
           <p style={{ fontSize: '14px', color: 'var(--text-secondary)', margin: 0 }}>
-            Sunday, March 15, 2026
+            {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
           </p>
         </div>
 
         <div className="flex items-center gap-3">
           <ConnectionStatusBadge />
           <button
+            onClick={() => {
+              const now = new Date();
+              const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+              const rows = [
+                ['HugoIT Dashboard Report'],
+                [`Generated: ${dateStr}`],
+                [''],
+                ['Metric', 'Value', 'Trend'],
+                ['Total Patients', kpiPatients, kpiPatientsTrend],
+                ['Appointments Today', kpiApptsToday, kpiApptsTrend],
+                ['Monthly Revenue', kpiRevenue, kpiRevenueTrend],
+                ['Active Staff', kpiStaffCount, kpiStaffTrend],
+                [''],
+                ['Financial Snapshot'],
+                ['This Month Revenue', `$${finSnap.thisMonth.toLocaleString()}`],
+                ['Last Month Revenue', `$${finSnap.lastMonth.toLocaleString()}`],
+                ['Paid Invoices', `$${finSnap.paid.toLocaleString()}`],
+                ['Pending Invoices', `$${finSnap.pending.toLocaleString()}`],
+                ['Overdue Invoices', `$${finSnap.overdue.toLocaleString()}`],
+                [''],
+                ['Staff Overview'],
+                ['Name', 'Role', 'Status'],
+                ...staffRows.map(s => [s.name, s.role, s.status]),
+              ];
+              const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+              const blob = new Blob([csv], { type: 'text/csv' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `vettrack-report-${now.toISOString().slice(0, 10)}.csv`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
             style={{
               display: 'inline-flex', alignItems: 'center', gap: '6px',
               padding: '8px 16px', borderRadius: '8px',
@@ -1247,21 +1402,53 @@ export default function SuperAdminDashboardPage() {
           let dynamicTrend = card.trendLabel;
           let dynamicTrendPositive = card.trendPositive;
           let dynamicSubtitle = card.subtitle;
+          let dynamicData = card.data;
+          let dynamicLabels = card.labels;
+          let dynamicAnnoStart = card.annotationStart;
+          let dynamicAnnoEnd = card.annotationEnd;
+          const fmtAnno = (v: number, unit: string) => {
+            if (unit === 'USD') return v >= 1000 ? `$${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : `$${v}`;
+            return v.toLocaleString();
+          };
           if (card.title === 'Total Patients') {
             dynamicValue = kpiPatients;
             dynamicTrend = kpiPatientsTrend;
+            if (sparkPatients.loaded) {
+              dynamicData = sparkPatients.data;
+              dynamicLabels = sparkPatients.labels;
+              dynamicAnnoStart = fmtAnno(sparkPatients.data[0], 'patients');
+              dynamicAnnoEnd = fmtAnno(sparkPatients.data[sparkPatients.data.length - 1], 'patients');
+            }
           } else if (card.title === 'Appointments') {
             dynamicValue = kpiApptsToday;
             dynamicTrend = kpiApptsTrend;
+            if (sparkAppts.loaded) {
+              dynamicData = sparkAppts.data;
+              dynamicLabels = sparkAppts.labels;
+              dynamicAnnoStart = fmtAnno(sparkAppts.data[0], 'appts');
+              dynamicAnnoEnd = fmtAnno(sparkAppts.data[sparkAppts.data.length - 1], 'appts');
+            }
           } else if (card.title === 'Monthly Revenue') {
             dynamicValue = kpiRevenue;
             dynamicTrend = kpiRevenueTrend;
             dynamicTrendPositive = kpiRevenueTrendPositive;
             const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
             dynamicSubtitle = `${monthNames[revenueMonth.month]} ${revenueMonth.year}`;
+            if (sparkRevenue.loaded) {
+              dynamicData = sparkRevenue.data;
+              dynamicLabels = sparkRevenue.labels;
+              dynamicAnnoStart = fmtAnno(sparkRevenue.data[0], 'USD');
+              dynamicAnnoEnd = fmtAnno(sparkRevenue.data[sparkRevenue.data.length - 1], 'USD');
+            }
           } else if (card.title === 'Active Staff') {
             dynamicValue = kpiStaffCount;
             dynamicTrend = kpiStaffTrend;
+            if (sparkStaff.loaded) {
+              dynamicData = sparkStaff.data;
+              dynamicLabels = sparkStaff.labels;
+              dynamicAnnoStart = fmtAnno(sparkStaff.data[0], 'staff');
+              dynamicAnnoEnd = fmtAnno(sparkStaff.data[sparkStaff.data.length - 1], 'staff');
+            }
           }
           const isRevenue = card.title === 'Monthly Revenue';
           return (
@@ -1272,6 +1459,10 @@ export default function SuperAdminDashboardPage() {
               trendLabel={dynamicTrend}
               trendPositive={dynamicTrendPositive}
               subtitle={dynamicSubtitle}
+              data={dynamicData}
+              labels={dynamicLabels}
+              annotationStart={dynamicAnnoStart}
+              annotationEnd={dynamicAnnoEnd}
               onPrev={isRevenue ? () => setRevenueMonth(prev => {
                 const m = prev.month - 1;
                 return m < 0 ? { year: prev.year - 1, month: 11 } : { year: prev.year, month: m };

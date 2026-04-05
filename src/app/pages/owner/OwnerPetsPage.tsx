@@ -7,6 +7,7 @@ import {
 import { Avatar, AvatarImage, AvatarFallback } from '../../components/ui/avatar';
 import { Badge } from '../../components/ui/badge';
 import { usePets } from '../../hooks/usePets';
+import { useOwnerClient } from '../../hooks/useOwnerClient';
 
 // ─── Brand ───────────────────────────────────────────────────
 const BRAND = '#2D6A4F';
@@ -22,7 +23,14 @@ const PET_EMOJI = { Dog: '🐕', Cat: '🐈', default: '🐾' };
 
 export default function OwnerPetsPage() {
   const navigate = useNavigate();
-  const { pets: supaPets } = usePets();
+  const { pets: allPets } = usePets();
+  const { client: ownerClient, clientId } = useOwnerClient();
+
+  // Filter to only this owner's pets
+  const supaPets = useMemo(() =>
+    clientId ? allPets.filter(p => p.client_id === clientId) : allPets,
+    [allPets, clientId],
+  );
 
   const PETS = useMemo(() =>
     supaPets.map((p) => {
@@ -69,7 +77,7 @@ export default function OwnerPetsPage() {
             <h1 style={{ fontSize: '26px', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>My Pets</h1>
           </div>
           <p style={{ fontSize: '14px', color: 'var(--text-secondary)', margin: 0, paddingLeft: '48px' }}>
-            {PETS.length} pets registered · John Smith
+            {PETS.length} pets registered · {ownerClient.fullName || 'My Pets'}
           </p>
         </div>
 

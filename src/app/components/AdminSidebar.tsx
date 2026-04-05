@@ -8,7 +8,7 @@ import { showToast } from './ToastNotification';
 import {
   Home, Calendar, CreditCard, MessageSquare, MessageCircle, Users, FileText, UserCircle, Clock,
   PawPrint, Sun, Moon, ChevronLeft, ChevronRight, LogOut, ChevronUp, Settings, CheckSquare,
-  Bell,
+  Bell, FlaskConical,
 } from 'lucide-react';
 
 type NavItem = {
@@ -44,8 +44,9 @@ const NAV_SECTIONS: NavSection[] = [
       { name: 'Bookings', icon: Calendar,    path: '/admin/bookings' },
       { name: 'Payments', icon: CreditCard,  path: '/admin/payments' },
       { name: 'Clients',  icon: Users,        path: '/admin/clients' },
-      { name: 'Records',  icon: FileText,    path: '/admin/records' },
-      { name: 'Tasks',    icon: CheckSquare, path: '/admin/tasks' },
+      { name: 'Records',  icon: FileText,       path: '/admin/records' },
+      { name: 'Lab',      icon: FlaskConical,   path: '/admin/lab' },
+      { name: 'Tasks',    icon: CheckSquare,    path: '/admin/tasks' },
     ],
   },
 ];
@@ -123,7 +124,7 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
     }
 
     checkChatUnread();
-    interval = setInterval(checkChatUnread, 3000);
+    interval = setInterval(checkChatUnread, 15000);
 
     return () => { mounted = false; if (interval) clearInterval(interval); };
   }, [pathname, user]);
@@ -137,15 +138,96 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
     return () => window.removeEventListener('adminChatRead', handler);
   }, []);
 
-  // Update sections when chatUnread changes
+  // ── Email unread badge from Gmail API ──────────
+  const [emailUnread, setEmailUnread] = useState(0);
+  const prevEmailCountRef = useRef(-1);
+
+  useEffect(() => {
+    if (!user) return;
+    let mounted = true;
+    let interval: ReturnType<typeof setInterval>;
+
+    async function checkEmailUnread() {
+      if (!mounted) return;
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return;
+
+        // Check if user has an active email integration first
+        const { data: integrations } = await supabase
+          .from('email_integrations')
+          .select('id, provider, status')
+          .eq('user_id', user!.id)
+          .eq('status', 'active');
+
+        if (!integrations || integrations.length === 0) {
+          if (mounted) setEmailUnread(0);
+          return;
+        }
+
+        // Fetch inbox unread count from Gmail labels API
+        const FUNCTIONS_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`;
+        const resp = await fetch(`${FUNCTIONS_BASE}/gmail-api?action=labels`, {
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+          },
+        });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const labels = data.labels || [];
+        const inbox = labels.find((l: any) => l.id === 'INBOX');
+        const unread = inbox?.messagesUnread || 0;
+
+        if (mounted && unread > 0 && prevEmailCountRef.current >= 0 && unread > prevEmailCountRef.current && pathname !== '/admin/communications') {
+          showToast({
+            type: 'info',
+            title: 'New Email',
+            message: `You have ${unread} unread email${unread > 1 ? 's' : ''} in your inbox`,
+            link: '/admin/communications',
+          });
+        }
+        if (mounted) { prevEmailCountRef.current = unread; setEmailUnread(unread); }
+      } catch (err) {
+        // Silently fail — email badge is non-critical
+      }
+    }
+
+    checkEmailUnread();
+    interval = setInterval(checkEmailUnread, 30000); // Check every 30 seconds
+
+    return () => { mounted = false; if (interval) clearInterval(interval); };
+  }, [pathname, user]);
+
+  // Listen for email read events from Communications page — decrement badge
+  useEffect(() => {
+    const handler = () => {
+      setEmailUnread(prev => {
+        const next = Math.max(0, prev - 1);
+        prevEmailCountRef.current = next;
+        return next;
+      });
+    };
+    window.addEventListener('adminEmailRead', handler);
+    return () => window.removeEventListener('adminEmailRead', handler);
+  }, []);
+
+  // Update sections when chatUnread or emailUnread changes
   useEffect(() => {
     setSections(NAV_SECTIONS.map(s => s.id === 'overview' ? {
       ...s,
-      items: s.items.map(item =>
-        item.path === '/admin/chat' ? { ...item, badge: chatUnread || undefined } : item
-      ),
+      items: s.items.map(item => {
+        if (item.path === '/admin/chat') return { ...item, badge: chatUnread || undefined };
+        if (item.path === '/admin/communications') {
+          // Hide badge when user is on the communications page
+          const showBadge = pathname !== '/admin/communications' ? emailUnread : undefined;
+          return { ...item, badge: showBadge || undefined };
+        }
+        return item;
+      }),
     } : s));
-  }, [chatUnread]);
+  }, [chatUnread, emailUnread, pathname]);
 
   const profileRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -251,10 +333,10 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
                           width: '4px',
                           borderRadius: '3px',
                           backgroundColor: 'var(--brand-green-text)',
-                          boxShadow: '0 0 12px 3px var(--brand-green-text)',
+                          boxShadow: isDark ? '0 0 12px 3px var(--brand-green-text)' : 'none',
                           zIndex: 2,
                         }} />
-                        <span style={{
+                        {isDark && <span style={{
                           position: 'absolute',
                           left: 0,
                           top: 0,
@@ -265,7 +347,7 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
                           pointerEvents: 'none',
                           borderRadius: '8px 0 0 8px',
                           zIndex: 1,
-                        }} />
+                        }} />}
                       </>
                     )}
                     <Link
@@ -483,7 +565,11 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
                     {adminProfile.fullName}
                   </p>
                   <p className="text-[var(--text-secondary)] truncate" style={{ fontSize: '12px', fontWeight: 400 }}>
-                    Front Desk Admin
+                    {adminProfile.role === 'clinic_manager' ? 'Clinic Manager'
+                      : adminProfile.role === 'front_desk_manager' ? 'Front Desk Manager'
+                      : adminProfile.role === 'receptionist' ? 'Receptionist'
+                      : adminProfile.role === 'superadmin' ? 'Super Administrator'
+                      : 'Staff'}
                   </p>
                 </div>
                 <ChevronUp

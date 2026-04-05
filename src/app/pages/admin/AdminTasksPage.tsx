@@ -98,7 +98,7 @@ const PRIORITY_CONFIG: Record<Priority, { color: string; bg: string; dot: string
 
 const STATUS_CONFIG: Record<TaskStatus, { color: string; bg: string; label: string }> = {
   'Pending':     { color: '#F4A261', bg: 'rgba(244,162,97,0.1)',  label: 'Pending'     },
-  'In Progress': { color: '#3B82F6', bg: 'rgba(59,130,246,0.1)',  label: 'In Progress' },
+  'In Progress': { color: '#3B82F6', bg: 'rgba(45,106,79,0.1)',  label: 'In Progress' },
   'Completed':   { color: '#2D6A4F', bg: 'rgba(45,106,79,0.1)',   label: 'Completed'   },
 };
 
@@ -274,7 +274,7 @@ function TaskCard({
                 className="flex items-center gap-1.5 transition-colors hover:opacity-80"
                 style={{
                   fontSize: 12, fontWeight: 600, padding: '5px 10px', borderRadius: 8,
-                  backgroundColor: '#2D6A4F', color: '#fff', border: 'none', cursor: 'pointer',
+                  backgroundColor: '#2D6A4F', color: 'var(--on-brand-green)', border: 'none', cursor: 'pointer',
                 }}
               >
                 <CheckCircle2 style={{ width: 13, height: 13 }} />
@@ -546,7 +546,7 @@ export default function AdminTasksPage() {
         </div>
         <Button
           onClick={() => setAddOpen(true)}
-          style={{ backgroundColor: '#2D6A4F', color: '#fff', fontWeight: 600, fontSize: '14px', borderRadius: '10px', padding: '10px 20px' }}
+          style={{ backgroundColor: '#2D6A4F', color: 'var(--on-brand-green)', fontWeight: 600, fontSize: '14px', borderRadius: '10px', padding: '10px 20px' }}
         >
           <Plus style={{ width: 16, height: 16, marginRight: 6 }} />
           Add Task
@@ -658,7 +658,7 @@ export default function AdminTasksPage() {
                 padding: '7px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 600,
                 border: 'none', cursor: 'pointer',
                 backgroundColor: isActive ? '#2D6A4F' : 'transparent',
-                color: isActive ? '#fff' : 'var(--text-secondary)',
+                color: isActive ? 'var(--on-brand-green)' : 'var(--text-secondary)',
               }}
             >
               {tab.label}
@@ -666,7 +666,7 @@ export default function AdminTasksPage() {
                 fontSize: 11, fontWeight: 700,
                 padding: '1px 7px', borderRadius: 999,
                 backgroundColor: isActive ? 'rgba(255,255,255,0.2)' : 'var(--surface-elevated)',
-                color: isActive ? '#fff' : 'var(--text-secondary)',
+                color: isActive ? 'var(--on-brand-green)' : 'var(--text-secondary)',
               }}>
                 {count}
               </span>
@@ -814,7 +814,7 @@ export default function AdminTasksPage() {
             <Button
               onClick={handleAddTask}
               disabled={addSaving || !addPetId || !addAssignedById || !addDueDate}
-              style={{ backgroundColor: '#2D6A4F', color: '#fff' }}
+              style={{ backgroundColor: '#2D6A4F', color: 'var(--on-brand-green)' }}
             >
               {addSaving ? 'Saving…' : 'Create Task'}
             </Button>

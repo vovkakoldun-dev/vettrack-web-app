@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { supabase } from '../lib/supabase';
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router';
 import { Sidebar } from './components/Sidebar';
@@ -7,60 +7,82 @@ import { useTheme } from './hooks/useTheme';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { TenantProvider, TenantGate } from './context/TenantContext';
 import { PortalGuard } from './components/PortalGuard';
-import DashboardPage from './pages/DashboardPage';
-import ClientsPage from './pages/ClientsPage';
-import ClientDetailPage from './pages/ClientDetailPage';
-import AppointmentsPage from './pages/AppointmentsPage';
-import MyPortalPage from './pages/MyPortalPage';
-import MyPatientsPage from './pages/MyPatientsPage';
-import RecordsPage from './pages/RecordsPage';
-import RecordDetailPage from './pages/RecordDetailPage';
-import NotificationsPage from './pages/NotificationsPage';
-import LabPage from './pages/LabPage';
-import SettingsPage from './pages/SettingsPage';
-import VaccinesPage from './pages/VaccinesPage';
-import PetsPage from './pages/PetsPage';
-import ChatPage from './pages/ChatPage';
 import LoginPage from './pages/LoginPage';
 import ToastNotification from './components/ToastNotification';
-import SupabaseTestPage from './pages/SupabaseTestPage';
-import VisitPage from './pages/VisitPage';
-import CheckoutPage from './pages/CheckoutPage';
-import OwnerDashboardPage from './pages/owner/OwnerDashboardPage';
-import OwnerContactPage from './pages/owner/OwnerContactPage';
-import OwnerPetProfilePage from './pages/owner/OwnerPetProfilePage';
-import OwnerPetsPage from './pages/owner/OwnerPetsPage';
-import OwnerAppointmentsPage from './pages/owner/OwnerAppointmentsPage';
-import OwnerRecordsPage from './pages/owner/OwnerRecordsPage';
-import OwnerRecordDetailPage from './pages/owner/OwnerRecordDetailPage';
-import OwnerInvoicesPage from './pages/owner/OwnerInvoicesPage';
 import { OwnerSidebar } from './components/OwnerSidebar';
 import { SuperAdminSidebar } from './components/SuperAdminSidebar';
-import AdminDashboardPage from './pages/admin/AdminDashboardPage';
-import SuperAdminDashboardPage from './pages/superadmin/SuperAdminDashboardPage';
-import SuperAdminAnalyticsPage from './pages/superadmin/SuperAdminAnalyticsPage';
-import SuperAdminSettingsPage from './pages/superadmin/SuperAdminSettingsPage';
-import SuperAdminChatPage from './pages/superadmin/SuperAdminChatPage';
-import SuperAdminBillingPage from './pages/superadmin/SuperAdminBillingPage';
-import SuperAdminServicesPage from './pages/superadmin/SuperAdminServicesPage';
-import SuperAdminStaffPage from './pages/superadmin/SuperAdminStaffPage';
-import SuperAdminAppointmentsPage from './pages/superadmin/SuperAdminAppointmentsPage';
-import SuperAdminPatientPortalsPage from './pages/superadmin/SuperAdminPatientPortalsPage';
-import AdminBookingsPage from './pages/admin/AdminBookingsPage';
-import AdminPaymentsPage from './pages/admin/AdminPaymentsPage';
-import AdminCommunicationsPage from './pages/admin/AdminCommunicationsPage';
-import AdminClientsPage from './pages/admin/AdminClientsPage';
-import AdminMyPortalPage from './pages/admin/AdminMyPortalPage';
-import AdminTasksPage from './pages/admin/AdminTasksPage';
-import AdminSettingsPage from './pages/admin/AdminSettingsPage';
-import AdminChatPage from './pages/admin/AdminChatPage';
-import ShiftsPage from './pages/ShiftsPage';
-import SuperAdminShiftsPage from './pages/superadmin/SuperAdminShiftsPage';
-import SystemAdminPage from './pages/sysadmin/SystemAdminPage';
 import { ActiveVisitProvider, useActiveVisit } from './context/ActiveVisitContext';
+
+// ─── Lazy-loaded pages (code-split per portal) ────────────────
+// Doctor portal
+const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const ClientsPage = lazy(() => import('./pages/ClientsPage'));
+const ClientDetailPage = lazy(() => import('./pages/ClientDetailPage'));
+const AppointmentsPage = lazy(() => import('./pages/AppointmentsPage'));
+const MyPortalPage = lazy(() => import('./pages/MyPortalPage'));
+const MyPatientsPage = lazy(() => import('./pages/MyPatientsPage'));
+const RecordsPage = lazy(() => import('./pages/RecordsPage'));
+const RecordDetailPage = lazy(() => import('./pages/RecordDetailPage'));
+const NotificationsPage = lazy(() => import('./pages/NotificationsPage'));
+const LabPage = lazy(() => import('./pages/LabPage'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const VaccinesPage = lazy(() => import('./pages/VaccinesPage'));
+const PetsPage = lazy(() => import('./pages/PetsPage'));
+const ChatPage = lazy(() => import('./pages/ChatPage'));
+const SupabaseTestPage = lazy(() => import('./pages/SupabaseTestPage'));
+const VisitPage = lazy(() => import('./pages/VisitPage'));
+const CheckoutPage = lazy(() => import('./pages/CheckoutPage'));
+const ShiftsPage = lazy(() => import('./pages/ShiftsPage'));
+// Owner portal
+const OwnerDashboardPage = lazy(() => import('./pages/owner/OwnerDashboardPage'));
+const OwnerContactPage = lazy(() => import('./pages/owner/OwnerContactPage'));
+const OwnerSettingsPage = lazy(() => import('./pages/owner/OwnerSettingsPage'));
+const OwnerPetProfilePage = lazy(() => import('./pages/owner/OwnerPetProfilePage'));
+const OwnerPetsPage = lazy(() => import('./pages/owner/OwnerPetsPage'));
+const OwnerAppointmentsPage = lazy(() => import('./pages/owner/OwnerAppointmentsPage'));
+const OwnerRecordsPage = lazy(() => import('./pages/owner/OwnerRecordsPage'));
+const OwnerRecordDetailPage = lazy(() => import('./pages/owner/OwnerRecordDetailPage'));
+const OwnerInvoicesPage = lazy(() => import('./pages/owner/OwnerInvoicesPage'));
+// Admin portal
+const AdminDashboardPage = lazy(() => import('./pages/admin/AdminDashboardPage'));
+const AdminBookingsPage = lazy(() => import('./pages/admin/AdminBookingsPage'));
+const AdminPaymentsPage = lazy(() => import('./pages/admin/AdminPaymentsPage'));
+const AdminCommunicationsPage = lazy(() => import('./pages/admin/AdminCommunicationsPage'));
+const AdminClientsPage = lazy(() => import('./pages/admin/AdminClientsPage'));
+const AdminMyPortalPage = lazy(() => import('./pages/admin/AdminMyPortalPage'));
+const AdminTasksPage = lazy(() => import('./pages/admin/AdminTasksPage'));
+const AdminSettingsPage = lazy(() => import('./pages/admin/AdminSettingsPage'));
+const AdminChatPage = lazy(() => import('./pages/admin/AdminChatPage'));
+// SuperAdmin portal
+const SuperAdminDashboardPage = lazy(() => import('./pages/superadmin/SuperAdminDashboardPage'));
+const SuperAdminAnalyticsPage = lazy(() => import('./pages/superadmin/SuperAdminAnalyticsPage'));
+const SuperAdminSettingsPage = lazy(() => import('./pages/superadmin/SuperAdminSettingsPage'));
+const SuperAdminChatPage = lazy(() => import('./pages/superadmin/SuperAdminChatPage'));
+const SuperAdminBillingPage = lazy(() => import('./pages/superadmin/SuperAdminBillingPage'));
+const SuperAdminServicesPage = lazy(() => import('./pages/superadmin/SuperAdminServicesPage'));
+const SuperAdminStaffPage = lazy(() => import('./pages/superadmin/SuperAdminStaffPage'));
+const SuperAdminAppointmentsPage = lazy(() => import('./pages/superadmin/SuperAdminAppointmentsPage'));
+const SuperAdminPatientPortalsPage = lazy(() => import('./pages/superadmin/SuperAdminPatientPortalsPage'));
+const SuperAdminShiftsPage = lazy(() => import('./pages/superadmin/SuperAdminShiftsPage'));
+const SuperAdminClientsPage = lazy(() => import('./pages/superadmin/SuperAdminClientsPage'));
+// System admin
+const SystemAdminPage = lazy(() => import('./pages/sysadmin/SystemAdminPage'));
 import { AppointmentStatusProvider } from './context/AppointmentStatusContext';
 import { Avatar, AvatarImage, AvatarFallback } from './components/ui/avatar';
 import { ClipboardList, Receipt, ArrowRight, X, Clock, Menu, PawPrint, Crown } from 'lucide-react';
+
+// ─── Lazy loading fallback ────────────────────────────────────
+function PageLoader() {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', width: '100%' }}>
+      <div style={{
+        width: 28, height: 28, border: '3px solid var(--border-color)',
+        borderTopColor: 'var(--brand-green-text)', borderRadius: '50%',
+        animation: 'spin 0.7s linear infinite',
+      }} />
+    </div>
+  );
+}
 
 // ─── Active Visit Floating Widget ────────────────────────────
 
@@ -236,6 +258,7 @@ function MainApp() {
     <div className="flex h-screen bg-[var(--bg-offwhite)]">
       <Sidebar isDark={isDark} onToggleTheme={toggle} />
       <main className="flex-1 overflow-auto">
+        <Suspense fallback={<PageLoader />}>
         <Routes>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/clients" element={<ClientsPage />} />
@@ -256,6 +279,7 @@ function MainApp() {
           <Route path="/chat" element={<ChatPage />} />
           <Route path="/supabase-test" element={<SupabaseTestPage />} />
         </Routes>
+        </Suspense>
       </main>
       {/* Floating active-visit widget — renders above everything */}
       <ActiveVisitWidget />
@@ -271,6 +295,7 @@ function AdminApp() {
     <div className="flex h-screen bg-[var(--bg-offwhite)]">
       <AdminSidebar isDark={isDark} onToggleTheme={toggle} />
       <main className="flex-1 overflow-auto">
+        <Suspense fallback={<PageLoader />}>
         <Routes>
           <Route path="/" element={<AdminDashboardPage />} />
           <Route path="/bookings" element={<AdminBookingsPage />} />
@@ -281,12 +306,14 @@ function AdminApp() {
           <Route path="/clients/:id" element={<ClientDetailPage />} />
           <Route path="/records" element={<RecordsPage />} />
           <Route path="/records/:id" element={<RecordDetailPage />} />
+          <Route path="/lab" element={<LabPage />} />
           <Route path="/my-portal" element={<AdminMyPortalPage />} />
           <Route path="/shifts" element={<ShiftsPage />} />
           <Route path="/chat" element={<AdminChatPage />} />
           <Route path="/tasks" element={<AdminTasksPage />} />
           <Route path="/settings" element={<AdminSettingsPage />} />
         </Routes>
+        </Suspense>
       </main>
     </div>
   );
@@ -323,6 +350,7 @@ function OwnerApp() {
           </div>
         </div>
         <main className="flex-1 overflow-auto">
+          <Suspense fallback={<PageLoader />}>
           <Routes>
             <Route path="/" element={<OwnerDashboardPage />} />
             <Route path="/pets" element={<OwnerPetsPage />} />
@@ -333,7 +361,9 @@ function OwnerApp() {
             <Route path="/invoices" element={<OwnerInvoicesPage />} />
             <Route path="/messages" element={<OwnerDashboardPage />} />
             <Route path="/contact" element={<OwnerContactPage />} />
+            <Route path="/settings" element={<OwnerSettingsPage />} />
           </Routes>
+          </Suspense>
         </main>
       </div>
     </div>
@@ -371,6 +401,7 @@ function SuperAdminApp() {
           </div>
         </div>
         <main className="flex-1 overflow-auto">
+          <Suspense fallback={<PageLoader />}>
           <Routes>
             <Route path="/" element={<SuperAdminDashboardPage />} />
             <Route path="/staff" element={<SuperAdminStaffPage />} />
@@ -379,6 +410,8 @@ function SuperAdminApp() {
             <Route path="/clinics" element={<SuperAdminDashboardPage />} />
             <Route path="/appointments" element={<SuperAdminAppointmentsPage />} />
             <Route path="/portals" element={<SuperAdminPatientPortalsPage />} />
+            <Route path="/clients" element={<SuperAdminClientsPage />} />
+            <Route path="/clients/:id" element={<ClientDetailPage />} />
             <Route path="/billing" element={<SuperAdminBillingPage />} />
             <Route path="/invoices" element={<SuperAdminDashboardPage />} />
             <Route path="/settings" element={<SuperAdminSettingsPage />} />
@@ -386,6 +419,7 @@ function SuperAdminApp() {
             <Route path="/chat" element={<SuperAdminChatPage />} />
             <Route path="/services" element={<SuperAdminServicesPage />} />
           </Routes>
+          </Suspense>
         </main>
       </div>
     </div>

@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import {
   CheckCircle2, Circle, Plus, X, ArrowRight,
-  CreditCard, CalendarCheck, ClipboardList,
+  CreditCard, CalendarCheck, ClipboardList, PawPrint,
   Clock, Users, DollarSign,
   MessageSquare, ChevronRight,
   Phone, Mail, Zap, Camera, ArrowUpRight,
@@ -19,6 +19,8 @@ import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { getOrgContext } from '../../hooks/useOrgContext';
 import { useDashboardStats } from '../../hooks/useDashboardStats';
+import { AddClientDialog } from '../../components/AddClientDialog';
+import { useClients, type AddClientValues } from '../../hooks/useClients';
 
 // ─── GlowStatCard infrastructure (mirrored from MyPortalPage) ─
 
@@ -75,7 +77,7 @@ function GlowStatCard({
   const first = pts[0]; const last = pts[pts.length - 1];
   const areaPath = linePath + ` L ${last.x} ${VH} L ${first.x} ${VH} Z`;
   const midY = VH / 2;
-  const uid = title.replace(/\s+/g, '');
+  const uid = title.replace(/[^a-zA-Z0-9]/g, '');
 
   // Read CSS custom properties for theme-aware tokens
   const cs = typeof window !== 'undefined' ? getComputedStyle(document.documentElement) : null;
@@ -147,11 +149,11 @@ function GlowStatCard({
           </defs>
           <line x1={PX} y1={midY} x2={VW - PX} y2={midY} stroke={midLineStroke} strokeWidth="1" strokeDasharray="5 5" />
           <path d={areaPath} fill={`url(#area-${uid})`} />
-          <path d={linePath} fill="none" stroke={color} strokeWidth="10" strokeLinecap="round" opacity={glowOpacity1} filter={`url(#bloom-${uid})`} />
-          <path d={linePath} fill="none" stroke={color} strokeWidth="5"  strokeLinecap="round" opacity={glowOpacity2} filter={`url(#bloom-${uid})`} />
+          {glowOpacity1 > 0 && <path d={linePath} fill="none" stroke={color} strokeWidth="10" strokeLinecap="round" opacity={glowOpacity1} filter={`url(#bloom-${uid})`} />}
+          {glowOpacity2 > 0 && <path d={linePath} fill="none" stroke={color} strokeWidth="5"  strokeLinecap="round" opacity={glowOpacity2} filter={`url(#bloom-${uid})`} />}
           <path d={linePath} fill="none" stroke={`url(#line-${uid})`} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
           <circle cx={first.x} cy={first.y} r="4.5" fill={dotHoleFill} stroke={color} strokeWidth="2" />
-          <circle cx={last.x}  cy={last.y}  r="5" fill={color} filter={`url(#bloom-${uid})`} />
+          <circle cx={last.x}  cy={last.y}  r="5" fill={color} filter={glowOpacity1 > 0 ? `url(#bloom-${uid})` : undefined} />
           <circle cx={last.x}  cy={last.y}  r="4" fill="#ffffff" opacity="0.9" />
           {annotationStart && <text x={first.x + 8} y={first.y - 9} fill={annoStartFill} fontSize="9.5" fontWeight="700" fontFamily="system-ui">{annotationStart}</text>}
           {annotationEnd   && <text x={last.x  - 8} y={last.y  - 9} fill={annoEndFill}   fontSize="9.5" fontWeight="700" fontFamily="system-ui" textAnchor="end">{annotationEnd}</text>}
@@ -160,7 +162,7 @@ function GlowStatCard({
             return (<>
               <line x1={hx} y1={0} x2={hx} y2={VH} stroke={color} strokeWidth="1" strokeDasharray="3 3" opacity="0.5" />
               <circle cx={hx} cy={hy} r="8" fill={color} opacity="0.18" />
-              <circle cx={hx} cy={hy} r="5" fill={color} filter={`url(#bloom-${uid})`} opacity="0.8" />
+              <circle cx={hx} cy={hy} r="5" fill={color} filter={glowOpacity1 > 0 ? `url(#bloom-${uid})` : undefined} opacity="0.8" />
               <circle cx={hx} cy={hy} r="4" fill={color} />
               <circle cx={hx} cy={hy} r="2" fill="#fff" />
             </>);
@@ -329,7 +331,7 @@ interface PortalTask { id: string; text: string; done: boolean; priority: 'high'
 // RECENT_ACTIVITY is now fetched from Supabase inside the component
 
 const QUICK_ACTIONS = [
-  { icon: CreditCard,    label: 'Process Payment', color: '#2D6A4F', path: '/admin/payments'       },
+  { icon: CreditCard,    label: 'Process Payment', color: 'var(--brand-green-text)', path: '/admin/payments'       },
   { icon: CalendarCheck, label: 'New Booking',      color: '#3B82F6', path: '/admin/bookings'       },
   { icon: Users,         label: 'Add Client',       color: '#8B5CF6', path: '/admin/clients'        },
   { icon: MessageSquare, label: 'Send Reminder',    color: '#F4A261', path: '/admin/communications' },
@@ -345,17 +347,49 @@ export default function AdminMyPortalPage() {
   const [tasksLoading, setTasksLoading] = useState(true);
   const [ADMIN_PROFILE, setAdminProfile] = useState<AdminProfile>(DEFAULT_ADMIN_PROFILE);
   const [profileLoading, setProfileLoading] = useState(true);
+  const [ptoAllowance, setPtoAllowance] = useState(20);
+  const [sickAllowance, setSickAllowance] = useState(10);
+  const [addClientOpen, setAddClientOpen] = useState(false);
+  const { addClient, refetch: refetchClients } = useClients();
 
-  // Fetch admin profile from Supabase on mount
+  const handleAddClient = async (values: AddClientValues): Promise<string | void> => {
+    const { data, error } = await addClient(values);
+    if (!error && data) return (data as any).id as string;
+  };
+
+  // ─── Single parallel data fetch on mount ─────────────────────
   useEffect(() => {
     if (!user) return;
     (async () => {
-      const { data } = await supabase
-        .from('profiles')
-        .select('id, first_name, last_name, email, phone, avatar_url, role')
-        .eq('id', user.id)
-        .single();
-      if (data) {
+      const { organizationId } = await getOrgContext();
+      const now = new Date();
+      const today = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}`;
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      const weekAgoStr = weekAgo.toISOString();
+
+      const [profileRes, tasksRes, checkinsRes, paymentsRes, apptsRes, newClientsRes, timeBlocksRes, staffRes] = await Promise.all([
+        // Profile
+        supabase.from('profiles').select('id, first_name, last_name, email, phone, avatar_url, role').eq('id', user.id).single(),
+        // Tasks
+        supabase.from('tasks').select('id, type, priority, status, due_date, doctor_notes, pet:pets!tasks_pet_id_fkey(name), client:clients!tasks_client_id_fkey(first_name, last_name)').eq('organization_id', organizationId).order('due_date', { ascending: true }).limit(10),
+        // Today's check-ins
+        supabase.from('appointments').select('id, scheduled_at, status, reason, pets!inner(name, clients!inner(first_name, last_name)), services(name)').eq('organization_id', organizationId).gte('scheduled_at', `${today}T00:00:00`).lte('scheduled_at', `${today}T23:59:59`).order('scheduled_at', { ascending: true }).limit(8),
+        // Recent payments
+        supabase.from('payments').select('id, amount, method, paid_at, invoices!inner(id, client_id, clients!inner(first_name, last_name, pets(name)))').gte('paid_at', weekAgoStr).order('paid_at', { ascending: false }).limit(3),
+        // Recent appointments
+        supabase.from('appointments').select('id, status, scheduled_at, pets!inner(name, clients!inner(first_name, last_name))').eq('organization_id', organizationId).gte('scheduled_at', weekAgoStr).in('status', ['Confirmed', 'Completed', 'Cancelled']).order('scheduled_at', { ascending: false }).limit(3),
+        // New clients
+        supabase.from('clients').select('id, first_name, last_name, created_at, pets(id)').eq('organization_id', organizationId).gte('created_at', weekAgoStr).order('created_at', { ascending: false }).limit(2),
+        // Time blocks
+        supabase.from('staff_time_blocks').select('*').eq('organization_id', organizationId).eq('staff_id', user.id).order('date'),
+        // Staff record (PTO/sick allowance)
+        supabase.from('staff').select('pto_allowance, sick_allowance').eq('id', user.id).single(),
+      ]);
+
+      // Profile
+      if (profileRes.data) {
+        const data = profileRes.data;
         setAdminProfile({
           name: (data.first_name && data.last_name) ? `${data.first_name} ${data.last_name}` : 'Sarah Mitchell',
           role: 'Front Desk Admin',
@@ -367,6 +401,101 @@ export default function AdminMyPortalPage() {
         });
       }
       setProfileLoading(false);
+
+      // PTO / Sick allowance from staff record
+      if (staffRes.data) {
+        setPtoAllowance(staffRes.data.pto_allowance ?? 20);
+        setSickAllowance(staffRes.data.sick_allowance ?? 10);
+      }
+
+      // Tasks
+      if (tasksRes.data) {
+        setTasks(tasksRes.data.map((t: any) => {
+          const petName = t.pet?.name || '';
+          const clientName = t.client ? `${t.client.first_name} ${t.client.last_name}`.trim() : '';
+          const parts: string[] = [t.type];
+          if (petName) parts.push(petName);
+          else if (clientName) parts.push(clientName);
+          const label = parts.join(' — ') + (t.doctor_notes ? ` · ${t.doctor_notes}` : '');
+          return { id: t.id, text: label, done: t.status === 'Completed', priority: (t.priority === 'Urgent' || t.priority === 'High') ? 'high' as const : 'normal' as const };
+        }));
+      }
+      setTasksLoading(false);
+
+      // Today's check-ins
+      if (checkinsRes.data) {
+        const statusColorMap: Record<string, string> = {
+          'Completed': '#22c55e', 'In Progress': '#3B82F6', 'Confirmed': '#8B5CF6',
+          'Scheduled': '#8B5CF6', 'Cancelled': '#6B7280', 'No Show': '#d4183d',
+        };
+        setTodayCheckins(checkinsRes.data.map((a: any) => {
+          const dt = new Date(a.scheduled_at);
+          return {
+            time: dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'UTC' }),
+            pet: a.pets?.name || 'Unknown',
+            owner: `${a.pets?.clients?.first_name || ''} ${a.pets?.clients?.last_name || ''}`.trim() || 'Unknown',
+            service: a.services?.name || a.reason || 'Appointment',
+            status: a.status || 'Scheduled',
+            color: statusColorMap[a.status] || '#8B5CF6',
+            apptId: a.id,
+          };
+        }));
+      }
+
+      // Recent activity (combine payments + appts + clients)
+      const activities: ActivityRow[] = [];
+      if (paymentsRes.data) {
+        for (const p of paymentsRes.data as any[]) {
+          const client = p.invoices?.clients;
+          const petName = client?.pets?.[0]?.name || '';
+          const clientName = `${client?.first_name || ''} ${client?.last_name || ''}`.trim();
+          const dt = new Date(p.paid_at);
+          activities.push({ icon: CreditCard, color: '#22c55e', text: 'Payment processed', sub: `${petName || clientName} · $${Number(p.amount).toFixed(2)}`, time: formatActivityTime(dt), link: '/admin/payments' });
+        }
+      }
+      if (apptsRes.data) {
+        for (const a of apptsRes.data as any[]) {
+          const petName = a.pets?.name || '';
+          const dt = new Date(a.scheduled_at);
+          const timeStr = dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'UTC' });
+          const dateStr = dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+          if (a.status === 'Cancelled') {
+            activities.push({ icon: CalendarCheck, color: '#06B6D4', text: 'Cancellation processed', sub: `${petName} · ${dateStr}`, time: formatActivityTime(dt), link: '/admin/bookings' });
+          } else {
+            activities.push({ icon: CalendarCheck, color: '#3B82F6', text: `Appointment ${a.status.toLowerCase()}`, sub: `${petName} · ${dateStr}, ${timeStr}`, time: formatActivityTime(dt), link: '/admin/bookings' });
+          }
+        }
+      }
+      if (newClientsRes.data) {
+        for (const c of newClientsRes.data as any[]) {
+          const dt = new Date(c.created_at);
+          const petCount = c.pets?.length || 0;
+          activities.push({ icon: Users, color: '#F4A261', text: 'New client registered', sub: `${c.first_name} ${c.last_name} · ${petCount} pet${petCount !== 1 ? 's' : ''}`, time: formatActivityTime(dt), link: `/admin/clients/${c.id}` });
+        }
+      }
+      setRecentActivity(activities.slice(0, 6));
+
+      // Time blocks
+      if (timeBlocksRes.data && timeBlocksRes.data.length > 0) {
+        const from12 = (t24: string) => {
+          if (!t24) return '8:00 AM';
+          let [h, m] = t24.split(':').map(Number);
+          const ap = h >= 12 ? 'PM' : 'AM';
+          if (h > 12) h -= 12; if (h === 0) h = 12;
+          return `${h}:${m.toString().padStart(2, '0')} ${ap}`;
+        };
+        setTimeBlocks(timeBlocksRes.data.map((b: any, i: number) => ({
+          id: i + 1,
+          dbId: b.id,
+          type: b.type as BlockType,
+          date: b.date,
+          timeStart: from12(b.time_start),
+          timeEnd: from12(b.time_end),
+          notes: b.notes || '',
+          status: (b.status || 'Confirmed') as BlockStatus,
+        })));
+        setNextBlockId(timeBlocksRes.data.length + 1);
+      }
     })();
   }, [user]);
 
@@ -428,8 +557,6 @@ export default function AdminMyPortalPage() {
     }
   }, []);
 
-  useEffect(() => { loadTasks(); }, [loadTasks]);
-
   // ─── Dashboard Stats (Supabase) ──────────────────────────────
   const dashStats = useDashboardStats();
 
@@ -463,11 +590,23 @@ export default function AdminMyPortalPage() {
     const vaccData = buildSparkData(dashStats.vaccinesDueThisWeek, false);
     vaccData[vaccData.length - 1] = dashStats.vaccinesDueThisWeek;
 
+    const pctChange = (current: number, previous: number): { label: string; positive: boolean } => {
+      if (previous === 0) return current > 0 ? { label: '+100%', positive: true } : { label: 'No change', positive: true };
+      const pct = Math.round(((current - previous) / previous) * 100);
+      if (pct === 0) return { label: 'No change', positive: true };
+      return { label: `${pct > 0 ? '+' : ''}${pct}%`, positive: pct > 0 };
+    };
+
+    const apptTrend = pctChange(dashStats.appointmentsToday, dashStats.appointmentsYesterday);
+    const clientTrend = pctChange(dashStats.totalClients, dashStats.clientsLastMonth);
+    const petTrend = pctChange(dashStats.activePets, dashStats.petsLastMonth);
+    const vaccTrend = pctChange(dashStats.vaccinesDueThisWeek, dashStats.vaccinesLastWeek);
+
     return [
       {
         title: "Today's Check-ins", subtitle: 'Appointments',
         metricLabel: 'Scheduled Today', value: String(dashStats.appointmentsToday),
-        trendLabel: 'today', trendPositive: true,
+        trendLabel: `${apptTrend.label} vs yesterday`, trendPositive: apptTrend.positive,
         color: '#4ADE80', shadowColor: 'rgba(74,222,128,0.35)',
         icon: CalendarCheck,
         data: apptData, labels: dayLabels, unit: 'appts',
@@ -477,7 +616,7 @@ export default function AdminMyPortalPage() {
       {
         title: 'Total Clients', subtitle: 'All Time',
         metricLabel: 'Registered Clients', value: String(dashStats.totalClients),
-        trendLabel: 'active', trendPositive: true,
+        trendLabel: `${clientTrend.label} vs last month`, trendPositive: clientTrend.positive,
         color: '#38BDF8', shadowColor: 'rgba(56,189,248,0.35)',
         icon: Users,
         data: clientData, labels: dayLabels, unit: 'clients',
@@ -487,9 +626,9 @@ export default function AdminMyPortalPage() {
       {
         title: 'Active Pets', subtitle: 'Registered',
         metricLabel: 'Total Active', value: String(dashStats.activePets),
-        trendLabel: 'registered', trendPositive: true,
+        trendLabel: `${petTrend.label} vs last month`, trendPositive: petTrend.positive,
         color: '#818CF8', shadowColor: 'rgba(129,140,248,0.35)',
-        icon: ClipboardList,
+        icon: PawPrint,
         data: petData, labels: dayLabels, unit: 'pets',
         annotationStart: petData[0].toLocaleString(), annotationEnd: String(dashStats.activePets),
         path: '/admin/clients',
@@ -497,7 +636,7 @@ export default function AdminMyPortalPage() {
       {
         title: 'Vaccines Due', subtitle: 'This Week',
         metricLabel: 'Due Within 7 Days', value: String(dashStats.vaccinesDueThisWeek),
-        trendLabel: 'due soon', trendPositive: false,
+        trendLabel: `${vaccTrend.label} vs last week`, trendPositive: !vaccTrend.positive,
         color: '#FB7185', shadowColor: 'rgba(251,113,133,0.35)',
         icon: Clock,
         data: vaccData, labels: dayLabels, unit: 'vaccines',
@@ -511,188 +650,14 @@ export default function AdminMyPortalPage() {
   interface CheckInRow { time: string; pet: string; owner: string; service: string; status: string; color: string; apptId: string; }
   const [todayCheckins, setTodayCheckins] = useState<CheckInRow[]>([]);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const { organizationId } = await getOrgContext();
-        const now = new Date();
-        const today = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}`;
-        const { data } = await supabase
-          .from('appointments')
-          .select('id, scheduled_at, status, reason, pets!inner(name, clients!inner(first_name, last_name)), services(name)')
-          .eq('organization_id', organizationId)
-          .gte('scheduled_at', `${today}T00:00:00`)
-          .lte('scheduled_at', `${today}T23:59:59`)
-          .order('scheduled_at', { ascending: true })
-          .limit(8);
-        if (data) {
-          const statusColorMap: Record<string, string> = {
-            'Completed': '#22c55e', 'In Progress': '#3B82F6', 'Confirmed': '#8B5CF6',
-            'Scheduled': '#8B5CF6', 'Cancelled': '#6B7280', 'No Show': '#d4183d',
-          };
-          setTodayCheckins(data.map((a: any) => {
-            const dt = new Date(a.scheduled_at);
-            return {
-              time: dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'UTC' }),
-              pet: a.pets?.name || 'Unknown',
-              owner: `${a.pets?.clients?.first_name || ''} ${a.pets?.clients?.last_name || ''}`.trim() || 'Unknown',
-              service: a.services?.name || a.reason || 'Appointment',
-              status: a.status || 'Scheduled',
-              color: statusColorMap[a.status] || '#8B5CF6',
-              apptId: a.id,
-            };
-          }));
-        }
-      } catch (err) {
-        console.error('Failed to load today check-ins:', err);
-      }
-    })();
-  }, []);
 
   // ─── Recent Activity (Supabase) ────────────────────────────
   interface ActivityRow { icon: React.ElementType; color: string; text: string; sub: string; time: string; link: string; }
   const [recentActivity, setRecentActivity] = useState<ActivityRow[]>([]);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const { organizationId } = await getOrgContext();
-        const activities: ActivityRow[] = [];
-
-        // Recent payments (last 7 days)
-        const weekAgo = new Date();
-        weekAgo.setDate(weekAgo.getDate() - 7);
-        const weekAgoStr = weekAgo.toISOString();
-        const { data: payments } = await supabase
-          .from('payments')
-          .select('id, amount, method, paid_at, invoices!inner(id, client_id, clients!inner(first_name, last_name, pets(name)))')
-          .gte('paid_at', weekAgoStr)
-          .order('paid_at', { ascending: false })
-          .limit(3);
-        if (payments) {
-          for (const p of payments as any[]) {
-            const client = p.invoices?.clients;
-            const petName = client?.pets?.[0]?.name || '';
-            const clientName = `${client?.first_name || ''} ${client?.last_name || ''}`.trim();
-            const dt = new Date(p.paid_at);
-            activities.push({
-              icon: CreditCard, color: '#22c55e',
-              text: 'Payment processed',
-              sub: `${petName || clientName} · $${Number(p.amount).toFixed(2)}`,
-              time: formatActivityTime(dt),
-              link: '/admin/payments',
-            });
-          }
-        }
-
-        // Recent appointments (last 7 days, confirmed/completed/cancelled)
-        const { data: appts } = await supabase
-          .from('appointments')
-          .select('id, status, scheduled_at, pets!inner(name, clients!inner(first_name, last_name))')
-          .eq('organization_id', organizationId)
-          .gte('scheduled_at', weekAgoStr)
-          .in('status', ['Confirmed', 'Completed', 'Cancelled'])
-          .order('scheduled_at', { ascending: false })
-          .limit(3);
-        if (appts) {
-          for (const a of appts as any[]) {
-            const petName = a.pets?.name || '';
-            const dt = new Date(a.scheduled_at);
-            const timeStr = dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'UTC' });
-            const dateStr = dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
-            if (a.status === 'Cancelled') {
-              activities.push({
-                icon: CalendarCheck, color: '#06B6D4',
-                text: 'Cancellation processed',
-                sub: `${petName} · ${dateStr}`,
-                time: formatActivityTime(dt),
-                link: '/admin/bookings',
-              });
-            } else {
-              activities.push({
-                icon: CalendarCheck, color: '#3B82F6',
-                text: `Appointment ${a.status.toLowerCase()}`,
-                sub: `${petName} · ${dateStr}, ${timeStr}`,
-                time: formatActivityTime(dt),
-                link: '/admin/bookings',
-              });
-            }
-          }
-        }
-
-        // New clients (last 7 days)
-        const { data: newClients } = await supabase
-          .from('clients')
-          .select('id, first_name, last_name, created_at, pets(id)')
-          .eq('organization_id', organizationId)
-          .gte('created_at', weekAgoStr)
-          .order('created_at', { ascending: false })
-          .limit(2);
-        if (newClients) {
-          for (const c of newClients as any[]) {
-            const dt = new Date(c.created_at);
-            const petCount = c.pets?.length || 0;
-            activities.push({
-              icon: Users, color: '#F4A261',
-              text: 'New client registered',
-              sub: `${c.first_name} ${c.last_name} · ${petCount} pet${petCount !== 1 ? 's' : ''}`,
-              time: formatActivityTime(dt),
-              link: `/admin/clients/${c.id}`,
-            });
-          }
-        }
-
-        // Sort all activities by time (most recent first) and take top 6
-        activities.sort((a, b) => {
-          // Use the raw time strings for ordering — recent first is already correct from queries
-          return 0; // keep insertion order which is already sorted per-category
-        });
-        setRecentActivity(activities.slice(0, 6));
-      } catch (err) {
-        console.error('Failed to load recent activity:', err);
-      }
-    })();
-  }, []);
-
   // Schedule + PTO state
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
-
-  // Load time blocks from Supabase
-  useEffect(() => {
-    if (!user) return;
-    (async () => {
-      try {
-        const { organizationId } = await getOrgContext();
-        const { data } = await supabase
-          .from('staff_time_blocks')
-          .select('*')
-          .eq('organization_id', organizationId)
-          .eq('staff_id', user.id)
-          .order('date');
-        if (data && data.length > 0) {
-          const from12 = (t24: string) => {
-            if (!t24) return '8:00 AM';
-            let [h, m] = t24.split(':').map(Number);
-            const ap = h >= 12 ? 'PM' : 'AM';
-            if (h > 12) h -= 12; if (h === 0) h = 12;
-            return `${h}:${m.toString().padStart(2, '0')} ${ap}`;
-          };
-          setTimeBlocks(data.map((b: any, i: number) => ({
-            id: i + 1,
-            dbId: b.id,
-            type: b.type as BlockType,
-            date: b.date,
-            timeStart: from12(b.time_start),
-            timeEnd: from12(b.time_end),
-            notes: b.notes || '',
-            status: (b.status || 'Confirmed') as BlockStatus,
-          })));
-          setNextBlockId(data.length + 1);
-        }
-      } catch {}
-    })();
-  }, [user]);
   const [blockDialogOpen, setBlockDialogOpen] = useState(false);
   const [blockType, setBlockType] = useState<BlockType>('Lunch Break');
   const [blockDateFrom, setBlockDateFrom] = useState('2026-03-15');
@@ -761,6 +726,16 @@ export default function AdminMyPortalPage() {
   const blockByTime = new Map(dayBlocks.map((b) => [b.timeStart, b]));
   const eventDates = new Set<string>(timeBlocks.map(b => b.date));
   const datesWithEvents = Array.from(eventDates).map((d) => new Date(d + 'T12:00:00'));
+
+  // Derive today's shift from work schedule
+  const todayDayKey = (['Sun','Mon','Tue','Wed','Thu','Fri','Sat'] as const)[new Date().getDay()] as WorkDay;
+  const todaySchedule = workSchedule[todayDayKey];
+  const todayShift = todaySchedule.enabled
+    ? (() => {
+        const fmt = (t: string) => { const [h, m] = t.split(':').map(Number); const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h; return `${h12}:${m.toString().padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`; };
+        return `${fmt(todaySchedule.start)} – ${fmt(todaySchedule.end)}`;
+      })()
+    : 'Day Off';
 
   const goToPrevDay = () => { const d = new Date(selectedDate); d.setDate(d.getDate() - 1); setSelectedDate(d); };
   const goToNextDay = () => { const d = new Date(selectedDate); d.setDate(d.getDate() + 1); setSelectedDate(d); };
@@ -832,6 +807,7 @@ export default function AdminMyPortalPage() {
         detail: `Requesting ${blockType.toLowerCase()} ${dateRange} (${dayCount} day${dayCount > 1 ? 's' : ''})${blockNotes ? ' — ' + blockNotes : ''}`,
         meta: `Submitted just now · ${ADMIN_PROFILE.role}`,
         status: 'pending',
+        requester_id: user?.id || null,
       });
     }
     setTimeBlocks((prev) => [...prev, ...newBlocks]);
@@ -839,8 +815,8 @@ export default function AdminMyPortalPage() {
     setBlockDialogOpen(false);
   };
 
-  const PTO_ALLOWANCE = 20;
-  const SICK_ALLOWANCE = 10;
+  const PTO_ALLOWANCE = ptoAllowance;
+  const SICK_ALLOWANCE = sickAllowance;
   const ptoRequests = timeBlocks.filter((b) => b.type === 'PTO' || b.type === 'Sick Day');
   const ptoUsed = timeBlocks.filter((b) => b.type === 'PTO' && (b.status === 'Approved' || b.status === 'Confirmed')).length;
   const sickUsed = timeBlocks.filter((b) => b.type === 'Sick Day' && (b.status === 'Approved' || b.status === 'Confirmed')).length;
@@ -883,9 +859,9 @@ export default function AdminMyPortalPage() {
             <button
               title="Change photo"
               onClick={() => navigate('/admin/settings')}
-              style={{ position: 'absolute', bottom: 0, right: 0, width: 22, height: 22, borderRadius: '50%', backgroundColor: '#2D6A4F', border: '2px solid var(--surface-white)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+              style={{ position: 'absolute', bottom: 0, right: 0, width: 22, height: 22, borderRadius: '50%', backgroundColor: 'var(--brand-green-text)', border: '2px solid var(--surface-white)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
             >
-              <Camera style={{ width: 11, height: 11, color: '#fff' }} />
+              <Camera style={{ width: 11, height: 11, color: 'var(--on-brand-green)' }} />
             </button>
           </div>
 
@@ -907,7 +883,7 @@ export default function AdminMyPortalPage() {
               </span>
               <span className="text-[var(--border-color)]">|</span>
               <span className="text-[var(--text-secondary)] flex items-center gap-1" style={{ fontSize: '13px' }}>
-                <Clock style={{ width: 12, height: 12 }} /> Shift: {ADMIN_PROFILE.shift}
+                <Clock style={{ width: 12, height: 12 }} /> Shift: {todayShift}
               </span>
             </div>
           </div>
@@ -915,16 +891,20 @@ export default function AdminMyPortalPage() {
       </div>
 
       {/* ── Glow Stat Cards ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 20, marginBottom: 24 }}>
+      <div className="grid grid-cols-2 lg:grid-cols-4" style={{ gap: 20, marginBottom: 24 }}>
         {glowCards.map(card => <GlowStatCard key={card.title} {...card} />)}
       </div>
 
       {/* ── Quick Actions ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 24 }}>
+      <div className="grid grid-cols-2 lg:grid-cols-4" style={{ gap: 12, marginBottom: 24 }}>
         {QUICK_ACTIONS.map(a => {
           const Icon = a.icon;
           return (
-            <button key={a.label} onClick={() => navigate(a.path)}
+            <button key={a.label} onClick={() => {
+              if (a.label === 'Add Client') setAddClientOpen(true);
+              else if (a.label === 'New Booking') navigate(a.path, { state: { openNewAppt: true } });
+              else navigate(a.path);
+            }}
               className="bg-[var(--surface-white)] border border-[var(--border-color)] rounded-xl hover:border-[var(--brand-green-text)] transition-colors"
               style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', textAlign: 'left' }}
             >
@@ -939,25 +919,25 @@ export default function AdminMyPortalPage() {
       </div>
 
       {/* ── Schedule Section ── */}
-      <div className="grid gap-6 mb-6" style={{ gridTemplateColumns: '1fr 340px', alignItems: 'start' }}>
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-6 mb-6" style={{ alignItems: 'start' }}>
 
         {/* Left: Day Schedule */}
         <div>
           {/* Date Nav */}
-          <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-4 mb-4 flex items-center justify-between" style={{ borderRadius: '12px' }}>
+          <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-4 mb-4 flex flex-wrap items-center justify-between gap-3" style={{ borderRadius: '12px' }}>
             <div className="flex items-center gap-2">
               <button onClick={goToPrevDay} className="p-1 hover:bg-[var(--surface-elevated)] transition-colors" style={{ borderRadius: '6px' }}>
                 <ChevronLeft style={{ width: 20, height: 20, color: 'var(--text-secondary)' }} />
               </button>
               <CalendarCheck style={{ width: 20, height: 20, color: 'var(--brand-green-text)' }} />
-              <h2 className="text-[var(--text-primary)]" style={{ fontSize: '18px', fontWeight: 600 }}>
+              <h2 className="text-[var(--text-primary)] whitespace-nowrap" style={{ fontSize: '18px', fontWeight: 600 }}>
                 {isToday(selectedDate) ? 'Today, ' : ''}{formatDate(selectedDate)}
               </h2>
               <button onClick={goToNextDay} className="p-1 hover:bg-[var(--surface-elevated)] transition-colors" style={{ borderRadius: '6px' }}>
                 <ChevronRightIcon style={{ width: 20, height: 20, color: 'var(--text-secondary)' }} />
               </button>
               {!isToday(selectedDate) && (
-                <button onClick={goToToday} className="ml-2 px-3 py-1 text-[var(--brand-green-text)] border border-[#2D6A4F] hover:bg-[#2D6A4F10] transition-colors" style={{ borderRadius: '6px', fontSize: '13px', fontWeight: 500 }}>
+                <button onClick={goToToday} className="ml-2 px-3 py-1 text-[var(--brand-green-text)] border border-[var(--brand-green-text)] hover:bg-[#2D6A4F10] transition-colors" style={{ borderRadius: '6px', fontSize: '13px', fontWeight: 500 }}>
                   Today
                 </button>
               )}
@@ -976,13 +956,21 @@ export default function AdminMyPortalPage() {
           {/* Time Slot Grid */}
           <div className="bg-[var(--surface-white)] border border-[var(--border-color)] overflow-hidden" style={{ borderRadius: '12px' }}>
             <div style={{ maxHeight: '796px', overflowY: 'auto' }}>
-            {SCHEDULE_SLOTS.map((slot, idx) => {
+            {(() => {
+              // Parse shift hours to determine which slots are within the shift
+              const shiftParts = ADMIN_PROFILE.shift.split('–').map(s => s.trim());
+              const shiftStart24 = shiftParts.length === 2 ? to24Hour(shiftParts[0]) : '08:00';
+              const shiftEnd24 = shiftParts.length === 2 ? to24Hour(shiftParts[1]) : '17:00';
+              return SCHEDULE_SLOTS.map((slot, idx) => {
               const block = blockByTime.get(slot);
               const isLast = idx === SCHEDULE_SLOTS.length - 1;
+              const slot24 = to24Hour(slot);
+              const inShift = slot24 >= shiftStart24 && slot24 < shiftEnd24;
               return (
-                <div key={slot} className={`flex items-stretch ${!isLast ? 'border-b border-[var(--border-color)]' : ''}`}>
+                <div key={slot} className={`flex items-stretch ${!isLast ? 'border-b border-[var(--border-color)]' : ''}`}
+                  style={inShift ? { borderLeft: '3px solid var(--brand-green-text)' } : { borderLeft: '3px solid transparent', opacity: 0.5 }}>
                   <div className="w-24 flex-shrink-0 px-3 py-3 flex items-center justify-end">
-                    <span style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: 500 }}>{slot}</span>
+                    <span style={{ fontSize: '13px', color: inShift ? 'var(--text-primary)' : 'var(--text-secondary)', fontWeight: inShift ? 600 : 500 }}>{slot}</span>
                   </div>
                   {block ? (
                     <div className="flex-1 m-1 px-3 py-2.5 flex items-center gap-3"
@@ -1008,7 +996,8 @@ export default function AdminMyPortalPage() {
                   )}
                 </div>
               );
-            })}
+            });
+            })()}
             </div>
           </div>
         </div>
@@ -1095,7 +1084,7 @@ export default function AdminMyPortalPage() {
               })}
             </div>
 
-            <Button onClick={() => openBlockDialog('PTO')} className="w-full mt-4 hover:opacity-90" style={{ backgroundColor: '#2D6A4F', color: '#fff', border: 'none', gap: '6px' }}>
+            <Button onClick={() => openBlockDialog('PTO')} className="w-full mt-4 hover:opacity-90" style={{ backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)', border: 'none', gap: '6px' }}>
               <Plus style={{ width: 16, height: 16 }} />
               Request Time Off
             </Button>
@@ -1104,7 +1093,7 @@ export default function AdminMyPortalPage() {
       </div>
 
       {/* ── Main Grid ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 340px', gap: 20 }}>
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[1fr_1fr_340px]" style={{ gap: 20 }}>
 
         {/* Tasks */}
         <div className="bg-[var(--surface-white)] border border-[var(--border-color)] rounded-xl overflow-hidden">
@@ -1353,6 +1342,8 @@ export default function AdminMyPortalPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AddClientDialog open={addClientOpen} onOpenChange={(open) => { setAddClientOpen(open); if (!open) setTimeout(() => { refetchClients(); }, 300); }} onSave={handleAddClient} />
 
     </div>
   );

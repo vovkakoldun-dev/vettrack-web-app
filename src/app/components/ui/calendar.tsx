@@ -2,10 +2,135 @@
 
 import * as React from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { DayPicker } from "react-day-picker";
+import { DayPicker, CaptionProps, useNavigation } from "react-day-picker";
 
 import { cn } from "./utils";
 import { buttonVariants } from "./button";
+
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+function CustomCaption({ displayMonth }: CaptionProps) {
+  const { goToMonth, previousMonth, nextMonth } = useNavigation();
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const currentYear = displayMonth.getFullYear();
+  const years = Array.from({ length: 11 }, (_, i) => 2020 + i);
+
+  return (
+    <div className="flex justify-center pt-1 relative items-center w-full">
+      <button
+        type="button"
+        aria-label="Go to previous month"
+        className={cn(
+          buttonVariants({ variant: "outline" }),
+          "size-7 bg-transparent p-0 opacity-50 hover:opacity-100 absolute left-1",
+        )}
+        onClick={() => previousMonth && goToMonth(previousMonth)}
+      >
+        <ChevronLeft className="size-4" />
+      </button>
+
+      <div ref={ref} className="relative">
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          className="flex items-center gap-1 text-sm font-medium hover:text-[var(--brand-green-text)] transition-colors px-1 py-0.5 rounded-md hover:bg-[var(--surface-elevated)]"
+        >
+          {MONTHS[displayMonth.getMonth()]} {currentYear}
+        </button>
+
+        {open && (
+          <div
+            className="absolute top-full left-1/2 -translate-x-1/2 mt-1 z-50 bg-[var(--surface-white)] border border-[var(--border-color)] shadow-lg overflow-hidden"
+            style={{ borderRadius: '10px', width: '220px' }}
+          >
+            {/* Month grid */}
+            <div className="grid grid-cols-3 gap-0.5 p-2">
+              {MONTHS.map((m, i) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => {
+                    goToMonth(new Date(currentYear, i, 1));
+                    setOpen(false);
+                  }}
+                  className="px-1 py-1.5 text-center transition-colors rounded-md"
+                  style={{
+                    fontSize: '12px',
+                    fontWeight: displayMonth.getMonth() === i ? 600 : 400,
+                    backgroundColor: displayMonth.getMonth() === i ? 'var(--brand-green-text)' : 'transparent',
+                    color: displayMonth.getMonth() === i ? '#000' : 'var(--text-primary)',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (displayMonth.getMonth() !== i) e.currentTarget.style.backgroundColor = 'var(--surface-elevated)';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (displayMonth.getMonth() !== i) e.currentTarget.style.backgroundColor = 'transparent';
+                  }}
+                >
+                  {m.slice(0, 3)}
+                </button>
+              ))}
+            </div>
+
+            {/* Year row */}
+            <div className="border-t border-[var(--border-color)] px-2 py-1.5 flex items-center gap-1 overflow-x-auto">
+              {years.map((y) => (
+                <button
+                  key={y}
+                  type="button"
+                  onClick={() => {
+                    goToMonth(new Date(y, displayMonth.getMonth(), 1));
+                    setOpen(false);
+                  }}
+                  className="px-1.5 py-1 rounded-md transition-colors flex-shrink-0"
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: currentYear === y ? 600 : 400,
+                    backgroundColor: currentYear === y ? 'var(--brand-green-text)' : 'transparent',
+                    color: currentYear === y ? '#000' : 'var(--text-secondary)',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (currentYear !== y) e.currentTarget.style.backgroundColor = 'var(--surface-elevated)';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (currentYear !== y) e.currentTarget.style.backgroundColor = 'transparent';
+                  }}
+                >
+                  {y}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <button
+        type="button"
+        aria-label="Go to next month"
+        className={cn(
+          buttonVariants({ variant: "outline" }),
+          "size-7 bg-transparent p-0 opacity-50 hover:opacity-100 absolute right-1",
+        )}
+        onClick={() => nextMonth && goToMonth(nextMonth)}
+      >
+        <ChevronRight className="size-4" />
+      </button>
+    </div>
+  );
+}
 
 function Calendar({
   className,
@@ -32,7 +157,7 @@ function Calendar({
         table: "w-full border-collapse space-x-1",
         head_row: "flex",
         head_cell:
-          "text-muted-foreground rounded-md w-8 font-normal text-[0.8rem]",
+          "text-[var(--brand-green-text)] rounded-md w-8 font-normal text-[0.8rem]",
         row: "flex w-full mt-2",
         cell: cn(
           "relative p-0 text-center text-sm focus-within:relative focus-within:z-20 [&:has([aria-selected])]:bg-accent [&:has([aria-selected].day-range-end)]:rounded-r-md",
@@ -60,12 +185,7 @@ function Calendar({
         ...classNames,
       }}
       components={{
-        IconLeft: ({ className, ...props }) => (
-          <ChevronLeft className={cn("size-4", className)} {...props} />
-        ),
-        IconRight: ({ className, ...props }) => (
-          <ChevronRight className={cn("size-4", className)} {...props} />
-        ),
+        Caption: CustomCaption,
       }}
       {...props}
     />

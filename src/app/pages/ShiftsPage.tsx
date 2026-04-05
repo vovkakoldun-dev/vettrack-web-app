@@ -133,6 +133,7 @@ export default function ShiftsPage() {
   const [myStaff, setMyStaff] = useState<StaffRow | null>(null);
   const [myShifts, setMyShifts] = useState<Shift[]>([]);
   const [allShifts, setAllShifts] = useState<Shift[]>([]);
+  const [allStaffList, setAllStaffList] = useState<{ id: string; role: string; first_name: string; last_name: string; avatar_url: string | null }[]>([]);
   const [loading, setLoading] = useState(true);
   const [swapOpen, setSwapOpen] = useState(false);
   const [swapMyShift, setSwapMyShift] = useState('');
@@ -140,6 +141,12 @@ export default function ShiftsPage() {
   const [swapTheirShift, setSwapTheirShift] = useState('');
   const [swapReason, setSwapReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [overtimeOpen, setOvertimeOpen] = useState(false);
+  const [overtimeDate, setOvertimeDate] = useState('');
+  const [overtimeStart, setOvertimeStart] = useState('');
+  const [overtimeEnd, setOvertimeEnd] = useState('');
+  const [overtimeReason, setOvertimeReason] = useState('');
+  const [overtimeSubmitting, setOvertimeSubmitting] = useState(false);
 
   const monday = useMemo(() => {
     const now = new Date();
@@ -185,16 +192,29 @@ export default function ShiftsPage() {
 
       setMyShifts((myShiftData as Shift[]) || []);
 
-      // Get all team shifts
-      const { data: allShiftData } = await supabase
-        .from('shifts')
-        .select('*, staff:staff!shifts_staff_id_fkey(id, role, profiles:profiles!staff_profile_id_fkey(first_name, last_name, avatar_url))')
-        .eq('organization_id', organizationId)
-        .gte('date', weekStartStr)
-        .lte('date', weekEndStr)
-        .order('date');
+      // Get all team shifts + all staff members in parallel
+      const [{ data: allShiftData }, { data: staffData }] = await Promise.all([
+        supabase
+          .from('shifts')
+          .select('*, staff:staff!shifts_staff_id_fkey(id, role, profiles:profiles!staff_profile_id_fkey(first_name, last_name, avatar_url))')
+          .eq('organization_id', organizationId)
+          .gte('date', weekStartStr)
+          .lte('date', weekEndStr)
+          .order('date'),
+        supabase
+          .from('staff')
+          .select('id, role, profiles:profiles!staff_profile_id_fkey(first_name, last_name, avatar_url)')
+          .eq('organization_id', organizationId),
+      ]);
 
       setAllShifts((allShiftData as Shift[]) || []);
+      setAllStaffList((staffData || []).map((s: any) => ({
+        id: s.id,
+        role: s.role,
+        first_name: s.profiles?.first_name || '',
+        last_name: s.profiles?.last_name || '',
+        avatar_url: s.profiles?.avatar_url || null,
+      })));
     } catch (err) {
       console.error('Error loading shifts:', err);
     } finally {
@@ -220,6 +240,18 @@ export default function ShiftsPage() {
 
   const teamMembers = useMemo(() => {
     const staffMap: Record<string, TeamMember> = {};
+    // Seed with all staff members so everyone appears
+    allStaffList.forEach((s) => {
+      staffMap[s.id] = {
+        id: s.id,
+        role: s.role,
+        firstName: s.first_name,
+        lastName: s.last_name,
+        avatarUrl: s.avatar_url,
+        shifts: {},
+      };
+    });
+    // Overlay shift data
     allShifts.forEach((s) => {
       if (!s.staff) return;
       const prof = s.staff.profiles;
@@ -243,7 +275,7 @@ export default function ShiftsPage() {
       return `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`);
     });
     return arr;
-  }, [allShifts, user]);
+  }, [allShifts, allStaffList, user]);
 
   // ─── Derived: stats ─────────────────────────────────────────
 
@@ -314,6 +346,7 @@ export default function ShiftsPage() {
         detail: `Swap ${myShift.date} with ${targetName}`,
         meta: `Submitted just now · ${myRole}`,
         status: 'pending',
+        requester_id: user?.id || null,
       });
 
       setSwapOpen(false);
@@ -329,6 +362,57 @@ export default function ShiftsPage() {
     }
   }, [swapMyShift, swapWithStaff, swapTheirShift, myStaff, myShifts, teamMembers, loadData]);
 
+  // ─── Overtime handler ───────────────────────────────────────
+
+  const handleSubmitOvertime = useCallback(async () => {
+    if (!overtimeDate || !overtimeStart || !overtimeEnd || !user) return;
+    setOvertimeSubmitting(true);
+    try {
+      const { organizationId } = await getOrgContext();
+
+      // Insert overtime as a shift with type 'overtime'
+      await supabase.from('shifts').insert({
+        organization_id: organizationId,
+        staff_id: user.id,
+        date: overtimeDate,
+        start_time: overtimeStart,
+        end_time: overtimeEnd,
+        status: 'Pending',
+        type: 'overtime',
+        notes: overtimeReason,
+      });
+
+      // Also submit a pending request for admin approval
+      const prof = myStaff?.profiles;
+      const myName = prof ? `${prof.first_name} ${prof.last_name}` : 'Staff';
+      const myInitials = prof ? `${prof.first_name[0]}${prof.last_name[0]}` : '??';
+      const myRole = myStaff?.role || 'Staff';
+
+      await supabase.from('pending_requests').insert({
+        organization_id: organizationId,
+        type: 'overtime',
+        avatar: myInitials,
+        avatar_color: '#F4A261',
+        title: `${myName} — Overtime Request`,
+        detail: `${overtimeDate} · ${overtimeStart} – ${overtimeEnd}${overtimeReason ? ` · ${overtimeReason}` : ''}`,
+        meta: `Submitted just now · ${myRole}`,
+        status: 'pending',
+        requester_id: user?.id || null,
+      });
+
+      setOvertimeOpen(false);
+      setOvertimeDate('');
+      setOvertimeStart('');
+      setOvertimeEnd('');
+      setOvertimeReason('');
+      loadData();
+    } catch (err) {
+      console.error('Error submitting overtime:', err);
+    } finally {
+      setOvertimeSubmitting(false);
+    }
+  }, [overtimeDate, overtimeStart, overtimeEnd, overtimeReason, user, myStaff, loadData]);
+
   // ─── Render ─────────────────────────────────────────────────
 
   return (
@@ -343,23 +427,44 @@ export default function ShiftsPage() {
             View your schedule and team shifts
           </p>
         </div>
-        <Button
-          onClick={() => setSwapOpen(true)}
-          style={{
-            background: 'var(--brand-green)',
-            color: '#fff',
-            fontWeight: 600,
-            fontSize: 13,
-            borderRadius: 10,
-            padding: '8px 18px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 7,
-          }}
-        >
-          <ArrowLeftRight size={15} />
-          Request Shift Swap
-        </Button>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <Button
+            variant="outline"
+            onClick={() => setOvertimeOpen(true)}
+            style={{
+              fontWeight: 600,
+              fontSize: 13,
+              borderRadius: 6,
+              padding: '8px 18px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 7,
+              border: '1px solid var(--border-color)',
+              color: 'var(--text-primary)',
+              background: 'var(--surface-white)',
+            }}
+          >
+            <Clock size={15} />
+            Add Overtime
+          </Button>
+          <Button
+            onClick={() => setSwapOpen(true)}
+            style={{
+              background: 'var(--brand-green-text)',
+              color: '#fff',
+              fontWeight: 600,
+              fontSize: 13,
+              borderRadius: 6,
+              padding: '8px 18px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 7,
+            }}
+          >
+            <ArrowLeftRight size={15} />
+            Request Shift Swap
+          </Button>
+        </div>
       </div>
 
       {/* ─── My Shifts Section ─────────────────────────────────── */}
@@ -785,6 +890,61 @@ export default function ShiftsPage() {
           </div>
         )}
       </div>
+
+      {/* ─── Overtime Dialog ──────────────────────────────────── */}
+      <Dialog open={overtimeOpen} onOpenChange={setOvertimeOpen}>
+        <DialogContent style={{ maxWidth: 440, padding: 0, borderRadius: 14, border: '1px solid var(--border-color)', background: 'var(--surface-white)' }}>
+          <DialogHeader style={{ padding: '20px 24px 0' }}>
+            <DialogTitle style={{ fontSize: 17, fontWeight: 700, color: 'var(--text-primary)' }}>
+              Add Overtime
+            </DialogTitle>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0 0' }}>
+              Request overtime hours for approval.
+            </p>
+          </DialogHeader>
+
+          <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div>
+              <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6, display: 'block' }}>Date</label>
+              <Input type="date" value={overtimeDate} onChange={(e) => setOvertimeDate(e.target.value)} style={{ borderRadius: 8, fontSize: 13, background: 'var(--surface-white)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }} />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6, display: 'block' }}>Start Time</label>
+                <Input type="time" value={overtimeStart} onChange={(e) => setOvertimeStart(e.target.value)} style={{ borderRadius: 8, fontSize: 13, background: 'var(--surface-white)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }} />
+              </div>
+              <div>
+                <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6, display: 'block' }}>End Time</label>
+                <Input type="time" value={overtimeEnd} onChange={(e) => setOvertimeEnd(e.target.value)} style={{ borderRadius: 8, fontSize: 13, background: 'var(--surface-white)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }} />
+              </div>
+            </div>
+            <div>
+              <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6, display: 'block' }}>
+                Reason <span style={{ fontWeight: 400, color: 'var(--text-secondary)' }}>(optional)</span>
+              </label>
+              <Textarea value={overtimeReason} onChange={(e) => setOvertimeReason(e.target.value)} placeholder="e.g. Emergency surgery, covering for absent staff..." rows={3} style={{ borderRadius: 8, fontSize: 13, resize: 'none', background: 'var(--surface-white)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }} />
+            </div>
+          </div>
+
+          <DialogFooter style={{ padding: '16px 24px', borderTop: '1px solid var(--border-color)', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+            <Button variant="outline" onClick={() => setOvertimeOpen(false)} style={{ borderRadius: 8, fontSize: 13, fontWeight: 600, border: '1px solid var(--border-color)', color: 'var(--text-primary)', background: 'var(--surface-white)', padding: '8px 18px' }}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmitOvertime}
+              disabled={!overtimeDate || !overtimeStart || !overtimeEnd || overtimeSubmitting}
+              style={{
+                borderRadius: 8, fontSize: 13, fontWeight: 600, padding: '8px 18px',
+                background: !overtimeDate || !overtimeStart || !overtimeEnd || overtimeSubmitting ? 'var(--surface-elevated)' : 'var(--brand-green-text)',
+                color: !overtimeDate || !overtimeStart || !overtimeEnd || overtimeSubmitting ? 'var(--text-secondary)' : '#fff',
+                cursor: !overtimeDate || !overtimeStart || !overtimeEnd || overtimeSubmitting ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {overtimeSubmitting ? 'Submitting...' : 'Submit Request'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ─── Swap Dialog ───────────────────────────────────────── */}
       <Dialog open={swapOpen} onOpenChange={setSwapOpen}>

@@ -334,7 +334,7 @@ export default function AdminPaymentsPage() {
         <button
           style={{
             padding: '10px 20px', borderRadius: '9px',
-            backgroundColor: '#2D6A4F', color: '#fff',
+            backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)',
             border: 'none', cursor: 'pointer',
             fontSize: '14px', fontWeight: 700,
             display: 'flex', alignItems: 'center', gap: '8px',

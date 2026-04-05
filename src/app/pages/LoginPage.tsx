@@ -69,7 +69,7 @@ const ROLES: RoleCard[] = [
     bg: 'rgba(139,92,246,0.08)',
     border: 'rgba(139,92,246,0.25)',
     ring: 'rgba(139,92,246,0.4)',
-    defaultEmail: 'john.smith@email.com',
+    defaultEmail: 'owner@vettrack.dev',
   },
   {
     id: 'sysadmin',

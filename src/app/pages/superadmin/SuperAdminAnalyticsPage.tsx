@@ -699,6 +699,389 @@ export default function SuperAdminAnalyticsPage() {
     ? `${monthLabels[0]} ${new Date().getFullYear() - 1} – ${monthLabels[monthLabels.length - 1]} ${new Date().getFullYear()}`
     : 'Apr 2025 – Mar 2026';
 
+  // ─── PDF Export ───
+  function handleExportPdf() {
+    const now = new Date();
+    const reportDate = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    const revenueMax = Math.max(...(monthlyRevenue.length ? monthlyRevenue : [1]));
+    const apptsMax = Math.max(...(monthlyAppts.length ? monthlyAppts : [1]));
+
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8" />
+<title>HugoIT Analytics Report — ${currentMonth}</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 20mm 16mm; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1a2332; font-size: 11px; line-height: 1.45; }
+  .page-break { page-break-before: always; }
+
+  /* Header */
+  .header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 16px; border-bottom: 3px solid #2D6A4F; margin-bottom: 20px; }
+  .logo { display: flex; align-items: center; gap: 12px; }
+  .logo-icon { width: 44px; height: 44px; border-radius: 10px; background: linear-gradient(135deg, #2D6A4F, #4ADE80); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 18px; font-weight: 800; }
+  .logo-text h1 { font-size: 20px; font-weight: 800; color: #2D6A4F; letter-spacing: -0.5px; }
+  .logo-text p { font-size: 11px; color: #6b7280; }
+  .header-right { text-align: right; }
+  .header-right h2 { font-size: 14px; font-weight: 700; color: #1a2332; margin-bottom: 2px; }
+  .header-right p { font-size: 10px; color: #6b7280; }
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 9999px; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+
+  /* Section */
+  .section { margin-bottom: 20px; }
+  .section-title { font-size: 13px; font-weight: 700; color: #2D6A4F; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1.5px solid #e5e7eb; display: flex; align-items: center; gap: 8px; }
+  .section-title::before { content: ''; width: 4px; height: 16px; border-radius: 2px; background: #2D6A4F; }
+
+  /* KPI Grid */
+  .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+  .kpi-card { border: 1.5px solid #e5e7eb; border-radius: 10px; padding: 14px 16px; }
+  .kpi-label { font-size: 9px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+  .kpi-value { font-size: 22px; font-weight: 800; color: #1a2332; margin-bottom: 4px; }
+  .kpi-trend { font-size: 10px; font-weight: 700; }
+  .kpi-trend.up { color: #16a34a; }
+  .kpi-trend.down { color: #dc2626; }
+  .kpi-sub { font-size: 9px; color: #9ca3af; }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  th { font-size: 9px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.06em; text-align: left; padding: 8px 10px; border-bottom: 2px solid #e5e7eb; }
+  td { padding: 9px 10px; border-bottom: 1px solid #f3f4f6; }
+  tr:last-child td { border-bottom: none; }
+  .text-right { text-align: right; }
+  .text-center { text-align: center; }
+  .fw700 { font-weight: 700; }
+  .fw800 { font-weight: 800; }
+
+  /* Bar charts (CSS-only) */
+  .bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .bar-label { width: 36px; font-size: 10px; font-weight: 600; color: #6b7280; text-align: right; flex-shrink: 0; }
+  .bar-track { flex: 1; height: 14px; background: #f3f4f6; border-radius: 7px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 7px; }
+  .bar-val { width: 60px; font-size: 10px; font-weight: 700; color: #1a2332; }
+
+  /* Service rows */
+  .svc-row { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
+  .svc-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .svc-name { flex: 1; font-size: 11px; font-weight: 600; }
+  .svc-count { font-size: 11px; font-weight: 700; width: 40px; text-align: right; }
+  .svc-bar-track { width: 120px; height: 6px; background: #f3f4f6; border-radius: 3px; overflow: hidden; }
+  .svc-bar-fill { height: 100%; border-radius: 3px; }
+
+  /* 2-col layout */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+
+  /* Staff avatar */
+  .avatar { width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #fff; flex-shrink: 0; }
+  .staff-cell { display: flex; align-items: center; gap: 8px; }
+  .staff-name { font-weight: 600; font-size: 11px; }
+  .staff-role { font-size: 9px; color: #6b7280; }
+
+  /* Summary box */
+  .summary-box { background: #f8faf9; border: 1.5px solid #e5e7eb; border-radius: 10px; padding: 14px 18px; }
+  .summary-row { display: flex; justify-content: space-between; padding: 4px 0; }
+  .summary-label { color: #6b7280; }
+  .summary-val { font-weight: 700; }
+
+  /* Footer */
+  .footer { position: fixed; bottom: 0; left: 0; right: 0; padding: 8px 16mm; font-size: 9px; color: #9ca3af; display: flex; justify-content: space-between; border-top: 1px solid #e5e7eb; }
+
+  /* Progress to target */
+  .target-bar { height: 10px; background: #f3f4f6; border-radius: 5px; overflow: hidden; margin: 6px 0; }
+  .target-fill { height: 100%; border-radius: 5px; }
+</style>
+</head><body>
+
+<!-- ═══ HEADER ═══ -->
+<div class="header">
+  <div class="logo">
+    <div class="logo-icon">VT</div>
+    <div class="logo-text">
+      <h1>HugoIT</h1>
+      <p>Veterinary Practice Management</p>
+    </div>
+  </div>
+  <div class="header-right">
+    <h2>Analytics Report</h2>
+    <p>${reportDate}</p>
+    <p style="margin-top:4px;">Period: ${chartSubtitle}</p>
+    <span class="badge" style="background:#2D6A4F15; color:#2D6A4F; margin-top:4px;">CONFIDENTIAL</span>
+  </div>
+</div>
+
+<!-- ═══ KPI SUMMARY ═══ -->
+<div class="section">
+  <div class="section-title">Key Performance Indicators</div>
+  <div class="kpi-grid">
+    <div class="kpi-card" style="border-left: 3px solid #4ADE80;">
+      <div class="kpi-label">Revenue (YTD)</div>
+      <div class="kpi-value" style="color:#2D6A4F;">$${revenueYtd.toLocaleString()}</div>
+      <span class="kpi-trend ${revenueTrendUp ? 'up' : 'down'}">${revenueTrend}</span>
+      <span class="kpi-sub"> vs last year</span>
+    </div>
+    <div class="kpi-card" style="border-left: 3px solid #F4A261;">
+      <div class="kpi-label">Total Appointments</div>
+      <div class="kpi-value">${totalAppts.toLocaleString()}</div>
+      <span class="kpi-trend ${apptsTrendUp ? 'up' : 'down'}">${apptsTrend}</span>
+      <span class="kpi-sub"> vs last year</span>
+    </div>
+    <div class="kpi-card" style="border-left: 3px solid #818CF8;">
+      <div class="kpi-label">New Patients</div>
+      <div class="kpi-value">${newPatients.toLocaleString()}</div>
+      <span class="kpi-trend ${patientsTrendUp ? 'up' : 'down'}">${patientsTrend}</span>
+      <span class="kpi-sub"> this year</span>
+    </div>
+    <div class="kpi-card" style="border-left: 3px solid #38BDF8;">
+      <div class="kpi-label">Avg per Visit</div>
+      <div class="kpi-value">$${avgPerVisit.toFixed(2)}</div>
+      <span class="kpi-trend ${avgTrendUp ? 'up' : 'down'}">${avgTrend}</span>
+      <span class="kpi-sub"> revenue/visit</span>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ REVENUE & APPOINTMENTS ═══ -->
+<div class="section">
+  <div class="two-col">
+    <div>
+      <div class="section-title">Monthly Revenue</div>
+      <div class="summary-box" style="margin-bottom:12px;">
+        <div class="summary-row">
+          <span class="summary-label">This Month</span>
+          <span class="summary-val" style="color:#2D6A4F;">$${thisMonthRevenue.toLocaleString()}</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">Monthly Target</span>
+          <span class="summary-val">$${revenueTarget.toLocaleString()}</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">Target Progress</span>
+          <span class="summary-val" style="color:#16a34a;">${((thisMonthRevenue / revenueTarget) * 100).toFixed(0)}%</span>
+        </div>
+        <div class="target-bar">
+          <div class="target-fill" style="width:${Math.min((thisMonthRevenue / revenueTarget) * 100, 100)}%; background: linear-gradient(90deg, #4ADE80, #22C55E);"></div>
+        </div>
+      </div>
+      ${monthLabels.map((m, i) => `<div class="bar-row">
+        <span class="bar-label">${m}</span>
+        <div class="bar-track"><div class="bar-fill" style="width:${revenueMax > 0 ? ((monthlyRevenue[i] || 0) / revenueMax * 100) : 0}%; background: linear-gradient(90deg, #4ADE80, #22C55E);"></div></div>
+        <span class="bar-val">$${(monthlyRevenue[i] || 0).toLocaleString()}</span>
+      </div>`).join('')}
+    </div>
+
+    <div>
+      <div class="section-title">Monthly Appointments</div>
+      <div class="summary-box" style="margin-bottom:12px;">
+        <div class="summary-row">
+          <span class="summary-label">This Month</span>
+          <span class="summary-val" style="color:#C2671A;">${thisMonthAppts.toLocaleString()}</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">Daily Average</span>
+          <span class="summary-val">~${dailyAvg}</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">Busiest Day</span>
+          <span class="summary-val">${busiestDay.label} (${busiestDay.val})</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">Quietest Day</span>
+          <span class="summary-val">${quietestDay.label} (${quietestDay.val})</span>
+        </div>
+      </div>
+      ${monthLabels.map((m, i) => `<div class="bar-row">
+        <span class="bar-label">${m}</span>
+        <div class="bar-track"><div class="bar-fill" style="width:${apptsMax > 0 ? ((monthlyAppts[i] || 0) / apptsMax * 100) : 0}%; background: linear-gradient(90deg, #F4A261, #C2671A);"></div></div>
+        <span class="bar-val">${(monthlyAppts[i] || 0).toLocaleString()}</span>
+      </div>`).join('')}
+    </div>
+  </div>
+</div>
+
+<!-- ═══ PAGE 2 ═══ -->
+<div class="page-break"></div>
+<div class="header" style="margin-top:0;">
+  <div class="logo">
+    <div class="logo-icon">VT</div>
+    <div class="logo-text">
+      <h1>HugoIT</h1>
+      <p>Analytics Report — continued</p>
+    </div>
+  </div>
+  <div class="header-right">
+    <p>${reportDate}</p>
+  </div>
+</div>
+
+<!-- ═══ SERVICES & DAILY VOLUME ═══ -->
+<div class="section">
+  <div class="two-col">
+    <div>
+      <div class="section-title">Services Breakdown</div>
+      ${services.map(s => `<div class="svc-row">
+        <div class="svc-dot" style="background:${s.color};"></div>
+        <span class="svc-name">${s.name}</span>
+        <span class="svc-count">${s.count}</span>
+        <div class="svc-bar-track"><div class="svc-bar-fill" style="width:${s.pct}%; background:${s.color}; opacity:0.75;"></div></div>
+      </div>`).join('')}
+    </div>
+
+    <div>
+      <div class="section-title">Daily Appointment Volume</div>
+      <div class="summary-box" style="margin-bottom:12px;">
+        <div class="summary-row">
+          <span class="summary-label">Today</span>
+          <span class="summary-val" style="color:#C2671A;">${todayAppts} appointments</span>
+        </div>
+      </div>
+      ${dailyAppts.map(d => {
+        const dMax = Math.max(...dailyAppts.map(x => x.val), 1);
+        return `<div class="bar-row">
+        <span class="bar-label" style="width:56px;${d.day === 'Today' ? 'font-weight:800;color:#C2671A;' : ''}">${d.day.length > 8 ? d.day.substring(0, 8) : d.day}</span>
+        <div class="bar-track"><div class="bar-fill" style="width:${(d.val / dMax) * 100}%; background:${d.day === 'Today' ? '#C2671A' : '#F4A261'};${d.day === 'Today' ? '' : 'opacity:0.65;'}"></div></div>
+        <span class="bar-val" style="width:30px;">${d.val}</span>
+      </div>`;
+      }).join('')}
+    </div>
+  </div>
+</div>
+
+<!-- ═══ PATIENT GROWTH ═══ -->
+<div class="section">
+  <div class="section-title">Patient Growth</div>
+  <div class="summary-box" style="margin-bottom:12px;">
+    <div class="summary-row">
+      <span class="summary-label">Total Active Patients</span>
+      <span class="summary-val" style="color:#818CF8;">${totalActivePatients.toLocaleString()}</span>
+    </div>
+    <div class="summary-row">
+      <span class="summary-label">New This Year</span>
+      <span class="summary-val">${newPatients.toLocaleString()}</span>
+    </div>
+    <div class="summary-row">
+      <span class="summary-label">Growth Trend</span>
+      <span class="summary-val ${patientsTrendUp ? 'up' : 'down'}" style="color:${patientsTrendUp ? '#16a34a' : '#dc2626'}">${patientsTrend} vs last year</span>
+    </div>
+  </div>
+  <table>
+    <tr>
+      <th>Month</th>
+      <th class="text-right">Total Patients</th>
+      <th class="text-right">MoM Change</th>
+    </tr>
+    ${monthLabels.map((m, i) => {
+      const val = patientsData[i] || 0;
+      const prev = i > 0 ? (patientsData[i - 1] || 0) : val;
+      const diff = val - prev;
+      return `<tr>
+      <td class="fw700">${m}</td>
+      <td class="text-right fw700">${val.toLocaleString()}</td>
+      <td class="text-right" style="color:${diff >= 0 ? '#16a34a' : '#dc2626'};">${diff >= 0 ? '+' : ''}${diff}</td>
+    </tr>`;
+    }).join('')}
+  </table>
+</div>
+
+<!-- ═══ PAGE 3 ═══ -->
+<div class="page-break"></div>
+<div class="header" style="margin-top:0;">
+  <div class="logo">
+    <div class="logo-icon">VT</div>
+    <div class="logo-text">
+      <h1>HugoIT</h1>
+      <p>Analytics Report — continued</p>
+    </div>
+  </div>
+  <div class="header-right">
+    <p>${reportDate}</p>
+  </div>
+</div>
+
+<!-- ═══ STAFF PERFORMANCE — DOCTORS ═══ -->
+<div class="section">
+  <div class="section-title">Staff Performance — Doctors</div>
+  <table>
+    <tr>
+      <th>Doctor</th>
+      <th class="text-center">Completed</th>
+      <th class="text-right">Revenue</th>
+      <th class="text-center">Patients</th>
+    </tr>
+    ${doctorPerf.length === 0 ? '<tr><td colspan="4" class="text-center" style="color:#9ca3af;padding:16px;">No doctors found</td></tr>' : doctorPerf.map(s => {
+      const roleLabel = s.role === 'senior_veterinarian' ? 'Sr. Veterinarian' : s.role === 'specialist' ? 'Specialist' : 'Veterinarian';
+      return `<tr>
+      <td>
+        <div class="staff-cell">
+          <div class="avatar" style="background:linear-gradient(135deg,${s.color}dd,${s.color}88);">${s.initials}</div>
+          <div><div class="staff-name">${s.name}</div><div class="staff-role">${roleLabel}</div></div>
+        </div>
+      </td>
+      <td class="text-center fw700">${s.completed}</td>
+      <td class="text-right fw700" style="color:${s.revenue === '$0' ? '#9ca3af' : '#16a34a'};">${s.revenue}</td>
+      <td class="text-center fw700" style="color:#818CF8;">${s.pets}</td>
+    </tr>`;
+    }).join('')}
+  </table>
+</div>
+
+<!-- ═══ STAFF PERFORMANCE — ADMIN ═══ -->
+<div class="section">
+  <div class="section-title">Staff Performance — Admin & Operations</div>
+  <table>
+    <tr>
+      <th>Staff Member</th>
+      <th class="text-center">Appts Booked</th>
+      <th class="text-center">Tasks Done</th>
+    </tr>
+    ${adminPerf.length === 0 ? '<tr><td colspan="3" class="text-center" style="color:#9ca3af;padding:16px;">No admin staff found</td></tr>' : adminPerf.map(s => {
+      const roleMap: Record<string, string> = {
+        clinic_manager: 'Manager', receptionist: 'Receptionist', front_desk_manager: 'FD Manager',
+        vet_technician: 'Vet Tech', lead_vet_tech: 'Lead Tech', groomer: 'Groomer', lab_technician: 'Lab Tech',
+      };
+      return `<tr>
+      <td>
+        <div class="staff-cell">
+          <div class="avatar" style="background:linear-gradient(135deg,${s.color}dd,${s.color}88);">${s.initials}</div>
+          <div><div class="staff-name">${s.name}</div><div class="staff-role">${roleMap[s.role] || s.role}</div></div>
+        </div>
+      </td>
+      <td class="text-center fw700">${s.booked}</td>
+      <td class="text-center fw700" style="color:${s.tasksCompleted > 0 ? '#16a34a' : '#9ca3af'};">${s.tasksCompleted}</td>
+    </tr>`;
+    }).join('')}
+  </table>
+</div>
+
+<!-- ═══ REPORT SUMMARY ═══ -->
+<div class="section" style="margin-top:24px;">
+  <div class="section-title">Executive Summary</div>
+  <div class="summary-box">
+    <div class="summary-row"><span class="summary-label">Report Period</span><span class="summary-val">${chartSubtitle}</span></div>
+    <div class="summary-row"><span class="summary-label">Year-to-Date Revenue</span><span class="summary-val" style="color:#2D6A4F;">$${revenueYtd.toLocaleString()}</span></div>
+    <div class="summary-row"><span class="summary-label">Monthly Revenue Target</span><span class="summary-val">$${revenueTarget.toLocaleString()}</span></div>
+    <div class="summary-row"><span class="summary-label">Target Achievement</span><span class="summary-val" style="color:#16a34a;">${((thisMonthRevenue / revenueTarget) * 100).toFixed(0)}%</span></div>
+    <div class="summary-row"><span class="summary-label">Total Appointments</span><span class="summary-val">${totalAppts.toLocaleString()}</span></div>
+    <div class="summary-row"><span class="summary-label">Active Patients</span><span class="summary-val" style="color:#818CF8;">${totalActivePatients.toLocaleString()}</span></div>
+    <div class="summary-row"><span class="summary-label">New Patients (YTD)</span><span class="summary-val">${newPatients.toLocaleString()}</span></div>
+    <div class="summary-row"><span class="summary-label">Active Doctors</span><span class="summary-val">${doctorPerf.length}</span></div>
+    <div class="summary-row"><span class="summary-label">Admin Staff</span><span class="summary-val">${adminPerf.length}</span></div>
+    <div class="summary-row"><span class="summary-label">Top Service</span><span class="summary-val">${services.length > 0 ? services[0].name + ' (' + services[0].count + ')' : '—'}</span></div>
+  </div>
+</div>
+
+<!-- ═══ FOOTER ═══ -->
+<div class="footer">
+  <span>HugoIT Analytics Report · Generated ${reportDate}</span>
+  <span>Confidential — For internal use only</span>
+</div>
+
+</body></html>`;
+
+    const w = window.open('', '_blank', 'width=900,height=700');
+    if (!w) return;
+    w.document.write(html);
+    w.document.close();
+    setTimeout(() => { w.print(); }, 400);
+  }
+
   // ─── Loading state ───
   if (loading) {
     return (
@@ -801,7 +1184,9 @@ export default function SuperAdminAnalyticsPage() {
             )}
           </div>
 
-          <button style={{
+          <button
+            onClick={handleExportPdf}
+            style={{
             display: 'flex', alignItems: 'center', gap: '6px',
             padding: '8px 16px', borderRadius: '9px',
             backgroundColor: '#F4A261', color: '#fff',

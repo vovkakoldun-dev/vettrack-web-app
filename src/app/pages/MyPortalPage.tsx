@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { uploadAvatar, removeAvatar } from '../hooks/useProfile';
 import { getOrgContext } from '../hooks/useOrgContext';
+import { useDashboardStats } from '../hooks/useDashboardStats';
 import { useActiveVisit } from '../context/ActiveVisitContext';
 import {
   Users, Calendar as CalendarIcon, ClipboardCheck, Clock,
@@ -278,7 +279,7 @@ function GlowStatCard({
   const last = pts[pts.length - 1];
   const areaPath = linePath + ` L ${last.x} ${VH} L ${first.x} ${VH} Z`;
   const midY = VH / 2;
-  const uid = title.replace(/\s+/g, '');
+  const uid = title.replace(/[^a-zA-Z0-9]/g, '');
 
   // ── Read CSS custom properties for theme-aware tokens ──────
   const cs = typeof window !== 'undefined' ? getComputedStyle(document.documentElement) : null;
@@ -426,12 +427,12 @@ function GlowStatCard({
           <path d={areaPath} fill={`url(#area-${uid})`} />
 
           {/* Outer glow halo */}
-          <path d={linePath} fill="none" stroke={color} strokeWidth="10"
-            strokeLinecap="round" opacity={glowOpacity1} filter={`url(#bloom-${uid})`} />
+          {glowOpacity1 > 0 && <path d={linePath} fill="none" stroke={color} strokeWidth="10"
+            strokeLinecap="round" opacity={glowOpacity1} filter={`url(#bloom-${uid})`} />}
 
           {/* Inner tight glow */}
-          <path d={linePath} fill="none" stroke={color} strokeWidth="5"
-            strokeLinecap="round" opacity={glowOpacity2} filter={`url(#bloom-${uid})`} />
+          {glowOpacity2 > 0 && <path d={linePath} fill="none" stroke={color} strokeWidth="5"
+            strokeLinecap="round" opacity={glowOpacity2} filter={`url(#bloom-${uid})`} />}
 
           {/* Sharp line */}
           <path d={linePath} fill="none" stroke={`url(#line-${uid})`} strokeWidth="2.5"
@@ -441,7 +442,7 @@ function GlowStatCard({
           <circle cx={first.x} cy={first.y} r="4.5" fill={dotHoleFill} stroke={color} strokeWidth="2" />
 
           {/* End dot (filled + glowing) */}
-          <circle cx={last.x} cy={last.y} r="5" fill={color} filter={`url(#bloom-${uid})`} />
+          <circle cx={last.x} cy={last.y} r="5" fill={color} filter={glowOpacity1 > 0 ? `url(#bloom-${uid})` : undefined} />
           <circle cx={last.x} cy={last.y} r="4" fill="#ffffff" opacity="0.9" />
 
           {/* Annotations */}
@@ -470,7 +471,7 @@ function GlowStatCard({
                 {/* Outer pulse ring */}
                 <circle cx={hx} cy={hy} r="8" fill={color} opacity="0.18" />
                 {/* Filled dot */}
-                <circle cx={hx} cy={hy} r="5" fill={color} filter={`url(#bloom-${uid})`} opacity="0.8" />
+                <circle cx={hx} cy={hy} r="5" fill={color} filter={glowOpacity1 > 0 ? `url(#bloom-${uid})` : undefined} opacity="0.8" />
                 <circle cx={hx} cy={hy} r="4" fill={color} />
                 {/* White center */}
                 <circle cx={hx} cy={hy} r="2" fill="#fff" />
@@ -550,7 +551,9 @@ export default function MyPortalPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { startVisit } = useActiveVisit();
+  const dashStats = useDashboardStats();
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
   const [blocksLoaded, setBlocksLoaded] = useState(false);
   const [dataLoaded, setDataLoaded] = useState(false);
@@ -559,6 +562,8 @@ export default function MyPortalPage() {
   const [vetProfile, setVetProfile] = useState(VET_PROFILE);
   const [vetId, setVetId] = useState<string | null>(null);
   const [profileImage, setProfileImage] = useState('');
+  const [ptoAllowance, setPtoAllowance] = useState(20);
+  const [sickAllowance, setSickAllowance] = useState(10);
   const [recentActivity, setRecentActivity] = useState<{ description: string; time: string; icon: typeof Stethoscope; color: string }[]>([]);
 
   // ── Photo upload ──
@@ -679,7 +684,7 @@ export default function MyPortalPage() {
       // Fetch operational data from staff table
       const { data: staffData } = await supabase
         .from('staff')
-        .select('id, created_at')
+        .select('id, created_at, pto_allowance, sick_allowance')
         .eq('id', user.id)
         .single();
       if (profileData && staffData) {
@@ -696,6 +701,8 @@ export default function MyPortalPage() {
           image: profileData.avatar_url || '',
         });
         setProfileImage(profileData.avatar_url || '');
+        setPtoAllowance(staffData.pto_allowance ?? 20);
+        setSickAllowance(staffData.sick_allowance ?? 10);
 
         // Fetch appointments for this vet
         const { data: apptData } = await supabase
@@ -968,20 +975,20 @@ export default function MyPortalPage() {
       annotationEnd: `${completedAppts}`,
     },
     {
-      title: 'Avg. Consult',
-      subtitle: 'Duration',
-      metricLabel: 'Time per Visit',
-      value: totalAppts > 0 ? `${avgDuration} min` : '— min',
-      trendLabel: totalAppts > 0 ? `${avgDuration} min avg` : 'No data',
+      title: 'Vaccines Due',
+      subtitle: 'This Week',
+      metricLabel: 'Due Within 7 Days',
+      value: String(dashStats.vaccinesDueThisWeek),
+      trendLabel: `${dashStats.vaccinesDueThisWeek} due`,
       trendPositive: false,
       color: '#FB7185',
       shadowColor: 'rgba(251,113,133,0.35)',
-      icon: Clock,
-      data: durationSparkData,
+      icon: Syringe,
+      data: buildSparkData(dashStats.vaccinesDueThisWeek, false),
       labels: dayLabels,
-      unit: 'min',
-      annotationStart: durationSparkData[0] > 0 ? `${durationSparkData[0]}m` : '0m',
-      annotationEnd: avgDuration > 0 ? `${avgDuration}m` : '0m',
+      unit: 'vaccines',
+      annotationStart: '0',
+      annotationEnd: String(dashStats.vaccinesDueThisWeek),
     },
   ];
 
@@ -1037,8 +1044,8 @@ export default function MyPortalPage() {
   const datesWithEvents = Array.from(eventDates).map((d) => new Date(d + 'T12:00:00'));
 
   // Time off summary
-  const PTO_ALLOWANCE = 20;
-  const SICK_ALLOWANCE = 10;
+  const PTO_ALLOWANCE = ptoAllowance;
+  const SICK_ALLOWANCE = sickAllowance;
   const ptoRequests = timeBlocks.filter((b) => b.type === 'PTO' || b.type === 'Sick Day');
   const ptoPending = ptoRequests.filter((b) => b.status === 'Pending').length;
   const ptoApproved = ptoRequests.filter((b) => b.status === 'Approved').length;
@@ -1197,6 +1204,7 @@ export default function MyPortalPage() {
         detail: `Requesting ${blockType.toLowerCase()} ${dateRange} (${dayCount} day${dayCount > 1 ? 's' : ''})${blockNotes ? ' — ' + blockNotes : ''}`,
         meta: `Submitted just now · Veterinarian`,
         status: 'pending',
+        requester_id: user?.id || null,
       });
     }
     setTimeBlocks((prev) => [...prev, ...newBlocks]);
@@ -1291,8 +1299,8 @@ export default function MyPortalPage() {
         {/* Left: Day Schedule */}
         <div>
           {/* Date Nav */}
-          <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-4 mb-4 flex items-center justify-between" style={{ borderRadius: '12px' }}>
-            <div className="flex items-center gap-2">
+          <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-4 mb-4 flex flex-wrap items-center justify-between gap-3" style={{ borderRadius: '12px' }}>
+            <div className="flex flex-wrap items-center gap-2">
               <button onClick={goToPrevDay} className="p-1 hover:bg-[var(--surface-elevated)] transition-colors" style={{ borderRadius: '6px' }}>
                 <ChevronLeft className="w-5 h-5 text-[var(--text-secondary)]" />
               </button>
@@ -1638,16 +1646,36 @@ export default function MyPortalPage() {
         {/* Right: Calendar + Quick Actions + Time Off */}
         <div className="space-y-5">
           {/* Mini Calendar */}
-          <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-4 flex justify-center" style={{ borderRadius: '12px' }}>
-            <Calendar
-              mode="single"
-              selected={selectedDate}
-              onSelect={(date) => date && setSelectedDate(date)}
-              modifiers={{ hasEvent: datesWithEvents }}
-              modifiersStyles={{
-                hasEvent: { fontWeight: 700, textDecoration: 'underline', textDecorationColor: 'var(--brand-green-text)', textUnderlineOffset: '4px' },
-              }}
-            />
+          <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-4" style={{ borderRadius: '12px' }}>
+            <div className="flex justify-center">
+              <Calendar
+                mode="single"
+                selected={selectedDate}
+                month={calendarMonth}
+                onMonthChange={setCalendarMonth}
+                onSelect={(date) => { if (date) { setSelectedDate(date); setCalendarMonth(date); } }}
+                modifiers={{ hasEvent: datesWithEvents }}
+                modifiersStyles={{
+                  hasEvent: { fontWeight: 700, textDecoration: 'underline', textDecorationColor: 'var(--brand-green-text)', textUnderlineOffset: '4px' },
+                }}
+              />
+            </div>
+            {(calendarMonth.getMonth() !== new Date().getMonth() || calendarMonth.getFullYear() !== new Date().getFullYear()) && (
+              <button
+                onClick={() => { const t = new Date(); setSelectedDate(t); setCalendarMonth(t); }}
+                className="w-full mt-2 py-1.5 text-center transition-colors hover:bg-[#2D6A4F10]"
+                style={{
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  color: 'var(--brand-green-text)',
+                  border: '1px solid #2D6A4F',
+                }}
+              >
+                <ChevronLeft className="w-3.5 h-3.5 inline -ml-0.5 mr-0.5" />
+                Back to Today
+              </button>
+            )}
           </div>
 
           {/* Recent Activity */}

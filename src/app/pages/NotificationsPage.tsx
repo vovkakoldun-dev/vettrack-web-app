@@ -161,13 +161,13 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean, userId?: string)
       if (!isAdmin && userId) q = q.eq('vet_id', userId);
       return q;
     })(),
-    ...(!isAdmin && userId ? [
+    ...(userId ? [
       supabase.from('notification_events').select('*')
         .eq('organization_id', organizationId)
         .gte('timestamp', new Date(now.getTime() - 7 * 86400000).toISOString()),
     ] : []),
   ]);
-  const rawNotifEvents = !isAdmin && userId ? (rest[0] as any)?.data : null;
+  const rawNotifEvents = userId ? (rest[0] as any)?.data : null;
   // Filter notification events to only show ones targeting the current vet
   const notifEvents = rawNotifEvents
     ? (rawNotifEvents as any[]).filter((evt: any) => {
@@ -354,8 +354,8 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean, userId?: string)
     }
   }
 
-  // ── 7. New patients assigned to current vet (doctor portal only) ──
-  if (!isAdmin && notifEvents) {
+  // ── 7. Notification events (vet assignments, request decisions, etc.) ──
+  if (notifEvents) {
   for (const evt of notifEvents) {
     const d = evt.data as any;
     if (evt.type === 'vet_assign') {
@@ -389,6 +389,21 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean, userId?: string)
         actionPath: `/clients/${d.clientId || ''}`,
         urgent: false,
       });
+    } else if (evt.type === 'request_resolved') {
+      const decision = d.decision === 'approved' ? 'Approved' : 'Declined';
+      const typeLabel = d.requestType === 'pto' ? 'PTO request' : d.requestType === 'shift_swap' ? 'Shift swap request' : d.requestType === 'overtime' ? 'Overtime request' : 'Request';
+      notifications.push({
+        id: evt.id,
+        category: 'System',
+        title: `${typeLabel} ${decision.toLowerCase()}`,
+        description: `Your ${typeLabel.toLowerCase()} has been ${decision.toLowerCase()} by management. ${d.detail || ''}`,
+        time: formatRelativeTime(evt.timestamp),
+        timeISO: evt.timestamp,
+        read: false,
+        actionLabel: 'View Schedule',
+        actionPath: '/shifts',
+        urgent: d.decision === 'declined',
+      });
     } else if (evt.type === 'appt_assign') {
       const dateLabel = d.date ? ` on ${d.date}` : '';
       const timeLabel = d.time ? ` at ${d.time}` : '';
@@ -406,9 +421,24 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean, userId?: string)
         actionPath: `/appointments`,
         urgent: false,
       });
+    } else if (evt.type === 'lab_ready') {
+      notifications.push({
+        id: evt.id,
+        category: 'Lab Result',
+        title: `Lab results ready — ${d.petName}`,
+        description: `${d.testPanel || 'Lab'} results for ${d.petName}${d.ownerName ? ` (owner: ${d.ownerName})` : ''} have been uploaded and are awaiting your review. File: ${d.fileName || 'N/A'}.`,
+        time: formatRelativeTime(evt.timestamp),
+        timeISO: evt.timestamp,
+        read: false,
+        petName: d.petName,
+        ownerName: d.ownerName,
+        actionLabel: 'View Lab Results',
+        actionPath: '/lab',
+        urgent: false,
+      });
     }
   }
-  } // end !isAdmin
+  }
 
   // Sort all notifications: unread first, then by date descending
   notifications.sort((a, b) => {

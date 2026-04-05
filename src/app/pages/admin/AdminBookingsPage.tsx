@@ -694,7 +694,7 @@ export default function AdminBookingsPage() {
                     {/* Approve */}
                     <button
                       onClick={() => approveRequest(req)}
-                      style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '7px 14px', borderRadius: '8px', backgroundColor: '#2D6A4F', color: '#fff', border: 'none', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
+                      style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '7px 14px', borderRadius: '8px', backgroundColor: '#2D6A4F', color: 'var(--on-brand-green)', border: 'none', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
                     >
                       <CheckCircle2 style={{ width: '13px', height: '13px' }} /> Approve
                     </button>
@@ -2029,7 +2029,7 @@ export default function AdminBookingsPage() {
           {/* ── Footer ── */}
           <div style={{ borderTop: '1px solid var(--border-color)', padding: '14px 24px', display: 'flex', justifyContent: 'flex-end', gap: '10px', flexShrink: 0, backgroundColor: 'var(--surface-white)' }}>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button onClick={() => setDialogOpen(false)} style={{ backgroundColor: '#2D6A4F', color: '#fff' }}>
+            <Button onClick={() => setDialogOpen(false)} style={{ backgroundColor: '#2D6A4F', color: 'var(--on-brand-green)' }}>
               <CalendarIcon className="w-4 h-4 mr-1.5" />
               Schedule Booking
             </Button>
@@ -2168,7 +2168,7 @@ export default function AdminBookingsPage() {
                 }}
                 disabled={paymentProcessing}
                 className="w-full hover:opacity-90"
-                style={{ backgroundColor: '#2D6A4F', color: '#fff', border: 'none', height: 42, fontSize: 14, fontWeight: 600 }}
+                style={{ backgroundColor: '#2D6A4F', color: 'var(--on-brand-green)', border: 'none', height: 42, fontSize: 14, fontWeight: 600 }}
               >
                 {paymentProcessing ? 'Processing...' : `Confirm Payment — $70.20`}
               </Button>
@@ -2185,7 +2185,7 @@ export default function AdminBookingsPage() {
                   {paymentAppt?.petName} — {paymentAppt?.ownerName} · {paymentMethod === 'card' ? 'Card' : paymentMethod === 'cash' ? 'Cash' : 'Insurance'}
                 </p>
               </div>
-              <Button onClick={() => setPaymentOpen(false)} className="hover:opacity-90" style={{ backgroundColor: '#2D6A4F', color: '#fff', border: 'none' }}>
+              <Button onClick={() => setPaymentOpen(false)} className="hover:opacity-90" style={{ backgroundColor: '#2D6A4F', color: 'var(--on-brand-green)', border: 'none' }}>
                 Done
               </Button>
             </div>
@@ -2926,7 +2926,7 @@ export default function AdminBookingsPage() {
                   setSavingAppt(false);
                 }
               }}
-              style={{ backgroundColor: '#2D6A4F', color: '#fff' }}
+              style={{ backgroundColor: '#2D6A4F', color: 'var(--on-brand-green)' }}
             >
               <CalendarIcon className="w-4 h-4 mr-1.5" />
               {savingAppt ? 'Saving…' : 'Schedule Appointment'}

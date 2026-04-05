@@ -20,6 +20,7 @@ const ROLE_PORTAL_MAP: Record<string, PortalId> = {
   clinic_manager: 'admin',
   superadmin: 'superadmin',
   pet_owner: 'owner',
+  owner: 'owner',
 };
 
 /** Get the portal a role is allowed to access. */
@@ -64,6 +65,7 @@ export function validatePortalAccess(role: string, pathname: string): PortalVali
   const urlPortal = portalFromPath(pathname);
 
   // Sysadmin is a special case — only superadmin can access it
+  // Superadmin can ONLY access superadmin and sysadmin portals — not admin, doctor, or owner
   const allowed = urlPortal === 'sysadmin'
     ? role === 'superadmin'
     : urlPortal === userPortal;

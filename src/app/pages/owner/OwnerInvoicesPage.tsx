@@ -115,7 +115,7 @@ function InvoiceModal({ inv, onClose }: { inv: OwnerInvoice; onClose: () => void
               {fmt(total)} charged to card on file
             </p>
             <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '28px' }}>
-              A receipt has been sent to john.smith@email.com
+              A receipt has been sent to your email
             </p>
             <button
               onClick={onClose}

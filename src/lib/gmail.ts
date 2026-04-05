@@ -280,6 +280,17 @@ export async function trashEmail(messageId: string): Promise<void> {
   await handleResponse(response);
 }
 
+/** Permanently delete an email */
+export async function deleteEmail(messageId: string): Promise<void> {
+  const headers = await getAuthHeaders();
+  const response = await fetch(`${FUNCTIONS_BASE}/gmail-api?action=delete`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ messageId }),
+  });
+  await handleResponse(response);
+}
+
 /** Restore email from trash */
 export async function untrashEmail(messageId: string): Promise<void> {
   const headers = await getAuthHeaders();

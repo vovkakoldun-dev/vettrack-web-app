@@ -446,9 +446,9 @@ export default function VisitPage() {
         className="bg-[var(--surface-white)] border-b border-[var(--border-color)] sticky top-0 z-10"
         style={{ padding: '16px 32px' }}
       >
-        <div className="max-w-[960px] mx-auto flex items-center gap-4">
+        <div className="max-w-[960px] mx-auto flex flex-wrap items-center gap-3">
           {/* Left: back + title */}
-          <div className="flex items-center gap-3 flex-1 min-w-0">
+          <div className="flex items-center gap-3 min-w-0">
             <button
               onClick={() => navigate('/appointments')}
               className="p-2 hover:bg-[var(--surface-elevated)] transition-colors flex-shrink-0"
@@ -495,7 +495,7 @@ export default function VisitPage() {
           </div>
 
           {/* Right: date/time + elapsed timer */}
-          <div className="flex items-center gap-3 flex-shrink-0">
+          <div className="flex items-center gap-3 flex-shrink-0 ml-auto">
             {/* Elapsed timer pill */}
             <div
               className="flex items-center gap-1.5 px-3 py-1.5"

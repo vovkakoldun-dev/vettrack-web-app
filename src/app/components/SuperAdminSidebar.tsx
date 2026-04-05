@@ -14,8 +14,8 @@ import { Link, useLocation, useNavigate } from 'react-router';
 import { useAuth } from '../context/AuthContext';
 import {
   Home, BarChart2, Users, Building2, Calendar, CreditCard, Clock,
-  Settings, ClipboardList, Sun, Moon, ChevronLeft, ChevronRight,
-  LogOut, ChevronUp, Crown, MessageSquare, Tag, MonitorSmartphone,
+  Settings, Sun, Moon, ChevronLeft, ChevronRight,
+  LogOut, ChevronUp, Crown, MessageSquare, Tag, MonitorSmartphone, PawPrint,
 } from 'lucide-react';
 
 type NavItem = {
@@ -49,6 +49,7 @@ const NAV_SECTIONS: NavSection[] = [
       { name: 'Clinics',          icon: Building2,         path: '/superadmin/clinics' },
       { name: 'Appointments',     icon: Calendar,          path: '/superadmin/appointments' },
       { name: 'Patient Portals',  icon: MonitorSmartphone, path: '/superadmin/portals' },
+      { name: 'Clients',          icon: PawPrint,          path: '/superadmin/clients' },
     ],
   },
   {
@@ -64,14 +65,6 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { name: 'Billing',   icon: CreditCard, path: '/superadmin/billing' },
       { name: 'Services',  icon: Tag,        path: '/superadmin/services' },
-    ],
-  },
-  {
-    id: 'system',
-    label: 'System',
-    items: [
-      { name: 'Settings',   icon: Settings,      path: '/superadmin/settings' },
-      { name: 'Audit Log',  icon: ClipboardList, path: '/superadmin/audit' },
     ],
   },
 ];
@@ -287,7 +280,7 @@ export function SuperAdminSidebar({
                           width: '4px',
                           borderRadius: '3px',
                           backgroundColor: BRAND_TEXT,
-                          boxShadow: `0 0 12px 3px ${BRAND_TEXT}`,
+                          boxShadow: isDark ? `0 0 12px 3px ${BRAND_TEXT}` : 'none',
                           zIndex: 2,
                         }} />
                         <span style={{
@@ -297,7 +290,7 @@ export function SuperAdminSidebar({
                           bottom: 0,
                           width: '40%',
                           background: `radial-gradient(ellipse at -5% 50%, ${BRAND_TEXT} 0%, transparent 65%)`,
-                          opacity: 0.15,
+                          opacity: isDark ? 0.15 : 0,
                           pointerEvents: 'none',
                           borderRadius: '8px 0 0 8px',
                           zIndex: 1,

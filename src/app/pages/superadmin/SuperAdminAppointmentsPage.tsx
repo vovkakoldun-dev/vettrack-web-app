@@ -3,6 +3,9 @@ import {
   Calendar, List, LayoutGrid, ChevronLeft, ChevronRight, Search,
   Plus, Clock, User, Loader2, Activity, TrendingUp, Users, PawPrint,
 } from 'lucide-react';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from '../../components/ui/dialog';
 import { useAppointments } from '../../hooks/useAppointments';
 import { getOrgContext } from '../../hooks/useOrgContext';
 import { supabase } from '../../../lib/supabase';
@@ -110,6 +113,7 @@ export default function SuperAdminAppointmentsPage() {
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [filterTab, setFilterTab] = useState<FilterTab>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedAppt, setSelectedAppt] = useState<any>(null);
 
   // Overview tab state
   const [staff, setStaff] = useState<StaffMember[]>([]);
@@ -155,8 +159,8 @@ export default function SuperAdminAppointmentsPage() {
     const dateStr = formatDate(selectedDate);
     let list = appointments;
 
-    // Date filter for list & schedule views
-    if (viewMode !== 'month') {
+    // Date filter for schedule view only (list shows all, month has its own logic)
+    if (viewMode === 'schedule') {
       list = list.filter((a) => a.scheduled_at.startsWith(dateStr));
     }
 
@@ -311,6 +315,111 @@ export default function SuperAdminAppointmentsPage() {
       </div>
 
       {activeTab === 'schedule' ? renderScheduleTab() : renderOverviewTab()}
+
+      {/* ── Appointment Detail Dialog ──────────────────────────────── */}
+      <Dialog open={!!selectedAppt} onOpenChange={(open) => { if (!open) setSelectedAppt(null); }}>
+        <DialogContent style={{
+          backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)',
+          borderRadius: 12, maxWidth: 520, padding: 0,
+        }}>
+          {selectedAppt && (() => {
+            const ss = getStatusStyle(selectedAppt.status);
+            const petName = selectedAppt.pets?.name ?? 'Unknown';
+            const ownerName = selectedAppt.clients ? `${selectedAppt.clients.first_name} ${selectedAppt.clients.last_name}` : '—';
+            const vetName = selectedAppt.staff?.profiles ? `Dr. ${selectedAppt.staff.profiles.first_name} ${selectedAppt.staff.profiles.last_name}` : '—';
+            const service = selectedAppt.services?.name ?? '—';
+            const time = formatTime(selectedAppt.scheduled_at);
+            const date = new Date(selectedAppt.scheduled_at).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+            return (
+              <>
+                <DialogHeader style={{ padding: '20px 24px 0' }}>
+                  <DialogTitle style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)' }}>
+                    Appointment Details
+                  </DialogTitle>
+                </DialogHeader>
+                <div style={{ padding: '16px 24px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  {/* Status badge */}
+                  <div>
+                    <span style={{
+                      display: 'inline-block', padding: '5px 14px', borderRadius: 20,
+                      fontSize: 13, fontWeight: 600, background: ss.bg, color: ss.color,
+                    }}>
+                      {selectedAppt.status}
+                    </span>
+                  </div>
+
+                  {/* Pet & Owner */}
+                  <div style={{
+                    display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16,
+                    padding: 16, borderRadius: 10, backgroundColor: 'var(--surface-elevated)',
+                  }}>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>Pet</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{
+                          width: 28, height: 28, borderRadius: '50%', overflow: 'hidden',
+                          background: 'var(--surface-white)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                        }}>
+                          {selectedAppt.pets?.photo_url ? (
+                            <img src={selectedAppt.pets.photo_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : (
+                            <PawPrint size={14} style={{ color: 'var(--text-secondary)' }} />
+                          )}
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{petName}</div>
+                          {selectedAppt.pets?.species && (
+                            <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{selectedAppt.pets.species}</div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>Owner</div>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{ownerName}</div>
+                    </div>
+                  </div>
+
+                  {/* Details grid */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>Date</div>
+                      <div style={{ fontSize: 14, color: 'var(--text-primary)' }}>{date}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>Time</div>
+                      <div style={{ fontSize: 14, color: 'var(--text-primary)' }}>
+                        {time}{selectedAppt.duration_minutes ? ` (${selectedAppt.duration_minutes} min)` : ''}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>Service</div>
+                      <div style={{ fontSize: 14, color: 'var(--text-primary)' }}>{service}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>Veterinarian</div>
+                      <div style={{ fontSize: 14, color: 'var(--text-primary)' }}>{vetName}</div>
+                    </div>
+                  </div>
+
+                  {/* Notes */}
+                  {selectedAppt.notes && (
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>Notes</div>
+                      <div style={{
+                        fontSize: 14, color: 'var(--text-primary)', padding: 12, borderRadius: 8,
+                        backgroundColor: 'var(--surface-elevated)', lineHeight: 1.5,
+                      }}>
+                        {selectedAppt.notes}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 
@@ -469,6 +578,7 @@ export default function SuperAdminAppointmentsPage() {
                   style={{ borderBottom: '1px solid var(--border-color)', cursor: 'pointer', transition: 'background 0.1s' }}
                   onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-elevated)')}
                   onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  onClick={() => setSelectedAppt(appt)}
                 >
                   {/* Time */}
                   <td style={{ padding: '14px 16px', fontSize: 14, color: 'var(--text-primary)', fontWeight: 500, whiteSpace: 'nowrap' }}>
@@ -538,7 +648,7 @@ export default function SuperAdminAppointmentsPage() {
                   {/* Actions */}
                   <td style={{ padding: '14px 16px' }}>
                     <button
-                      onClick={(e) => { e.stopPropagation(); }}
+                      onClick={(e) => { e.stopPropagation(); setSelectedAppt(appt); }}
                       style={{
                         padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border-color)',
                         background: 'transparent', color: 'var(--text-secondary)', fontSize: 12,

@@ -71,8 +71,8 @@
   --stat-card-anno-start: rgba(0,0,0,0.4);
   --stat-card-anno-end: rgba(0,0,0,0.8);
   --stat-card-area-opacity: 0.14;
-  --stat-card-glow1: 0.28;
-  --stat-card-glow2: 0.45;
+  --stat-card-glow1: 0;
+  --stat-card-glow2: 0;
   --stat-card-line-white-opacity: 1;
   --stat-card-use-accent-line: 1;
 
@@ -346,8 +346,8 @@
   --stat-card-anno-start: rgba(61,50,64,0.4);
   --stat-card-anno-end: rgba(61,50,64,0.75);
   --stat-card-area-opacity: 0.12;
-  --stat-card-glow1: 0.25;
-  --stat-card-glow2: 0.4;
+  --stat-card-glow1: 0;
+  --stat-card-glow2: 0;
   --stat-card-line-white-opacity: 1;
   --stat-card-use-accent-line: 1;
 
@@ -511,8 +511,8 @@
   --stat-card-anno-start: rgba(30,43,34,0.4);
   --stat-card-anno-end: rgba(30,43,34,0.8);
   --stat-card-area-opacity: 0.14;
-  --stat-card-glow1: 0.28;
-  --stat-card-glow2: 0.45;
+  --stat-card-glow1: 0;
+  --stat-card-glow2: 0;
   --stat-card-line-white-opacity: 1;
   --stat-card-use-accent-line: 1;
 
@@ -593,8 +593,8 @@
   --stat-card-anno-start: rgba(44,36,23,0.4);
   --stat-card-anno-end: rgba(44,36,23,0.8);
   --stat-card-area-opacity: 0.14;
-  --stat-card-glow1: 0.28;
-  --stat-card-glow2: 0.45;
+  --stat-card-glow1: 0;
+  --stat-card-glow2: 0;
   --stat-card-line-white-opacity: 1;
   --stat-card-use-accent-line: 1;
 

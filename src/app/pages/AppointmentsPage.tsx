@@ -190,6 +190,8 @@ export default function AppointmentsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'schedule' | 'month'>('list');
   const [showAllDates, setShowAllDates] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(5);
+  const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
   const [monthViewDate, setMonthViewDate] = useState<Date>(new Date());
   const [newApptTime, setNewApptTime] = useState('09:00');
   const today = new Date().toISOString().split('T')[0];
@@ -369,13 +371,15 @@ export default function AppointmentsPage() {
     const prev = new Date(selectedDate);
     prev.setDate(prev.getDate() - 1);
     setSelectedDate(prev);
+    setCalendarMonth(prev);
   };
   const goToNextDay = () => {
     const next = new Date(selectedDate);
     next.setDate(next.getDate() + 1);
     setSelectedDate(next);
+    setCalendarMonth(next);
   };
-  const goToToday = () => setSelectedDate(new Date());
+  const goToToday = () => { const t = new Date(); setSelectedDate(t); setCalendarMonth(t); };
 
   const goToPrevMonth = () => setMonthViewDate((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
   const goToNextMonth = () => setMonthViewDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
@@ -571,8 +575,8 @@ export default function AppointmentsPage() {
         <div>
           {/* Date + Filters + Search */}
           <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-5 mb-4" style={{ borderRadius: '12px' }}>
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <div className="flex flex-wrap items-center gap-2">
                 {viewMode === 'month' ? (
                   <>
                     <button onClick={goToPrevMonth} className="p-1 hover:bg-[var(--surface-elevated)] transition-colors" style={{ borderRadius: '6px' }}>
@@ -629,6 +633,7 @@ export default function AppointmentsPage() {
                       onClick={() => {
                         const next = !showAllDates;
                         setShowAllDates(next);
+                        setVisibleCount(5);
                         if (next && viewMode !== 'list') setViewMode('list');
                       }}
                       className="ml-2 px-3 py-1 transition-colors"
@@ -637,11 +642,11 @@ export default function AppointmentsPage() {
                         fontSize: '13px',
                         fontWeight: 600,
                         backgroundColor: showAllDates ? 'var(--brand-green-text)' : 'transparent',
-                        color: showAllDates ? '#fff' : 'var(--brand-green-text)',
+                        color: showAllDates ? '#000' : 'var(--brand-green-text)',
                         border: showAllDates ? '1px solid var(--brand-green-text)' : '1px solid #2D6A4F',
                       }}
                     >
-                      {showAllDates ? '← Back to Day' : 'View All'}
+                      {showAllDates ? <><ChevronLeft className="w-3.5 h-3.5 inline -ml-0.5 mr-0.5" />Back to Day</> : 'View All'}
                     </button>
                   </>
                 )}
@@ -697,13 +702,13 @@ export default function AppointmentsPage() {
             </div>
 
             {viewMode !== 'month' && (
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
                 {/* Filter Tabs */}
                 <div className="flex gap-1 p-1 bg-[var(--surface-elevated)]" style={{ borderRadius: '8px' }}>
                   {FILTER_TABS.map((tab) => (
                     <button
                       key={tab}
-                      onClick={() => setActiveFilter(tab)}
+                      onClick={() => { setActiveFilter(tab); setVisibleCount(5); }}
                       className="px-3 py-1.5 transition-colors"
                       style={{
                         borderRadius: '6px',
@@ -720,12 +725,12 @@ export default function AppointmentsPage() {
                 </div>
 
                 {/* Search */}
-                <div className="relative flex-1">
+                <div className="relative flex-1" style={{ minWidth: '180px' }}>
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-secondary)]" />
                   <Input
-                    placeholder="Search pet, owner, or service..."
+                    placeholder="Search pet"
                     value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onChange={(e) => { setSearchQuery(e.target.value); setVisibleCount(5); }}
                     className="pl-9 h-9"
                   />
                 </div>
@@ -749,103 +754,116 @@ export default function AppointmentsPage() {
               </div>
             ) : (
               <div className="space-y-3">
-                {filteredAppointments.map((appt, idx) => {
-                  const s = statusStyles[appt.status];
-                  const StatusIcon = s.icon;
-                  const serviceColor = serviceColors[appt.service] || serviceColors.Other;
-                  // Show date header when in "All" mode and date changes
-                  const showDateHeader = showAllDates && (idx === 0 || filteredAppointments[idx - 1].date !== appt.date);
-                  const dateLabel = showDateHeader ? new Date(appt.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : '';
+                {(() => {
+                  const visibleItems = filteredAppointments.slice(0, visibleCount);
+                  const hasMore = visibleCount < filteredAppointments.length;
                   return (
-                    <div key={appt.id}>
-                    {showDateHeader && (
-                      <div className="flex items-center gap-2 mb-2 mt-4" style={{ ...(idx === 0 ? { marginTop: 0 } : {}) }}>
-                        <CalendarIcon className="w-4 h-4 text-[var(--brand-green-text)]" />
-                        <span className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 600 }}>{dateLabel}</span>
-                        <div className="flex-1 h-px bg-[var(--border-color)]" />
-                      </div>
-                    )}
-                    <div
-                      className="bg-[var(--surface-white)] border border-[var(--border-color)] p-4 hover:border-[#2D6A4F] transition-colors cursor-pointer"
-                      style={{ borderRadius: '12px' }}
-                      onClick={() => openApptDetail(appt)}
-                    >
-                      <div className="flex items-center gap-4">
-                        {/* Time */}
-                        <div className="w-28 flex-shrink-0 text-center">
-                          <p className="text-[var(--text-primary)]" style={{ fontSize: '15px', fontWeight: 600 }}>
-                            {appt.timeStart}
-                          </p>
-                          <p className="text-[var(--text-secondary)]" style={{ fontSize: '12px' }}>
-                            to {appt.timeEnd}
-                          </p>
-                        </div>
-
-                        {/* Divider */}
-                        <div className="w-px h-12 bg-[var(--border-color)]" />
-
-                        {/* Pet + Owner */}
-                        <div className="flex items-center gap-3 flex-1">
-                          <Avatar className="w-10 h-10">
-                            <AvatarImage src={appt.petImage} alt={appt.petName} className="object-cover" />
-                            <AvatarFallback>{appt.petName.slice(0, 2)}</AvatarFallback>
-                          </Avatar>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-[var(--text-primary)]" style={{ fontSize: '16px', fontWeight: 600 }}>
-                              {appt.petName}
-                            </p>
-                            <p className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>
-                              {appt.ownerName} · {appt.species}
-                            </p>
+                    <>
+                      {visibleItems.map((appt, idx) => {
+                        const s = statusStyles[appt.status];
+                        const StatusIcon = s.icon;
+                        const serviceColor = serviceColors[appt.service] || serviceColors.Other;
+                        const showDateHeader = showAllDates && (idx === 0 || filteredAppointments[idx - 1].date !== appt.date);
+                        const dateLabel = showDateHeader ? new Date(appt.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : '';
+                        return (
+                          <div key={appt.id}>
+                          {showDateHeader && (
+                            <div className="flex items-center gap-2 mb-2 mt-4" style={{ ...(idx === 0 ? { marginTop: 0 } : {}) }}>
+                              <CalendarIcon className="w-4 h-4 text-[var(--brand-green-text)]" />
+                              <span className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 600 }}>{dateLabel}</span>
+                              <div className="flex-1 h-px bg-[var(--border-color)]" />
+                            </div>
+                          )}
+                          <div
+                            className="bg-[var(--surface-white)] border border-[var(--border-color)] p-4 hover:border-[#2D6A4F] transition-colors cursor-pointer"
+                            style={{ borderRadius: '12px' }}
+                            onClick={() => openApptDetail(appt)}
+                          >
+                            <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+                              <div className="w-24 sm:w-28 flex-shrink-0 text-center">
+                                <p className="text-[var(--text-primary)]" style={{ fontSize: '15px', fontWeight: 600 }}>
+                                  {appt.timeStart}
+                                </p>
+                                <p className="text-[var(--text-secondary)]" style={{ fontSize: '12px' }}>
+                                  to {appt.timeEnd}
+                                </p>
+                              </div>
+                              <div className="w-px h-12 bg-[var(--border-color)] hidden sm:block" />
+                              <div className="flex items-center gap-3 flex-1 min-w-[160px]">
+                                <Avatar className="w-10 h-10">
+                                  <AvatarImage src={appt.petImage} alt={appt.petName} className="object-cover" />
+                                  <AvatarFallback>{appt.petName.slice(0, 2)}</AvatarFallback>
+                                </Avatar>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-[var(--text-primary)] truncate" style={{ fontSize: '16px', fontWeight: 600 }}>
+                                    {appt.petName}
+                                  </p>
+                                  <p className="text-[var(--text-secondary)] truncate" style={{ fontSize: '13px' }}>
+                                    {appt.ownerName}
+                                  </p>
+                                </div>
+                              </div>
+                              <span
+                                className="inline-block px-2.5 py-1 flex-shrink-0 truncate max-w-[180px]"
+                                style={{
+                                  backgroundColor: serviceColor + '15',
+                                  color: serviceColor,
+                                  borderRadius: '6px',
+                                  fontSize: '13px',
+                                  fontWeight: 600,
+                                }}
+                              >
+                                {appt.service}
+                              </span>
+                              <div className="flex items-center gap-1.5 flex-shrink-0">
+                                <User className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
+                                <span className="text-[var(--text-secondary)] truncate max-w-[100px]" style={{ fontSize: '13px' }}>{appt.vet}</span>
+                              </div>
+                              <span
+                                className="inline-flex items-center gap-1 px-2.5 py-1 flex-shrink-0"
+                                style={{
+                                  backgroundColor: s.bg,
+                                  color: s.text,
+                                  borderRadius: '9999px',
+                                  fontSize: '12px',
+                                  fontWeight: 600,
+                                }}
+                              >
+                                <StatusIcon className="w-3 h-3" />
+                                {appt.status}
+                              </span>
+                            </div>
+                            {appt.notes && (
+                              <p className="text-[var(--text-secondary)] mt-2 sm:ml-32 ml-0 pl-4" style={{ fontSize: '13px', borderLeft: '2px solid var(--border-color)' }}>
+                                {appt.notes}
+                              </p>
+                            )}
                           </div>
+                          </div>
+                        );
+                      })}
+
+                      {/* Load More */}
+                      {hasMore && (
+                        <div className="pt-2">
+                          <button
+                            onClick={() => setVisibleCount((c) => c + 5)}
+                            className="w-full py-2 transition-colors hover:bg-[#2D6A4F10]"
+                            style={{
+                              borderRadius: '8px',
+                              fontSize: '13px',
+                              fontWeight: 600,
+                              color: 'var(--brand-green-text)',
+                              border: '1px solid #2D6A4F',
+                            }}
+                          >
+                            Load More ({filteredAppointments.length - visibleCount} remaining)
+                          </button>
                         </div>
-
-                        {/* Service Badge */}
-                        <span
-                          className="inline-block px-2.5 py-1 flex-shrink-0"
-                          style={{
-                            backgroundColor: serviceColor + '15',
-                            color: serviceColor,
-                            borderRadius: '6px',
-                            fontSize: '13px',
-                            fontWeight: 600,
-                          }}
-                        >
-                          {appt.service}
-                        </span>
-
-                        {/* Vet */}
-                        <div className="flex items-center gap-1.5 flex-shrink-0 w-24">
-                          <User className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
-                          <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{appt.vet}</span>
-                        </div>
-
-                        {/* Status */}
-                        <span
-                          className="inline-flex items-center gap-1 px-2.5 py-1 flex-shrink-0"
-                          style={{
-                            backgroundColor: s.bg,
-                            color: s.text,
-                            borderRadius: '9999px',
-                            fontSize: '12px',
-                            fontWeight: 600,
-                          }}
-                        >
-                          <StatusIcon className="w-3 h-3" />
-                          {appt.status}
-                        </span>
-                      </div>
-
-                      {/* Notes preview */}
-                      {appt.notes && (
-                        <p className="text-[var(--text-secondary)] mt-2 ml-32 pl-4" style={{ fontSize: '13px', borderLeft: '2px solid var(--border-color)' }}>
-                          {appt.notes}
-                        </p>
                       )}
-                    </div>
-                    </div>
+                    </>
                   );
-                })}
+                })()}
               </div>
             )
           )}
@@ -1082,21 +1100,41 @@ export default function AppointmentsPage() {
         {viewMode === 'list' && (
         <div className="space-y-6">
           {/* Mini Calendar */}
-          <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-4 flex justify-center" style={{ borderRadius: '12px' }}>
-            <Calendar
-              mode="single"
-              selected={selectedDate}
-              onSelect={(date) => date && setSelectedDate(date)}
-              modifiers={{ hasAppointment: datesWithAppointments }}
-              modifiersStyles={{
-                hasAppointment: {
-                  fontWeight: 700,
-                  textDecoration: 'underline',
-                  textDecorationColor: 'var(--brand-green-text)',
-                  textUnderlineOffset: '4px',
-                },
-              }}
-            />
+          <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-4" style={{ borderRadius: '12px' }}>
+            <div className="flex justify-center">
+              <Calendar
+                mode="single"
+                selected={selectedDate}
+                month={calendarMonth}
+                onMonthChange={setCalendarMonth}
+                onSelect={(date) => { if (date) { setSelectedDate(date); setCalendarMonth(date); } }}
+                modifiers={{ hasAppointment: datesWithAppointments }}
+                modifiersStyles={{
+                  hasAppointment: {
+                    fontWeight: 700,
+                    textDecoration: 'underline',
+                    textDecorationColor: 'var(--brand-green-text)',
+                    textUnderlineOffset: '4px',
+                  },
+                }}
+              />
+            </div>
+            {(calendarMonth.getMonth() !== new Date().getMonth() || calendarMonth.getFullYear() !== new Date().getFullYear()) && (
+              <button
+                onClick={() => { const t = new Date(); setSelectedDate(t); setCalendarMonth(t); }}
+                className="w-full mt-2 py-1.5 text-center transition-colors hover:bg-[#2D6A4F10]"
+                style={{
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  color: 'var(--brand-green-text)',
+                  border: '1px solid #2D6A4F',
+                }}
+              >
+                <ChevronLeft className="w-3.5 h-3.5 inline -ml-0.5 mr-0.5" />
+                Back to Today
+              </button>
+            )}
           </div>
 
           {/* Daily Stats */}
@@ -1161,15 +1199,17 @@ export default function AppointmentsPage() {
               Vets on Duty
             </h3>
             <div className="space-y-3">
-              {['Dr. Chen', 'Dr. Patel', 'Dr. Garcia'].map((vet) => {
-                const count = dayAppointments.filter((a) => a.vet === vet && a.status !== 'Cancelled').length;
+              {staffList.length === 0 ? (
+                <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>No vets found</span>
+              ) : staffList.map((vet) => {
+                const count = dayAppointments.filter((a) => a.vet === vet.name && a.status !== 'Cancelled').length;
                 return (
-                  <div key={vet} className="flex items-center justify-between">
+                  <div key={vet.id} className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 bg-[#2D6A4F15] flex items-center justify-center" style={{ borderRadius: '9999px' }}>
-                        <User className="w-3.5 h-3.5 text-[var(--brand-green-text)]" />
+                      <div className="w-7 h-7 bg-[#2D6A4F15] flex items-center justify-center" style={{ borderRadius: '9999px', fontSize: '11px', fontWeight: 600, color: 'var(--brand-green-text)' }}>
+                        {vet.initials}
                       </div>
-                      <span className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 500 }}>{vet}</span>
+                      <span className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 500 }}>{vet.name}</span>
                     </div>
                     <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>
                       {count} appt{count !== 1 ? 's' : ''}

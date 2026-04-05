@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
-import { Search, Plus, Mail, Phone, ChevronDown, CheckCircle2, AlertCircle, AlertTriangle, Loader2, Users, Trash2, Filter, X, ArrowUpDown } from 'lucide-react';
+import { Search, Plus, Mail, Phone, ChevronDown, CheckCircle2, AlertCircle, AlertTriangle, Loader2, Users, Trash2, Filter, X, ArrowUpDown, Copy } from 'lucide-react';
 import { AddClientDialog } from '../components/AddClientDialog';
 import { useClients, deletePetCascade } from '../hooks/useClients';
 import { supabase } from '../../lib/supabase';
@@ -538,15 +538,23 @@ export default function ClientsPage() {
                       <p className="text-[var(--text-primary)]" style={{ fontSize: '16px', fontWeight: 400 }}>
                         {client.ownerName}
                       </p>
-                      <div className="flex items-center gap-1 mt-1">
+                      <div className="flex items-center gap-1 mt-1" onClick={(e) => e.stopPropagation()}>
                         <Mail className="w-3 h-3 text-[var(--text-secondary)]" />
-                        <button
-                          onClick={(e) => { e.stopPropagation(); navigate('/communications'); }}
-                          className="hover:underline"
-                          style={{ fontSize: '12px', color: 'var(--brand-green-text)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-                        >
-                          {client.ownerEmail}
-                        </button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              className="hover:underline"
+                              style={{ fontSize: '12px', color: 'var(--brand-green-text)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                            >
+                              {client.ownerEmail}
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="start">
+                            <DropdownMenuItem onClick={() => navigator.clipboard.writeText(client.ownerEmail)}>
+                              <Copy className="w-3.5 h-3.5 mr-2" /> Copy email
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
                     </div>
                   </TableCell>

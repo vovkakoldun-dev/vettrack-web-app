@@ -61,7 +61,8 @@ function useGlobalSearch(query: string, debounceMs = 300) {
     setLoading(true);
     const pattern = `%${term}%`;
 
-    const [clientsRes, petsRes, appointmentsRes] = await Promise.all([
+    // Step 1: Search clients and pets in parallel
+    const [clientsRes, petsRes] = await Promise.all([
       supabase
         .from('clients')
         .select('id, first_name, last_name, email, phone')
@@ -72,17 +73,29 @@ function useGlobalSearch(query: string, debounceMs = 300) {
         .select('id, name, species, breed, photo_url, client_id, clients(id, first_name, last_name)')
         .or(`name.ilike.${pattern},species.ilike.${pattern},breed.ilike.${pattern}`)
         .limit(6),
-      supabase
-        .from('appointments')
-        .select('id, scheduled_at, status, reason, pets(id, name), clients(id, first_name, last_name), services(id, name)')
-        .or(`reason.ilike.${pattern}`)
-        .order('scheduled_at', { ascending: false })
-        .limit(6),
     ]);
 
+    const matchedClients = (clientsRes.data as SearchResultClient[]) ?? [];
+    const matchedPets = (petsRes.data as SearchResultPet[]) ?? [];
+
+    // Step 2: Search appointments by reason, OR by matched client/pet IDs
+    const clientIds = matchedClients.map(c => c.id);
+    const petIds = matchedPets.map(p => p.id);
+
+    const orParts: string[] = [`reason.ilike.${pattern}`];
+    if (clientIds.length > 0) orParts.push(`client_id.in.(${clientIds.join(',')})`);
+    if (petIds.length > 0) orParts.push(`pet_id.in.(${petIds.join(',')})`);
+
+    const appointmentsRes = await supabase
+      .from('appointments')
+      .select('id, scheduled_at, status, reason, pets(id, name), clients(id, first_name, last_name), services(id, name)')
+      .or(orParts.join(','))
+      .order('scheduled_at', { ascending: false })
+      .limit(6);
+
     setResults({
-      clients: (clientsRes.data as SearchResultClient[]) ?? [],
-      pets: (petsRes.data as SearchResultPet[]) ?? [],
+      clients: matchedClients,
+      pets: matchedPets,
       appointments: (appointmentsRes.data as SearchResultAppointment[]) ?? [],
     });
     setLoading(false);
@@ -226,7 +239,7 @@ function GlowStatCard({
   const last = pts[pts.length - 1];
   const areaPath = linePath + ` L ${last.x} ${VH} L ${first.x} ${VH} Z`;
   const midY = VH / 2;
-  const uid = title.replace(/\s+/g, '');
+  const uid = title.replace(/[^a-zA-Z0-9]/g, '');
 
   // Read CSS custom properties from DOM
   const cs = typeof window !== 'undefined' ? getComputedStyle(document.documentElement) : null;
@@ -390,12 +403,12 @@ function GlowStatCard({
           <path d={areaPath} fill={`url(#area-${uid})`} />
 
           {/* Outer glow halo */}
-          <path d={linePath} fill="none" stroke={color} strokeWidth="10"
-            strokeLinecap="round" opacity={glowOpacity1} filter={`url(#bloom-${uid})`} />
+          {glowOpacity1 > 0 && <path d={linePath} fill="none" stroke={color} strokeWidth="10"
+            strokeLinecap="round" opacity={glowOpacity1} filter={`url(#bloom-${uid})`} />}
 
           {/* Inner tight glow */}
-          <path d={linePath} fill="none" stroke={color} strokeWidth="5"
-            strokeLinecap="round" opacity={glowOpacity2} filter={`url(#bloom-${uid})`} />
+          {glowOpacity2 > 0 && <path d={linePath} fill="none" stroke={color} strokeWidth="5"
+            strokeLinecap="round" opacity={glowOpacity2} filter={`url(#bloom-${uid})`} />}
 
           {/* Sharp line */}
           <path d={linePath} fill="none" stroke={`url(#line-${uid})`} strokeWidth="2.5"
@@ -405,7 +418,7 @@ function GlowStatCard({
           <circle cx={first.x} cy={first.y} r="4.5" fill={dotHoleFill} stroke={color} strokeWidth="2" />
 
           {/* End dot (filled + glowing) */}
-          <circle cx={last.x} cy={last.y} r="5" fill={color} filter={`url(#bloom-${uid})`} />
+          <circle cx={last.x} cy={last.y} r="5" fill={color} filter={glowOpacity1 > 0 ? `url(#bloom-${uid})` : undefined} />
           <circle cx={last.x} cy={last.y} r="4" fill="#ffffff" opacity="0.9" />
 
           {/* Annotations */}
@@ -431,7 +444,7 @@ function GlowStatCard({
                 <line x1={hx} y1={0} x2={hx} y2={VH}
                   stroke={color} strokeWidth="1" strokeDasharray="3 3" opacity="0.5" />
                 <circle cx={hx} cy={hy} r="8" fill={color} opacity="0.18" />
-                <circle cx={hx} cy={hy} r="5" fill={color} filter={`url(#bloom-${uid})`} opacity="0.8" />
+                <circle cx={hx} cy={hy} r="5" fill={color} filter={glowOpacity1 > 0 ? `url(#bloom-${uid})` : undefined} opacity="0.8" />
                 <circle cx={hx} cy={hy} r="4" fill={color} />
                 <circle cx={hx} cy={hy} r="2" fill="#fff" />
               </>

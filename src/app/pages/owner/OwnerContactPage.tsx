@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Phone, Mail, MapPin, Clock, Send, CheckCircle,
   MessageSquare, ChevronRight,
 } from 'lucide-react';
+import { useOwnerClient } from '../../hooks/useOwnerClient';
 
 const BRAND = '#2D6A4F';
 const BRAND_TEXT = 'var(--brand-green-text)';
@@ -59,7 +60,13 @@ function SectionTitle({ icon: Icon, title }: { icon: React.ElementType; title: s
 }
 
 export default function OwnerContactPage() {
-  const [form, setForm] = useState({ name: 'John Smith', email: 'john.smith@email.com', subject: '', message: '' });
+  const { client: ownerClient } = useOwnerClient();
+  const [form, setForm] = useState({ name: '', email: '', subject: '', message: '' });
+  useEffect(() => {
+    if (ownerClient.fullName) {
+      setForm(prev => ({ ...prev, name: ownerClient.fullName, email: ownerClient.email }));
+    }
+  }, [ownerClient.fullName, ownerClient.email]);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
 

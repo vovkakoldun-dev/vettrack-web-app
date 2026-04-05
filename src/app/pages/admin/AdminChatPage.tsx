@@ -230,6 +230,7 @@ export default function AdminChatPage() {
         .select('id, first_name, last_name, role, avatar_url')
         .eq('organization_id', organizationId)
         .neq('id', user.id)
+        .neq('role', 'owner')
         .or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%`)
         .limit(8);
       const existingIds = new Set(conversations.map(c => c.otherProfileId));
@@ -299,6 +300,7 @@ export default function AdminChatPage() {
       .select('id, first_name, last_name, role, avatar_url')
       .eq('organization_id', organizationId)
       .neq('id', user.id)
+      .neq('role', 'owner')
       .order('first_name');
     setAllStaff(data || []);
     setGroupSelectedIds([]);
@@ -1363,7 +1365,7 @@ export default function AdminChatPage() {
               <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{groupSelectedIds.length} selected</span>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button onClick={() => setNewGroupOpen(false)} style={{ padding: '8px 16px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-white)', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: 'var(--text-primary)' }}>Cancel</button>
-                <button onClick={handleCreateGroup} disabled={groupSelectedIds.length < 2} style={{ padding: '8px 16px', borderRadius: '8px', border: 'none', backgroundColor: groupSelectedIds.length < 2 ? 'var(--border-color)' : '#2D6A4F', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: groupSelectedIds.length < 2 ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <button onClick={handleCreateGroup} disabled={groupSelectedIds.length < 2} style={{ padding: '8px 16px', borderRadius: '8px', border: 'none', backgroundColor: groupSelectedIds.length < 2 ? 'var(--border-color)' : '#2D6A4F', color: 'var(--on-brand-green)', fontSize: '13px', fontWeight: 600, cursor: groupSelectedIds.length < 2 ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <Users style={{ width: '14px', height: '14px' }} /> Create Group
                 </button>
               </div>

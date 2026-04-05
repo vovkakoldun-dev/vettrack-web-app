@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   ChevronLeft, ChevronRight, Plus, Clock, Users, RefreshCw,
-  AlertTriangle, Trash2, Check, X, Loader2, CalendarDays,
+  AlertTriangle, Trash2, Check, X, Loader2, CalendarDays, BarChart3,
 } from 'lucide-react';
 import { Input } from '../../components/ui/input';
 import { Button } from '../../components/ui/button';
@@ -166,6 +166,17 @@ export default function SuperAdminShiftsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  // Tab state
+  const [activeTab, setActiveTab] = useState<'schedule' | 'stats'>('schedule');
+
+  // Stats tab state
+  const [statsMonth, setStatsMonth] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  });
+  const [monthlyShifts, setMonthlyShifts] = useState<ShiftRow[]>([]);
+  const [statsLoading, setStatsLoading] = useState(false);
+
   // Dialog state
   const [assignOpen, setAssignOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -211,7 +222,7 @@ export default function SuperAdminShiftsPage() {
           .from('pending_requests')
           .select('*')
           .eq('organization_id', organizationId)
-          .eq('type', 'shift_swap')
+          .in('type', ['shift_swap', 'overtime'])
           .eq('status', 'pending')
           .order('created_at', { ascending: false }),
       ]);
@@ -229,6 +240,65 @@ export default function SuperAdminShiftsPage() {
   useEffect(() => {
     if (!authLoading && authUser) loadData();
   }, [authLoading, authUser, loadData]);
+
+  // ─── Monthly Overtime (for stat card) ─────────────────────
+  const [monthlyOvertimeHours, setMonthlyOvertimeHours] = useState(0);
+
+  useEffect(() => {
+    if (!authUser || authLoading) return;
+    (async () => {
+      const { organizationId } = await getOrgContext();
+      const now = new Date();
+      const monthStart = fmtDateISO(new Date(now.getFullYear(), now.getMonth(), 1));
+      const monthEnd = fmtDateISO(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+      const { data } = await supabase
+        .from('shifts')
+        .select('start_time, end_time')
+        .eq('organization_id', organizationId)
+        .eq('type', 'overtime')
+        .gte('date', monthStart)
+        .lte('date', monthEnd);
+      if (data) {
+        const total = data.reduce((sum: number, s: any) => sum + shiftHours(s.start_time, s.end_time), 0);
+        setMonthlyOvertimeHours(total);
+      }
+    })();
+  }, [authUser, authLoading]);
+
+  // ─── Stats Tab Data Loading ───────────────────────────────
+  const statsMonthStr = fmtDateISO(statsMonth);
+  const statsMonthEnd = fmtDateISO(new Date(statsMonth.getFullYear(), statsMonth.getMonth() + 1, 0));
+
+  useEffect(() => {
+    if (activeTab !== 'stats' || !authUser || authLoading) return;
+    let cancelled = false;
+    (async () => {
+      setStatsLoading(true);
+      try {
+        const { organizationId } = await getOrgContext();
+        const { data } = await supabase
+          .from('shifts')
+          .select('*, staff:staff!shifts_staff_id_fkey(id, role, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
+          .eq('organization_id', organizationId)
+          .gte('date', statsMonthStr)
+          .lte('date', statsMonthEnd)
+          .order('date');
+        if (!cancelled && data) setMonthlyShifts(data as any);
+      } catch (err) {
+        console.error('Failed to load monthly stats:', err);
+      } finally {
+        if (!cancelled) setStatsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeTab, statsMonthStr, statsMonthEnd, authUser, authLoading]);
+
+  function prevMonth() {
+    setStatsMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+  }
+  function nextMonth() {
+    setStatsMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+  }
 
   // ─── Stats ────────────────────────────────────────────────
   const todayStr = fmtDateISO(new Date());
@@ -482,12 +552,50 @@ export default function SuperAdminShiftsPage() {
           iconColor="#F4A261"
         />
         <StatCard
-          title="Coverage Gaps"
-          value={loading ? '...' : coverageGaps}
-          icon={AlertTriangle}
-          iconColor={coverageGaps > 0 ? '#EF4444' : '#6B7280'}
+          title="Overtime This Month"
+          value={loading ? '...' : `${monthlyOvertimeHours.toFixed(1)}h`}
+          icon={Clock}
+          iconColor={monthlyOvertimeHours > 0 ? '#F4A261' : '#6B7280'}
         />
       </div>
+
+      {/* Tabs */}
+      <div style={{
+        display: 'flex', gap: 0, marginBottom: 28,
+        borderBottom: '2px solid var(--border-color)',
+      }}>
+        {([
+          { key: 'schedule', label: 'Schedule', icon: CalendarDays },
+          { key: 'stats', label: 'Hours & Overtime', icon: BarChart3 },
+        ] as { key: 'schedule' | 'stats'; label: string; icon: typeof CalendarDays }[]).map(tab => {
+          const active = activeTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 7,
+                padding: '10px 20px',
+                fontSize: 14, fontWeight: active ? 700 : 500,
+                color: active ? 'var(--brand-green-text)' : 'var(--text-secondary)',
+                backgroundColor: 'transparent',
+                border: 'none',
+                borderBottom: `2px solid ${active ? 'var(--brand-green-text)' : 'transparent'}`,
+                marginBottom: -2,
+                cursor: 'pointer',
+                transition: 'all 0.15s',
+              }}
+            >
+              <tab.icon style={{ width: 16, height: 16 }} />
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ─── Schedule Tab ─────────────────────────────────────── */}
+      {activeTab === 'schedule' && (
+      <div>
 
       {/* Week View */}
       <div style={{
@@ -721,7 +829,7 @@ export default function SuperAdminShiftsPage() {
         )}
       </div>
 
-      {/* Pending Swap Requests */}
+      {/* Pending Swap & Overtime Requests */}
       <div style={{
         backgroundColor: 'var(--surface-white)',
         border: '1px solid var(--border-color)',
@@ -735,7 +843,7 @@ export default function SuperAdminShiftsPage() {
         }}>
           <RefreshCw style={{ width: 16, height: 16, color: '#F4A261' }} />
           <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>
-            Pending Swap Requests
+            Pending Swap & Overtime Requests
           </span>
           {swapRequests.length > 0 && (
             <span style={{
@@ -755,7 +863,7 @@ export default function SuperAdminShiftsPage() {
         ) : swapRequests.length === 0 ? (
           <div style={{ padding: 40, textAlign: 'center' }}>
             <RefreshCw style={{ width: 32, height: 32, color: 'var(--text-secondary)', opacity: 0.3, margin: '0 auto 10px' }} />
-            <p style={{ fontSize: 14, color: 'var(--text-secondary)', margin: 0 }}>No pending swap requests</p>
+            <p style={{ fontSize: 14, color: 'var(--text-secondary)', margin: 0 }}>No pending requests</p>
           </div>
         ) : (
           <div>
@@ -836,6 +944,269 @@ export default function SuperAdminShiftsPage() {
           </div>
         )}
       </div>
+
+      </div>)}
+
+      {/* ─── Stats Tab ────────────────────────────────────────── */}
+      {activeTab === 'stats' && (() => {
+        const STANDARD_HOURS = 40; // weekly standard
+        // Calculate total working days in the month (Mon-Fri)
+        const daysInMonth = new Date(statsMonth.getFullYear(), statsMonth.getMonth() + 1, 0).getDate();
+        let workingDays = 0;
+        for (let d = 1; d <= daysInMonth; d++) {
+          const day = new Date(statsMonth.getFullYear(), statsMonth.getMonth(), d).getDay();
+          if (day !== 0 && day !== 6) workingDays++;
+        }
+        const monthlyTarget = (STANDARD_HOURS / 5) * workingDays; // expected hours
+
+        // Build per-staff stats
+        const staffStats = staff.map(s => {
+          const name = staffName(s);
+          const ini = staffInitials(s);
+          const color = avatarColor(s.id);
+          const role = ROLE_DISPLAY[s.role] || s.role;
+          const staffShifts = monthlyShifts.filter(sh => sh.staff_id === s.id);
+          const regularShifts = staffShifts.filter(sh => (sh as any).type !== 'overtime');
+          const overtimeShifts = staffShifts.filter(sh => (sh as any).type === 'overtime');
+          const regularHours = regularShifts.reduce((sum, sh) => sum + shiftHours(sh.start_time, sh.end_time), 0);
+          const overtimeHours = overtimeShifts.reduce((sum, sh) => sum + shiftHours(sh.start_time, sh.end_time), 0);
+          const totalHours = regularHours + overtimeHours;
+          const daysWorked = new Set(staffShifts.map(sh => sh.date)).size;
+          return { id: s.id, name, ini, color, role, regularHours, overtimeHours, totalHours, daysWorked, shiftCount: staffShifts.length };
+        }).sort((a, b) => b.totalHours - a.totalHours);
+
+        const maxHours = Math.max(monthlyTarget, ...staffStats.map(s => s.totalHours));
+        const totalOvertimeAll = staffStats.reduce((sum, s) => sum + s.overtimeHours, 0);
+        const totalRegularAll = staffStats.reduce((sum, s) => sum + s.regularHours, 0);
+
+        const monthLabel = statsMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+            {/* Month Navigator */}
+            <div style={{
+              backgroundColor: 'var(--surface-white)',
+              border: '1px solid var(--border-color)',
+              borderRadius: 12,
+              padding: '16px 24px',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <BarChart3 style={{ width: 18, height: 18, color: 'var(--brand-green-text)' }} />
+                <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>
+                  Staff Hours Overview
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  onClick={prevMonth}
+                  style={{
+                    width: 32, height: 32, borderRadius: 8,
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'transparent',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    cursor: 'pointer', color: 'var(--text-secondary)',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'var(--surface-elevated)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                >
+                  <ChevronLeft style={{ width: 16, height: 16 }} />
+                </button>
+                <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', minWidth: 160, textAlign: 'center' }}>
+                  {monthLabel}
+                </span>
+                <button
+                  onClick={nextMonth}
+                  style={{
+                    width: 32, height: 32, borderRadius: 8,
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'transparent',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    cursor: 'pointer', color: 'var(--text-secondary)',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'var(--surface-elevated)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                >
+                  <ChevronRight style={{ width: 16, height: 16 }} />
+                </button>
+              </div>
+            </div>
+
+            {/* Summary Cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
+              <div style={{
+                backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)',
+                borderRadius: 12, padding: '20px 24px',
+              }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  Total Regular Hours
+                </div>
+                <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--text-primary)', marginTop: 6 }}>
+                  {statsLoading ? '...' : `${totalRegularAll.toFixed(1)}h`}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>
+                  Target: {monthlyTarget.toFixed(0)}h per person
+                </div>
+              </div>
+              <div style={{
+                backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)',
+                borderRadius: 12, padding: '20px 24px',
+              }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  Total Overtime
+                </div>
+                <div style={{ fontSize: 28, fontWeight: 800, color: totalOvertimeAll > 0 ? '#F4A261' : 'var(--text-primary)', marginTop: 6 }}>
+                  {statsLoading ? '...' : `${totalOvertimeAll.toFixed(1)}h`}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>
+                  Across {staffStats.filter(s => s.overtimeHours > 0).length} staff members
+                </div>
+              </div>
+              <div style={{
+                backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)',
+                borderRadius: 12, padding: '20px 24px',
+              }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  Avg Hours / Person
+                </div>
+                <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--text-primary)', marginTop: 6 }}>
+                  {statsLoading || staff.length === 0 ? '...' : `${((totalRegularAll + totalOvertimeAll) / staff.length).toFixed(1)}h`}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>
+                  {staff.length} active staff members
+                </div>
+              </div>
+            </div>
+
+            {/* Staff Hours Table with Progress Bars */}
+            <div style={{
+              backgroundColor: 'var(--surface-white)',
+              border: '1px solid var(--border-color)',
+              borderRadius: 12,
+              overflow: 'hidden',
+            }}>
+              {/* Legend */}
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '14px 24px',
+                borderBottom: '1px solid var(--border-color)',
+              }}>
+                <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
+                  Hours by Staff Member
+                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: '#2D6A4F' }} />
+                    <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Regular</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: '#F4A261' }} />
+                    <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Overtime</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: 'var(--border-color)' }} />
+                    <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Target ({monthlyTarget.toFixed(0)}h)</span>
+                  </div>
+                </div>
+              </div>
+
+              {statsLoading ? (
+                <div style={{ padding: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+                  <Loader2 style={{ width: 20, height: 20, color: 'var(--text-secondary)', animation: 'spin 1s linear infinite' }} />
+                  <span style={{ fontSize: 14, color: 'var(--text-secondary)' }}>Loading stats...</span>
+                </div>
+              ) : staffStats.length === 0 ? (
+                <div style={{ padding: 60, textAlign: 'center' }}>
+                  <BarChart3 style={{ width: 32, height: 32, color: 'var(--text-secondary)', opacity: 0.3, margin: '0 auto 10px' }} />
+                  <p style={{ fontSize: 14, color: 'var(--text-secondary)', margin: 0 }}>No staff data available</p>
+                </div>
+              ) : (
+                <div>
+                  {staffStats.map((s, idx) => {
+                    const regularPct = maxHours > 0 ? (s.regularHours / maxHours) * 100 : 0;
+                    const overtimePct = maxHours > 0 ? (s.overtimeHours / maxHours) * 100 : 0;
+                    const targetPct = maxHours > 0 ? (monthlyTarget / maxHours) * 100 : 0;
+                    return (
+                      <div
+                        key={s.id}
+                        style={{
+                          padding: '16px 24px',
+                          borderBottom: idx < staffStats.length - 1 ? '1px solid var(--border-color)' : 'none',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                            <div style={{
+                              width: 36, height: 36, borderRadius: '50%',
+                              backgroundColor: s.color + '20',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              color: s.color, fontSize: 13, fontWeight: 700, flexShrink: 0,
+                            }}>
+                              {s.ini}
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{s.name}</div>
+                              <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{s.role} · {s.daysWorked} days worked</div>
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
+                              {s.totalHours.toFixed(1)}h
+                            </div>
+                            {s.overtimeHours > 0 && (
+                              <div style={{ fontSize: 12, fontWeight: 600, color: '#F4A261' }}>
+                                +{s.overtimeHours.toFixed(1)}h overtime
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        {/* Progress bar */}
+                        <div style={{ position: 'relative', height: 24, borderRadius: 6, backgroundColor: 'var(--surface-elevated)', overflow: 'hidden' }}>
+                          {/* Regular hours bar */}
+                          <div style={{
+                            position: 'absolute', left: 0, top: 0, bottom: 0,
+                            width: `${regularPct}%`,
+                            backgroundColor: '#2D6A4F',
+                            borderRadius: s.overtimeHours > 0 ? '6px 0 0 6px' : 6,
+                            transition: 'width 0.5s ease',
+                          }} />
+                          {/* Overtime bar */}
+                          {s.overtimeHours > 0 && (
+                            <div style={{
+                              position: 'absolute', left: `${regularPct}%`, top: 0, bottom: 0,
+                              width: `${overtimePct}%`,
+                              backgroundColor: '#F4A261',
+                              borderRadius: '0 6px 6px 0',
+                              transition: 'width 0.5s ease',
+                            }} />
+                          )}
+                          {/* Target marker line */}
+                          <div style={{
+                            position: 'absolute', left: `${targetPct}%`, top: -2, bottom: -2,
+                            width: 2, backgroundColor: 'var(--text-secondary)', opacity: 0.4,
+                            borderRadius: 1,
+                          }} />
+                          {/* Hours label on bar */}
+                          {s.totalHours > 0 && (
+                            <div style={{
+                              position: 'absolute', left: 8, top: 0, bottom: 0,
+                              display: 'flex', alignItems: 'center',
+                              fontSize: 11, fontWeight: 700,
+                              color: regularPct > 8 ? '#fff' : 'var(--text-primary)',
+                            }}>
+                              {s.regularHours.toFixed(0)}h{s.overtimeHours > 0 ? ` + ${s.overtimeHours.toFixed(0)}h OT` : ''}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ─── Assign Shift Dialog ─────────────────────────────── */}
       <Dialog open={assignOpen} onOpenChange={setAssignOpen}>

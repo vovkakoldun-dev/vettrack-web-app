@@ -95,6 +95,7 @@ The app has **5 portal shells**, each with its own sidebar and route tree.
 | `/admin/clients/:id` | ClientDetailPage (shared) |
 | `/admin/records` | RecordsPage (shared) |
 | `/admin/records/:id` | RecordDetailPage (shared) |
+| `/admin/lab` | LabPage (shared) |
 | `/admin/my-portal` | AdminMyPortalPage |
 | `/admin/chat` | AdminChatPage |
 | `/admin/tasks` | AdminTasksPage |
@@ -347,6 +348,7 @@ Event Producers (pages that create events)
 | `vet_assign` | Vet assigned to a pet | AddClientDialog, ClientDetailPage, ClientsPage |
 | `vet_unassign` | Vet unassigned from pet | ClientDetailPage, ClientsPage |
 | `appt_assign` | Appointment assigned to vet | AppointmentsPage, AdminBookingsPage |
+| `lab_ready` | Lab result uploaded for pet | LabPage |
 
 ### `notification_events` Table
 

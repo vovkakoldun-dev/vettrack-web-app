@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import {
   ArrowLeft, Calendar, Syringe, FileText,
@@ -12,123 +12,25 @@ import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
 } from '../../components/ui/table';
 import { Separator } from '../../components/ui/separator';
+import { usePets } from '../../hooks/usePets';
+import { useAppointments } from '../../hooks/useAppointments';
+import { useOwnerClient } from '../../hooks/useOwnerClient';
+import { supabase } from '../../../lib/supabase';
 
 // ─── Brand ───────────────────────────────────────────────────
 const BRAND = '#2D6A4F';
 const BRAND_TEXT = 'var(--brand-green-text)';
 
-// ─── Mock Data ───────────────────────────────────────────────
-const mockPets = [
-  {
-    id: 1,
-    name: 'Max',
-    species: 'Dog',
-    breed: 'Golden Retriever',
-    dob: '2020-06-15',
-    age: '5 years',
-    sex: 'Male (Neutered)',
-    weight: '32 kg',
-    microchip: '900118000123456',
-    color: 'Golden',
-    image: 'https://images.unsplash.com/photo-1734966213753-1b361564bab4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxnb2xkZW4lMjByZXRyaWV2ZXIlMjBkb2clMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyNDMxMzB8MA&ixlib=rb-4.1.0&q=80&w=400',
-    status: 'Healthy' as const,
-    conditions: [
-      { id: 1, name: 'Hip Dysplasia', dateDiagnosed: 'Jan 15, 2024', status: 'active' as const },
-      { id: 2, name: 'Seasonal Allergies', dateDiagnosed: 'Mar 20, 2023', status: 'active' as const },
-      { id: 3, name: 'Ear Infection', dateDiagnosed: 'Aug 5, 2025', status: 'resolved' as const },
-    ],
-    treatments: [
-      { id: 1, name: 'Carprofen (Rimadyl) 75mg', date: 'Mar 10, 2026', vet: 'Dr. Chen', notes: 'Daily for hip dysplasia pain management' },
-      { id: 2, name: 'Apoquel 16mg', date: 'Mar 1, 2026', vet: 'Dr. Chen', notes: 'For seasonal allergy control' },
-      { id: 3, name: 'Rabies Vaccine', date: 'Jan 20, 2026', vet: 'Dr. Patel', notes: '3-year booster administered' },
-      { id: 4, name: 'DHPP Vaccine', date: 'Jan 20, 2026', vet: 'Dr. Patel', notes: 'Annual booster' },
-      { id: 5, name: 'Ear Drops (Otomax)', date: 'Aug 5, 2025', vet: 'Dr. Chen', notes: 'Apply twice daily for 14 days' },
-    ],
-    allergies: ['Chicken', 'Amoxicillin'],
-    visits: [
-      {
-        id: 1, date: 'Mar 10, 2026', reason: 'Annual Checkup', vet: 'Dr. Chen',
-        summary: 'Routine annual examination. Weight stable. Hip dysplasia managed well with current medication.',
-        notes: 'Physical exam normal. Heart and lungs clear. Teeth in good condition — recommended dental cleaning in 6 months.',
-        status: 'Completed' as const,
-      },
-      {
-        id: 2, date: 'Jan 20, 2026', reason: 'Vaccination', vet: 'Dr. Patel',
-        summary: 'Rabies and DHPP boosters administered. No adverse reactions.',
-        notes: 'Vaccines administered in left rear leg (Rabies) and right rear leg (DHPP).',
-        status: 'Completed' as const,
-      },
-      {
-        id: 3, date: 'Aug 5, 2025', reason: 'Ear Infection', vet: 'Dr. Chen',
-        summary: 'Left ear infection diagnosed. Prescribed Otomax ear drops.',
-        notes: 'Owner reported head shaking and scratching at left ear for 3 days.',
-        status: 'Completed' as const,
-      },
-      {
-        id: 4, date: 'Mar 15, 2025', reason: 'Follow-up', vet: 'Dr. Chen',
-        summary: 'Hip dysplasia follow-up. Adjusted pain medication dosage.',
-        notes: 'Owner reports improved mobility since starting Carprofen.',
-        status: 'Completed' as const,
-      },
-    ],
-    clientNotes: 'Hi John! Max is doing great overall. Please continue his daily Carprofen and Apoquel as prescribed. Remember to keep up with his joint supplements. We\'d like to see him again in about 3 months for a follow-up on his hips.',
-    upcomingAppointments: [
-      { id: 1, time: '2:30 PM', date: 'Mar 15, 2026', reason: 'Dental Cleaning' },
-    ],
-    vaccinations: [
-      { id: 1, name: 'Rabies', status: 'Up to date' as const, lastGiven: 'Dec 15, 2025', nextDue: 'Dec 15, 2026' },
-      { id: 2, name: 'DHPP', status: 'Up to date' as const, lastGiven: 'Jan 20, 2026', nextDue: 'Jan 20, 2027' },
-      { id: 3, name: 'Bordetella', status: 'Due soon' as const, lastGiven: 'Sep 10, 2025', nextDue: 'Mar 10, 2026' },
-      { id: 4, name: 'Leptospirosis', status: 'Up to date' as const, lastGiven: 'Jan 20, 2026', nextDue: 'Jan 20, 2027' },
-      { id: 5, name: 'Lyme', status: 'Up to date' as const, lastGiven: 'Nov 5, 2025', nextDue: 'Nov 5, 2026' },
-    ],
-  },
-  {
-    id: 2,
-    name: 'Hugo',
-    species: 'Cat',
-    breed: 'Persian',
-    dob: '2022-03-10',
-    age: '3 years',
-    sex: 'Male (Neutered)',
-    weight: '4.2 kg',
-    microchip: '900118000789012',
-    color: 'White',
-    image: 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=400',
-    status: 'Follow-up' as const,
-    conditions: [
-      { id: 1, name: 'Dental Disease', dateDiagnosed: 'Feb 1, 2026', status: 'active' as const },
-    ],
-    treatments: [
-      { id: 1, name: 'Dental Cleaning', date: 'Feb 1, 2026', vet: 'Dr. Patel', notes: 'Full dental cleaning under general anesthesia' },
-      { id: 2, name: 'Metacam 1.5mg', date: 'Feb 1, 2026', vet: 'Dr. Patel', notes: 'Pain relief post-dental procedure' },
-    ],
-    allergies: ['Fish'],
-    visits: [
-      {
-        id: 1, date: 'Feb 1, 2026', reason: 'Dental Procedure', vet: 'Dr. Patel',
-        summary: 'Stage 2 periodontal disease. Full dental cleaning and two extractions performed.',
-        notes: 'Oral exam shows significant tartar buildup. Dental cleaning performed under general anesthesia. Two teeth extracted.',
-        status: 'Completed' as const,
-      },
-      {
-        id: 2, date: 'Nov 15, 2025', reason: 'Annual Checkup', vet: 'Dr. Chen',
-        summary: 'Healthy cat. Weight stable. Dental tartar noted.',
-        notes: 'Physical exam normal. Coat in good condition. Slight dental tartar buildup noted.',
-        status: 'Completed' as const,
-      },
-    ],
-    clientNotes: 'Hi John! Hugo is recovering well from his dental procedure. Please continue daily dental treats to help prevent tartar buildup. His FeLV vaccine booster is due soon — please call to schedule an appointment.',
-    upcomingAppointments: [
-      { id: 1, time: '10:00 AM', date: 'Mar 20, 2026', reason: 'Dental Recheck' },
-    ],
-    vaccinations: [
-      { id: 1, name: 'Rabies', status: 'Up to date' as const, lastGiven: 'Feb 1, 2026', nextDue: 'Feb 1, 2027' },
-      { id: 2, name: 'FVRCP', status: 'Up to date' as const, lastGiven: 'Feb 1, 2026', nextDue: 'Feb 1, 2027' },
-      { id: 3, name: 'FeLV', status: 'Due soon' as const, lastGiven: 'Aug 10, 2025', nextDue: 'Mar 20, 2026' },
-    ],
-  },
-];
+// ─── Helpers ─────────────────────────────────────────────────
+function fmtDate(d: string | null | undefined): string {
+  if (!d) return '—';
+  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+}
+function calcAge(dob: string | null): string {
+  if (!dob) return '—';
+  const years = Math.floor((Date.now() - new Date(dob).getTime()) / (365.25 * 24 * 60 * 60 * 1000));
+  return `${years} years`;
+}
 
 // ─── Banner presets ───────────────────────────────────────────
 const BANNER_PRESETS = [
@@ -140,11 +42,8 @@ const BANNER_PRESETS = [
   { id: 'slate',   label: 'Slate',   gradient: 'linear-gradient(135deg, #0F172A 0%, #334155 50%, #94A3B8 100%)' },
 ];
 
-// Default per pet
-const PET_DEFAULT_BANNER: Record<number, string> = {
-  1: BANNER_PRESETS[0].gradient, // Max → Forest green
-  2: BANNER_PRESETS[1].gradient, // Hugo → Ocean blue
-};
+// Default banner
+const DEFAULT_BANNER = BANNER_PRESETS[0].gradient;
 
 // ─── Status config ────────────────────────────────────────────
 const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
@@ -157,21 +56,114 @@ const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
 export default function OwnerPetProfilePage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { pets: allPets } = usePets();
+  const { appointments: allAppts } = useAppointments();
+  const { clientId } = useOwnerClient();
 
-  const pet = mockPets.find((p) => String(p.id) === id) ?? mockPets[0];
-  const otherPet = mockPets.find((p) => p.id !== pet.id)!;
-  const statusColor = STATUS_COLORS[pet.status] ?? STATUS_COLORS.Healthy;
+  // Filter to this owner's pets
+  const myPets = useMemo(() =>
+    clientId ? allPets.filter(p => p.client_id === clientId) : allPets,
+    [allPets, clientId],
+  );
+
+  // Find current pet by URL param (real UUID)
+  const supaPet = myPets.find(p => p.id === id) ?? myPets[0];
+
+  // Fetch vaccinations for this pet
+  const [vaccinations, setVaccinations] = useState<{ id: string; name: string; status: 'Up to date' | 'Due soon'; lastGiven: string; nextDue: string }[]>([]);
+  useEffect(() => {
+    if (!supaPet?.id) return;
+    supabase
+      .from('vaccinations')
+      .select('id, vaccine_name, administered_date, next_due_date')
+      .eq('pet_id', supaPet.id)
+      .order('administered_date', { ascending: false })
+      .then(({ data }) => {
+        if (!data) return;
+        const now = new Date();
+        setVaccinations(data.map(v => {
+          const nextDue = v.next_due_date ? new Date(v.next_due_date) : null;
+          const isDueSoon = nextDue ? nextDue <= new Date(now.getTime() + 30 * 86400000) : false;
+          return {
+            id: v.id,
+            name: v.vaccine_name,
+            status: isDueSoon ? 'Due soon' as const : 'Up to date' as const,
+            lastGiven: fmtDate(v.administered_date),
+            nextDue: fmtDate(v.next_due_date),
+          };
+        }));
+      });
+  }, [supaPet?.id]);
+
+  // Build pet object from real data
+  const pet = useMemo(() => {
+    if (!supaPet) return null;
+    const petAppts = allAppts
+      .filter(a => a.pet_id === supaPet.id && new Date(a.scheduled_at) >= new Date())
+      .map(a => {
+        const dt = new Date(a.scheduled_at);
+        return {
+          id: a.id,
+          time: dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' }),
+          date: fmtDate(a.scheduled_at),
+          reason: a.reason ?? a.services?.name ?? 'Checkup',
+        };
+      });
+
+    const pastAppts = allAppts
+      .filter(a => a.pet_id === supaPet.id && new Date(a.scheduled_at) < new Date())
+      .sort((a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime())
+      .map((a, i) => ({
+        id: i + 1,
+        date: fmtDate(a.scheduled_at),
+        reason: a.reason ?? a.services?.name ?? 'Visit',
+        vet: a.staff?.profiles ? `Dr. ${a.staff.profiles.last_name}` : '—',
+        summary: a.notes ?? 'Visit completed.',
+        notes: a.reason ?? '',
+        status: 'Completed' as const,
+      }));
+
+    return {
+      id: supaPet.id,
+      name: supaPet.name,
+      species: supaPet.species,
+      breed: supaPet.breed ?? '—',
+      dob: supaPet.date_of_birth ?? '—',
+      age: calcAge(supaPet.date_of_birth),
+      sex: supaPet.sex ?? '—',
+      weight: supaPet.weight_kg ? `${supaPet.weight_kg} kg` : '—',
+      microchip: supaPet.microchip_no ?? '—',
+      color: '—',
+      image: supaPet.photo_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(supaPet.name)}&background=74C69D&color=fff&size=400`,
+      status: 'Healthy' as const,
+      conditions: [] as { id: number; name: string; dateDiagnosed: string; status: 'active' | 'resolved' }[],
+      treatments: [] as { id: number; name: string; date: string; vet: string; notes: string }[],
+      allergies: [] as string[],
+      visits: pastAppts,
+      clientNotes: pastAppts.length > 0 ? pastAppts[0].summary : '',
+      lastVetName: pastAppts.length > 0 ? pastAppts[0].vet : '',
+      lastVetDate: pastAppts.length > 0 ? pastAppts[0].date : '',
+      upcomingAppointments: petAppts,
+      vaccinations,
+    };
+  }, [supaPet, allAppts, vaccinations]);
+
+  // Other pets for switcher
+  const otherPets = myPets.filter(p => p.id !== id);
+
+  const statusColor = STATUS_COLORS[pet?.status ?? 'Healthy'] ?? STATUS_COLORS.Healthy;
 
   const [expandedVisit, setExpandedVisit] = useState<number | null>(null);
-  const [bannerGradient, setBannerGradient] = useState(PET_DEFAULT_BANNER[pet.id] ?? BANNER_PRESETS[0].gradient);
+  const [bannerGradient, setBannerGradient] = useState(DEFAULT_BANNER);
   const [bannerPickerOpen, setBannerPickerOpen] = useState(false);
   const bannerPickerRef = useRef<HTMLDivElement>(null);
 
-  // Simulate: true = super admin, false = regular owner
   const IS_SUPER_ADMIN = true;
 
-  const activeConditions = pet.conditions.filter((c) => c.status === 'active');
-  const resolvedConditions = pet.conditions.filter((c) => c.status === 'resolved');
+  const activeConditions = pet?.conditions.filter((c) => c.status === 'active') ?? [];
+  const resolvedConditions = pet?.conditions.filter((c) => c.status === 'resolved') ?? [];
+
+  if (!pet) return <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading pet profile...</div>;
 
   return (
     <div className="p-4 md:p-8" style={{ minHeight: '100vh', backgroundColor: 'var(--bg-base)' }}>
@@ -327,23 +319,25 @@ export default function OwnerPetProfilePage() {
               {/* Action buttons + pet switcher */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                 {/* Switch pet */}
-                <button
-                  onClick={() => navigate(`/owner/pets/${otherPet.id}`)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: '8px',
-                    padding: '8px 14px', borderRadius: '9px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'var(--surface-elevated)',
-                    fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <Avatar style={{ width: '22px', height: '22px' }}>
-                    <AvatarImage src={otherPet.image} alt={otherPet.name} style={{ objectFit: 'cover' }} />
-                    <AvatarFallback style={{ fontSize: '9px' }}>{otherPet.name[0]}</AvatarFallback>
-                  </Avatar>
-                  Switch to {otherPet.name}
-                </button>
+                {otherPets.length > 0 && (
+                  <button
+                    onClick={() => navigate(`/owner/pets/${otherPets[0].id}`)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '8px',
+                      padding: '8px 14px', borderRadius: '9px',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'var(--surface-elevated)',
+                      fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <Avatar style={{ width: '22px', height: '22px' }}>
+                      <AvatarImage src={otherPets[0].image} alt={otherPets[0].name} style={{ objectFit: 'cover' }} />
+                      <AvatarFallback style={{ fontSize: '9px' }}>{otherPets[0].name[0]}</AvatarFallback>
+                    </Avatar>
+                    Switch to {otherPets[0].name}
+                  </button>
+                )}
                 <button
                   onClick={() => navigate('/owner/appointments')}
                   style={{
@@ -507,20 +501,26 @@ export default function OwnerPetProfilePage() {
                     <span style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>Note from Your Vet</span>
                   </div>
                   <div style={{ padding: '16px 20px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-                      <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'linear-gradient(135deg, #2D6A4F, #52B788)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                        <span style={{ fontSize: '11px', fontWeight: 700, color: '#fff' }}>DC</span>
-                      </div>
-                      <div>
-                        <p style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>Dr. Chen</p>
-                        <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: 0 }}>Mar 10, 2026</p>
-                      </div>
-                    </div>
-                    <div style={{ padding: '12px', borderRadius: '9px', backgroundColor: `${BRAND}08`, border: `1px solid ${BRAND}20` }}>
-                      <p style={{ fontSize: '13px', color: 'var(--text-primary)', lineHeight: 1.6, margin: 0 }}>
-                        {pet.clientNotes}
-                      </p>
-                    </div>
+                    {pet.lastVetName ? (
+                      <>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                          <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'linear-gradient(135deg, #2D6A4F, #52B788)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                            <span style={{ fontSize: '11px', fontWeight: 700, color: '#fff' }}>{pet.lastVetName.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase()}</span>
+                          </div>
+                          <div>
+                            <p style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>{pet.lastVetName}</p>
+                            <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: 0 }}>{pet.lastVetDate}</p>
+                          </div>
+                        </div>
+                        <div style={{ padding: '12px', borderRadius: '9px', backgroundColor: `${BRAND}08`, border: `1px solid ${BRAND}20` }}>
+                          <p style={{ fontSize: '13px', color: 'var(--text-primary)', lineHeight: 1.6, margin: 0 }}>
+                            {pet.clientNotes || 'No notes from this visit.'}
+                          </p>
+                        </div>
+                      </>
+                    ) : (
+                      <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: 0 }}>No vet notes yet.</p>
+                    )}
                   </div>
                 </div>
 

@@ -18,25 +18,124 @@ function getCorsHeaders(origin: string | null): Record<string, string> {
   };
 }
 
-function parseGmailMessage(msg: any): any {
+/** Decode base64 (URL-safe) to a proper UTF-8 string (handles emojis, etc.) */
+function decodeBase64Utf8(data: string): string {
+  const raw = atob(data.replace(/-/g, '+').replace(/_/g, '/'));
+  const bytes = Uint8Array.from(raw, c => c.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+/** Encode a UTF-8 string to URL-safe base64 (handles emojis, etc.) */
+function encodeBase64Utf8(str: string): string {
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/** Recursively collect all leaf parts from a MIME tree */
+function collectParts(part: any, result: any[] = []): any[] {
+  if (!part) return result;
+  if (part.parts && part.parts.length > 0) {
+    for (const child of part.parts) {
+      collectParts(child, result);
+    }
+  } else {
+    result.push(part);
+  }
+  return result;
+}
+
+async function parseGmailMessage(msg: any, gmailToken?: string): Promise<any> {
   const headers = msg.payload?.headers || [];
   const getHeader = (name: string) => headers.find((h: any) => h.name.toLowerCase() === name.toLowerCase())?.value || '';
 
+  // Recursively collect all leaf parts from the MIME tree
+  const allParts = collectParts(msg.payload);
+
+  // Find body: prefer HTML over plain text
   let body = '';
-  if (msg.payload?.body?.data) {
-    body = atob(msg.payload.body.data.replace(/-/g, '+').replace(/_/g, '/'));
-  } else if (msg.payload?.parts) {
-    const htmlPart = msg.payload.parts.find((p: any) => p.mimeType === 'text/html');
-    const textPart = msg.payload.parts.find((p: any) => p.mimeType === 'text/plain');
-    const part = htmlPart || textPart;
-    if (part?.body?.data) {
-      body = atob(part.body.data.replace(/-/g, '+').replace(/_/g, '/'));
+  if (msg.payload?.body?.data && !msg.payload?.parts) {
+    body = decodeBase64Utf8(msg.payload.body.data);
+  } else {
+    const htmlPart = allParts.find((p: any) => p.mimeType === 'text/html' && p.body?.data);
+    const textPart = allParts.find((p: any) => p.mimeType === 'text/plain' && p.body?.data);
+    const bestPart = htmlPart || textPart;
+    if (bestPart?.body?.data) {
+      body = decodeBase64Utf8(bestPart.body.data);
     }
   }
 
-  const attachments = (msg.payload?.parts || [])
-    .filter((p: any) => p.filename && p.filename.length > 0)
-    .map((p: any) => ({ id: p.body?.attachmentId, filename: p.filename, mimeType: p.mimeType, size: p.body?.size || 0 }));
+  // Build a CID → data URL map for inline images
+  const cidMap: Record<string, string> = {};
+  const cidParts = allParts.filter((p: any) => {
+    const contentIdHeader = (p.headers || []).find((h: any) => h.name.toLowerCase() === 'content-id');
+    return contentIdHeader && p.mimeType?.startsWith('image/');
+  });
+
+  for (const p of cidParts) {
+    const contentIdHeader = (p.headers || []).find((h: any) => h.name.toLowerCase() === 'content-id');
+    const cid = contentIdHeader.value.replace(/^<|>$/g, '');
+
+    if (p.body?.data) {
+      // Image data is inline
+      const b64 = p.body.data.replace(/-/g, '+').replace(/_/g, '/');
+      cidMap[cid] = `data:${p.mimeType};base64,${b64}`;
+    } else if (p.body?.attachmentId && gmailToken && msg.id) {
+      // Image data needs to be fetched via attachments API
+      try {
+        const attResp = await fetch(
+          `${GMAIL_API_BASE}/messages/${msg.id}/attachments/${p.body.attachmentId}`,
+          { headers: { Authorization: `Bearer ${gmailToken}` } }
+        );
+        if (attResp.ok) {
+          const attData = await attResp.json();
+          if (attData.data) {
+            const b64 = attData.data.replace(/-/g, '+').replace(/_/g, '/');
+            cidMap[cid] = `data:${p.mimeType};base64,${b64}`;
+          }
+        }
+      } catch {
+        // Skip this inline image if fetch fails
+      }
+    }
+  }
+
+  // Replace cid: references in the HTML body with data URLs
+  if (body && Object.keys(cidMap).length > 0) {
+    for (const [cid, dataUrl] of Object.entries(cidMap)) {
+      body = body.split(`cid:${cid}`).join(dataUrl);
+    }
+  }
+
+  // Remove any remaining unresolved cid: image references (e.g. from quoted replies
+  // where the original message's inline images aren't part of this message's MIME tree)
+  if (body) {
+    body = body.replace(/<img[^>]*src="cid:[^"]*"[^>]*>/gi, '');
+  }
+
+  // Collect real attachments — exclude inline CID images
+  const attachments = allParts
+    .filter((p: any) => {
+      if (p.filename && p.filename.length > 0) {
+        const contentId = (p.headers || []).find((h: any) => h.name.toLowerCase() === 'content-id');
+        if (contentId) {
+          const cid = contentId.value.replace(/^<|>$/g, '');
+          if (cidMap[cid]) return false;
+          // Also skip if disposition is inline
+          const disposition = (p.headers || []).find((h: any) => h.name.toLowerCase() === 'content-disposition');
+          if (disposition && disposition.value.toLowerCase().startsWith('inline')) return false;
+        }
+        return true;
+      }
+      return false;
+    })
+    .map((p: any) => ({
+      id: p.body?.attachmentId,
+      filename: p.filename,
+      mimeType: p.mimeType,
+      size: p.body?.size || 0,
+    }));
 
   const labelIds = msg.labelIds || [];
 
@@ -60,28 +159,91 @@ function parseGmailMessage(msg: any): any {
 }
 
 function createMimeMessage(to: string, subject: string, body: string, cc?: string, bcc?: string): string {
-  const boundary = `boundary_${crypto.randomUUID()}`;
+  // Extract inline base64 images from HTML body
+  const inlineImages: { cid: string; mimeType: string; base64Data: string }[] = [];
+  let processedBody = body;
+  const imgRegex = /src="data:(image\/[^;]+);base64,([^"]+)"/g;
+  let match;
+  while ((match = imgRegex.exec(body)) !== null) {
+    const cid = `img_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
+    inlineImages.push({ cid, mimeType: match[1], base64Data: match[2] });
+    processedBody = processedBody.replace(match[0], `src="cid:${cid}"`);
+  }
+
+  const altBoundary = `boundary_alt_${crypto.randomUUID()}`;
+
+  if (inlineImages.length === 0) {
+    // Simple multipart/alternative (no images)
+    const lines = [
+      `To: ${to}`,
+      ...(cc ? [`Cc: ${cc}`] : []),
+      ...(bcc ? [`Bcc: ${bcc}`] : []),
+      `Subject: ${subject}`,
+      'MIME-Version: 1.0',
+      `Content-Type: multipart/alternative; boundary="${altBoundary}"`,
+      '',
+      `--${altBoundary}`,
+      'Content-Type: text/plain; charset="UTF-8"',
+      '',
+      body.replace(/<[^>]*>/g, ''),
+      '',
+      `--${altBoundary}`,
+      'Content-Type: text/html; charset="UTF-8"',
+      '',
+      body,
+      '',
+      `--${altBoundary}--`,
+    ];
+    return encodeBase64Utf8(lines.join('\r\n'));
+  }
+
+  // multipart/related wrapping multipart/alternative + inline images
+  const relBoundary = `boundary_rel_${crypto.randomUUID()}`;
   const lines = [
     `To: ${to}`,
     ...(cc ? [`Cc: ${cc}`] : []),
     ...(bcc ? [`Bcc: ${bcc}`] : []),
     `Subject: ${subject}`,
     'MIME-Version: 1.0',
-    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    `Content-Type: multipart/related; boundary="${relBoundary}"`,
     '',
-    `--${boundary}`,
+    `--${relBoundary}`,
+    `Content-Type: multipart/alternative; boundary="${altBoundary}"`,
+    '',
+    `--${altBoundary}`,
     'Content-Type: text/plain; charset="UTF-8"',
     '',
-    body.replace(/<[^>]*>/g, ''),
+    processedBody.replace(/<[^>]*>/g, ''),
     '',
-    `--${boundary}`,
+    `--${altBoundary}`,
     'Content-Type: text/html; charset="UTF-8"',
     '',
-    body,
+    processedBody,
     '',
-    `--${boundary}--`,
+    `--${altBoundary}--`,
   ];
-  return btoa(lines.join('\r\n')).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+  // Add each inline image as a MIME part
+  for (const img of inlineImages) {
+    lines.push('');
+    lines.push(`--${relBoundary}`);
+    lines.push(`Content-Type: ${img.mimeType}`);
+    lines.push('Content-Transfer-Encoding: base64');
+    lines.push(`Content-ID: <${img.cid}>`);
+    lines.push(`Content-Disposition: inline`);
+    lines.push('');
+    // Split base64 data into 76-char lines per MIME spec
+    const b64 = img.base64Data;
+    for (let i = 0; i < b64.length; i += 76) {
+      lines.push(b64.slice(i, i + 76));
+    }
+  }
+
+  lines.push('');
+  lines.push(`--${relBoundary}--`);
+
+  const raw = lines.join('\r\n');
+  return encodeBase64Utf8(raw);
 }
 
 serve(async (req: Request) => {
@@ -197,7 +359,7 @@ serve(async (req: Request) => {
             `${GMAIL_API_BASE}/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject&metadataHeaders=Date`,
             { headers: { Authorization: `Bearer ${gmailToken}` } }
           );
-          return parseGmailMessage(await r.json());
+          return await parseGmailMessage(await r.json());
         })
       );
 
@@ -213,22 +375,24 @@ serve(async (req: Request) => {
     if (action === 'get') {
       const messageId = url.searchParams.get('id');
       if (!messageId) return new Response(JSON.stringify({ error: 'Missing id' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-      const { response: r } = await gmailFetch(`${GMAIL_API_BASE}/messages/${messageId}?format=full`, undefined, 'get');
+      const { response: r, token: getToken } = await gmailFetch(`${GMAIL_API_BASE}/messages/${messageId}?format=full`, undefined, 'get');
       if (r.status === 401) return r;
       const d = await r.json();
       if (d.error) return new Response(JSON.stringify({ error: d.error.message }), { status: d.error.code || 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-      return new Response(JSON.stringify({ message: parseGmailMessage(d) }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      const parsed = await parseGmailMessage(d, getToken);
+      return new Response(JSON.stringify({ message: parsed }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     // ─── THREAD ───
     if (action === 'thread') {
       const threadId = url.searchParams.get('threadId');
       if (!threadId) return new Response(JSON.stringify({ error: 'Missing threadId' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-      const { response: r } = await gmailFetch(`${GMAIL_API_BASE}/threads/${threadId}?format=full`, undefined, 'thread');
+      const { response: r, token: threadToken } = await gmailFetch(`${GMAIL_API_BASE}/threads/${threadId}?format=full`, undefined, 'thread');
       if (r.status === 401) return r;
       const d = await r.json();
       if (d.error) return new Response(JSON.stringify({ error: d.error.message }), { status: d.error.code || 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-      return new Response(JSON.stringify({ threadId: d.id, messages: (d.messages || []).map(parseGmailMessage) }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      const threadMessages = await Promise.all((d.messages || []).map((m: any) => parseGmailMessage(m, threadToken)));
+      return new Response(JSON.stringify({ threadId: d.id, messages: threadMessages }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     // ─── SEND ───
@@ -260,6 +424,16 @@ serve(async (req: Request) => {
       const { response: r } = await gmailFetch(`${GMAIL_API_BASE}/messages/${body.messageId}/${action}`, { method: 'POST' }, action);
       if (r.status === 401) return r;
       if (!r.ok) { const e = await r.json(); return new Response(JSON.stringify({ error: e.error?.message || 'Failed' }), { status: r.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }); }
+      return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // ─── DELETE (permanent) ───
+    if (action === 'delete') {
+      const body = await req.json();
+      if (!body.messageId) return new Response(JSON.stringify({ error: 'Missing messageId' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      const { response: r } = await gmailFetch(`${GMAIL_API_BASE}/messages/${body.messageId}`, { method: 'DELETE' }, 'delete');
+      if (r.status === 401) return r;
+      if (!r.ok && r.status !== 204) { const e = await r.json().catch(() => ({})); return new Response(JSON.stringify({ error: (e as any).error?.message || 'Failed to delete' }), { status: r.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }); }
       return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 

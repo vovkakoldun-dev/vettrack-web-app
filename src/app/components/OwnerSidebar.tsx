@@ -11,6 +11,7 @@ function useIsMobile() {
 }
 import { Link, useLocation, useNavigate } from 'react-router';
 import { useAuth } from '../context/AuthContext';
+import { useOwnerClient } from '../hooks/useOwnerClient';
 import {
   Home, Calendar, CreditCard, MessageCircle, FileText,
   PawPrint, Sun, Moon, ChevronLeft, ChevronRight, LogOut, ChevronUp, Settings,
@@ -64,6 +65,10 @@ export function OwnerSidebar({
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const { signOut } = useAuth();
+  const { client: ownerClient } = useOwnerClient();
+  const ownerName = ownerClient.fullName || 'Pet Owner';
+  const ownerInitials = ownerClient.initials || 'PO';
+  const ownerEmail = ownerClient.email || '';
 
   const isMobile = useIsMobile();
   const [collapsed, setCollapsed]     = useState(false);
@@ -117,33 +122,20 @@ export function OwnerSidebar({
         }}
       >
         <Link to="/owner" className="flex items-center gap-2 flex-shrink-0">
-          <div
-            className="w-10 h-10 flex items-center justify-center flex-shrink-0"
-            style={{ borderRadius: '10px', backgroundColor: BRAND }}
-          >
-            <PawPrint className="w-6 h-6 text-white" />
-          </div>
-          {!effectiveCollapsed && (
-            <div className="flex flex-col">
-              <span
-                className="text-[var(--text-primary)] whitespace-nowrap"
-                style={{ fontSize: '20px', fontWeight: 700, lineHeight: 1.2 }}
-              >
-                Hugory
-              </span>
-              <span
-                style={{
-                  fontSize: '10px',
-                  fontWeight: 700,
-                  letterSpacing: '0.08em',
-                  textTransform: 'uppercase',
-                  color: BRAND_TEXT,
-                  lineHeight: 1.2,
-                }}
-              >
-                Client
-              </span>
-            </div>
+          {effectiveCollapsed ? (
+            <img src="/logo-mini.svg" alt="HugoIT" className="flex-shrink-0" style={{ width: '32px', height: '32px' }} />
+          ) : (
+            <>
+              <img src="/logo-mini.svg" alt="HugoIT" className="flex-shrink-0" style={{ width: '40px', height: '40px' }} />
+              <div className="flex flex-col">
+                <span className="text-[var(--text-primary)] whitespace-nowrap" style={{ fontSize: '20px', fontWeight: 700, lineHeight: 1.2 }}>
+                  Hugory
+                </span>
+                <span style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: BRAND_TEXT, lineHeight: 1.2 }}>
+                  Client
+                </span>
+              </div>
+            </>
           )}
         </Link>
       </div>
@@ -363,14 +355,14 @@ export function OwnerSidebar({
                       fontSize: '14px',
                     }}
                   >
-                    JS
+                    {ownerInitials}
                   </div>
                   <div className="min-w-0">
                     <p className="text-[var(--text-primary)] truncate" style={{ fontSize: '14px', fontWeight: 600 }}>
-                      John Smith
+                      {ownerName}
                     </p>
                     <p className="text-[var(--text-secondary)] truncate" style={{ fontSize: '12px' }}>
-                      john.smith@email.com
+                      {ownerEmail}
                     </p>
                   </div>
                 </div>
@@ -402,7 +394,7 @@ export function OwnerSidebar({
           {/* Trigger */}
           <button
             onClick={() => setProfileOpen(!profileOpen)}
-            title={effectiveCollapsed ? 'John Smith' : undefined}
+            title={effectiveCollapsed ? ownerName : undefined}
             className={`w-full flex items-center transition-colors overflow-hidden ${profileOpen ? 'bg-[var(--surface-elevated)]' : 'hover:bg-[var(--surface-elevated)]'}`}
             style={{
               borderRadius: '8px',
@@ -419,13 +411,13 @@ export function OwnerSidebar({
                 fontSize: '13px',
               }}
             >
-              JS
+              {ownerInitials}
             </div>
             {!effectiveCollapsed && (
               <>
                 <div className="flex-1 min-w-0 text-left">
                   <p className="text-[var(--text-primary)] truncate" style={{ fontSize: '14px', fontWeight: 600 }}>
-                    John Smith
+                    {ownerName}
                   </p>
                   <p className="text-[var(--text-secondary)] truncate" style={{ fontSize: '12px', fontWeight: 400 }}>
                     Pet Owner

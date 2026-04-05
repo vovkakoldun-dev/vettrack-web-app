@@ -6,7 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import {
   ArrowLeft, Edit2, MoreHorizontal, Plus, Save, X, Printer, Archive, Trash2, FileDown, PawPrint,
   Mail, Phone, MapPin, Shield, AlertCircle, Check, PlusCircle,
-  Calendar, Clock, Syringe, ChevronRight,
+  Calendar, Clock, Syringe, ChevronRight, FlaskConical, Download, Eye, FileText,
   CheckCircle2, AlertTriangle, ChevronDown, Camera, Loader2,
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
@@ -443,7 +443,7 @@ export default function ClientDetailPage() {
             sex: p.sex || '—', weight: p.weight_kg ? `${p.weight_kg} kg` : '—', microchip: p.microchip_no || '—',
             color: '—', image: p.photo_url || '', assignedVet: p.assigned_vet?.profiles ? `Dr. ${p.assigned_vet.profiles.first_name} ${p.assigned_vet.profiles.last_name}` : '—', status: ((['Healthy', 'Follow-up', 'Critical'].includes((c as any).health_status)) ? (c as any).health_status : 'Healthy') as 'Healthy' | 'Follow-up' | 'Critical',
             conditions: ((coRes.data as any[]) || []).filter((co: any) => co.pet_id === p.id).map((co: any) => ({ id: co.id, name: co.name, status: co.status || 'active', date: co.date_diagnosed || co.created_at?.split('T')[0] || '', notes: co.notes || '' })),
-            treatments: ((trRes.data as any[]) || []).filter((t: any) => t.pet_id === p.id).map((t: any) => ({ id: t.id, name: t.name, date: t.date || '', vet: t.vet || '—', notes: t.notes || '' })),
+            treatments: ((trRes.data as any[]) || []).filter((t: any) => t.pet_id === p.id).map((t: any) => ({ id: t.id, name: t.name, date: t.date || '', vet: t.vet || '—', notes: t.notes || '', addedBy: t.added_by || '', createdAt: t.created_at || '' })),
             allergies: ((alRes.data as any[]) || []).filter((a: any) => a.pet_id === p.id).map((a: any) => a.name as string),
             visits: [] as any[], vetNotes: '', clientNotes: '',
             upcomingAppointments: petAppts2.filter((a: any) => a.pet_id === p.id).map((a: any, ai: number) => {
@@ -546,6 +546,8 @@ export default function ClientDetailPage() {
   const [noteSaving, setNoteSaving] = useState(false);
   const { user } = useAuth();
   const [visitReports, setVisitReports] = useState<any[]>([]);
+  const [labFiles, setLabFiles] = useState<any[]>([]);
+  const [labLoading, setLabLoading] = useState(false);
   const [activeVaxDot, setActiveVaxDot] = useState(0);
   const vaxScrollRef = useRef<HTMLDivElement>(null);
 
@@ -705,13 +707,34 @@ export default function ClientDetailPage() {
     }
   }, []);
 
+  const fetchLabFiles = useCallback(async (petDbId: string) => {
+    if (!petDbId) return;
+    setLabLoading(true);
+    const { organizationId } = await getOrgContext();
+    const { data } = await supabase
+      .from('lab_results')
+      .select(`
+        id, file_name, file_url, file_type, test_panel, notes,
+        review_status, reviewed_at, created_at,
+        uploader:profiles!lab_results_uploaded_by_fkey(first_name, last_name),
+        reviewer:profiles!lab_results_reviewed_by_fkey(first_name, last_name)
+      `)
+      .eq('pet_id', petDbId)
+      .eq('organization_id', organizationId)
+      .not('file_url', 'is', null)
+      .order('created_at', { ascending: false });
+    if (data) setLabFiles(data);
+    setLabLoading(false);
+  }, []);
+
   useEffect(() => {
     const petDbId = client.pets[selectedPetIdx]?.dbId;
     if (petDbId) {
       fetchNotes(petDbId);
       fetchVisitReports(petDbId);
+      fetchLabFiles(petDbId);
     }
-  }, [selectedPetIdx, client.pets, fetchNotes, fetchVisitReports]);
+  }, [selectedPetIdx, client.pets, fetchNotes, fetchVisitReports, fetchLabFiles]);
 
 
   const handleSaveNote = async (type: 'vet' | 'client') => {
@@ -829,14 +852,20 @@ export default function ClientDetailPage() {
     if (!newTreatmentName.trim()) return;
     const pet = client.pets[selectedPetIdx];
     const petDbId = pet?.dbId;
-    const dateFormatted = new Date(newTreatmentDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    // Get current user's display name
+    let addedByName = 'Unknown';
+    if (user) {
+      const { data: prof } = await supabase.from('profiles').select('first_name, last_name').eq('id', user.id).single();
+      if (prof) addedByName = `${prof.first_name || ''} ${prof.last_name || ''}`.trim() || user.email || 'Unknown';
+    }
     if (petDbId) {
       const { data } = await supabase.from('pet_treatments').insert({
-        pet_id: petDbId, name: newTreatmentName.trim(), date: newTreatmentDate, vet: newTreatmentVet, notes: newTreatmentNotes,
+        pet_id: petDbId, name: newTreatmentName.trim(), date: newTreatmentDate, vet: newTreatmentVet, notes: newTreatmentNotes, added_by: addedByName,
       }).select().single();
-      setTreatments([{ id: data?.id || Date.now(), name: newTreatmentName.trim(), date: dateFormatted, vet: newTreatmentVet, notes: newTreatmentNotes }, ...treatments]);
+      const createdAt = data?.created_at || new Date().toISOString();
+      setTreatments([{ id: data?.id || Date.now(), name: newTreatmentName.trim(), date: newTreatmentDate, vet: newTreatmentVet, notes: newTreatmentNotes, addedBy: addedByName, createdAt }, ...treatments]);
     } else {
-      setTreatments([{ id: Date.now(), name: newTreatmentName.trim(), date: dateFormatted, vet: newTreatmentVet, notes: newTreatmentNotes }, ...treatments]);
+      setTreatments([{ id: Date.now(), name: newTreatmentName.trim(), date: newTreatmentDate, vet: newTreatmentVet, notes: newTreatmentNotes, addedBy: addedByName, createdAt: new Date().toISOString() }, ...treatments]);
     }
     setNewTreatmentName(''); setNewTreatmentDate(new Date().toISOString().split('T')[0]);
     setNewTreatmentVet(''); setNewTreatmentNotes('');
@@ -1259,6 +1288,7 @@ export default function ClientDetailPage() {
             <TabsTrigger value="visits">Visits</TabsTrigger>
             <TabsTrigger value="notes">Notes</TabsTrigger>
             <TabsTrigger value="reports">Reports</TabsTrigger>
+            <TabsTrigger value="lab">Lab</TabsTrigger>
           </TabsList>
           {/* ── Pet Switcher + Add Pet ── */}
           <div className="flex items-center gap-1.5">
@@ -1723,23 +1753,29 @@ export default function ClientDetailPage() {
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
                     <TableHead className="py-3 px-4" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>Treatment</TableHead>
-                    <TableHead className="py-3 px-4" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>Date</TableHead>
+                    <TableHead className="py-3 px-4" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>Date & Time</TableHead>
                     <TableHead className="py-3 px-4" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>Vet</TableHead>
+                    <TableHead className="py-3 px-4" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>Added By</TableHead>
                     <TableHead className="py-3 px-4" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>Notes</TableHead>
                     <TableHead className="py-3 px-4 w-10" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {treatments.map((t) => (
+                  {treatments.map((t) => {
+                    const dateDisplay = t.createdAt ? new Date(t.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : t.date;
+                    return (
                     <TableRow key={t.id} className="hover:bg-[var(--surface-elevated)]">
                       <TableCell className="py-3 px-4">
                         <span className="text-[var(--text-primary)]" style={{ fontSize: '16px', fontWeight: 500 }}>{t.name}</span>
                       </TableCell>
                       <TableCell className="py-3 px-4">
-                        <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>{t.date}</span>
+                        <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>{dateDisplay}</span>
                       </TableCell>
                       <TableCell className="py-3 px-4">
                         <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>{t.vet}</span>
+                      </TableCell>
+                      <TableCell className="py-3 px-4">
+                        <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>{t.addedBy || '—'}</span>
                       </TableCell>
                       <TableCell className="py-3 px-4">
                         <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>{t.notes}</span>
@@ -1754,7 +1790,8 @@ export default function ClientDetailPage() {
                         </button>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    );
+                  })}
                 </TableBody>
               </Table>
             )}
@@ -2306,6 +2343,104 @@ export default function ClientDetailPage() {
                               )}
                             </div>
                           )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </TabsContent>
+
+        {/* ─── Lab Tab ──────────────────────────────────── */}
+        <TabsContent value="lab">
+          <div className="space-y-4">
+            <div className="border border-[var(--border-color)] p-6" style={{ borderRadius: '12px', backgroundColor: 'var(--surface-white)' }}>
+              <div className="flex items-center justify-between mb-5">
+                <div>
+                  <h3 className="text-[var(--text-primary)]" style={{ fontSize: 16, fontWeight: 600 }}>Lab Results</h3>
+                  <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: 14 }}>
+                    Uploaded lab files and diagnostic results
+                  </p>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => navigate('/lab')}>
+                  <FlaskConical className="w-3.5 h-3.5" /> Go to Lab
+                </Button>
+              </div>
+
+              {labLoading ? (
+                <div className="text-center py-10">
+                  <Loader2 className="w-8 h-8 mx-auto mb-3 animate-spin" style={{ color: 'var(--text-secondary)', opacity: 0.4 }} />
+                  <p className="text-[var(--text-secondary)]" style={{ fontSize: 14 }}>Loading lab results…</p>
+                </div>
+              ) : labFiles.length === 0 ? (
+                <div className="text-center py-10">
+                  <FlaskConical className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--text-secondary)', opacity: 0.4 }} />
+                  <p className="text-[var(--text-secondary)]" style={{ fontSize: 14 }}>No lab results yet.</p>
+                  <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: 13 }}>Lab files will appear here once uploaded from the Lab page.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {labFiles.map((f: any) => {
+                    const isReviewed = f.review_status === 'reviewed';
+                    const uploaderName = f.uploader ? `${f.uploader.first_name} ${f.uploader.last_name}`.trim() : '—';
+                    const reviewerName = f.reviewer ? `Dr. ${f.reviewer.first_name} ${f.reviewer.last_name}`.trim() : '';
+                    const isPdf = f.file_type === 'application/pdf';
+                    const isImage = f.file_type?.startsWith('image/');
+                    const uploadDate = f.created_at ? new Date(f.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+
+                    return (
+                      <div key={f.id} className="border border-[var(--border-color)] flex items-center justify-between px-5 py-3.5" style={{ borderRadius: '10px' }}>
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div
+                            className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+                            style={{ backgroundColor: isPdf ? '#EF444415' : isImage ? '#3B82F615' : '#6B728015' }}
+                          >
+                            {isPdf ? <FileText className="w-4 h-4" style={{ color: '#EF4444' }} />
+                              : isImage ? <Eye className="w-4 h-4" style={{ color: '#3B82F6' }} />
+                              : <FileText className="w-4 h-4" style={{ color: '#6B7280' }} />}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[var(--text-primary)] truncate" style={{ fontSize: 14, fontWeight: 600 }}>{f.file_name || 'Unnamed file'}</p>
+                            <p className="text-[var(--text-secondary)]" style={{ fontSize: 12 }}>
+                              {f.test_panel && f.test_panel !== 'General' ? `${f.test_panel} · ` : ''}{uploadDate} · by {uploaderName}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <span
+                            className="inline-flex items-center gap-1 px-2 py-0.5"
+                            style={{
+                              backgroundColor: isReviewed ? 'rgba(22, 163, 74, 0.08)' : 'rgba(245, 158, 11, 0.08)',
+                              color: isReviewed ? '#16A34A' : '#D97706',
+                              borderRadius: 9999, fontSize: 11, fontWeight: 700,
+                              border: `1px solid ${isReviewed ? 'rgba(22, 163, 74, 0.2)' : 'rgba(245, 158, 11, 0.2)'}`,
+                            }}
+                          >
+                            {isReviewed ? <CheckCircle2 className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
+                            {isReviewed ? 'Reviewed' : 'Awaiting Review'}
+                          </span>
+                          {isReviewed && reviewerName && (
+                            <span className="text-[var(--text-secondary)]" style={{ fontSize: 11 }}>
+                              {reviewerName}
+                            </span>
+                          )}
+                          <a
+                            href={f.file_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              width: 32, height: 32, borderRadius: 8,
+                              border: '1px solid var(--border-color)',
+                              backgroundColor: 'transparent', display: 'flex',
+                              alignItems: 'center', justifyContent: 'center',
+                              color: 'var(--text-secondary)', textDecoration: 'none',
+                            }}
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                          </a>
                         </div>
                       </div>
                     );

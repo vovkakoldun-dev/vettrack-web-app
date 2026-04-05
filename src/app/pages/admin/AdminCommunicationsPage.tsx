@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { useSearchParams } from 'react-router';
+import { useSearchParams, useLocation } from 'react-router';
 import {
   Mail, X, ExternalLink, Check, ArrowRight, Copy, ChevronLeft, Shield, Key, Link2,
   Inbox, Send, Star, Trash2, Archive, MailPlus, Search, Paperclip, MoreHorizontal,
@@ -27,6 +27,7 @@ import {
   unstarEmail as gmailUnstarEmail,
   archiveEmail as gmailArchiveEmail,
   trashEmail as gmailTrashEmail,
+  deleteEmail as gmailDeleteEmail,
   getLabels as gmailGetLabels,
   EmailAuthError,
   type GmailMessage,
@@ -251,12 +252,13 @@ const SIDEBAR_ITEMS = [
 
 // ─── Email Inbox View (Enhanced) ─────────────────────────────
 
-function EmailInboxView({ connectedIds, integrations, onManageIntegrations, activeProvider, connectedEmail }: {
+function EmailInboxView({ connectedIds, integrations, onManageIntegrations, activeProvider, connectedEmail, prefillCompose }: {
   connectedIds: Set<string>;
   integrations: Integration[];
   onManageIntegrations: () => void;
   activeProvider: 'gmail' | 'outlook' | null;
   connectedEmail: string | null;
+  prefillCompose?: { composeTo?: string; composeSubject?: string; composeBody?: string };
 }) {
   const [emails, setEmails] = useState<UnifiedEmail[]>([]);
   const [selectedEmail, setSelectedEmail] = useState<UnifiedEmail | null>(null);
@@ -279,8 +281,29 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
   // Compose state
   const [composeTo, setComposeTo] = useState('');
   const [composeSubject, setComposeSubject] = useState('');
+  const [composeAttachments, setComposeAttachments] = useState<{ file: File; name: string; size: number }[]>([]);
   const composeRef = useRef<HTMLDivElement>(null);
+  const prefillApplied = useRef(false);
   const savedSelection = useRef<Range | null>(null);
+  const attachFileInputRef = useRef<HTMLInputElement>(null);
+  const imageFileInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Prefill compose from navigation state ──
+  useEffect(() => {
+    if (prefillCompose?.composeTo && !prefillApplied.current) {
+      prefillApplied.current = true;
+      setComposeTo(prefillCompose.composeTo);
+      if (prefillCompose.composeSubject) setComposeSubject(prefillCompose.composeSubject);
+      setShowCompose(true);
+      setComposeExpanded(true);
+      setTimeout(() => {
+        if (composeRef.current && prefillCompose.composeBody) {
+          composeRef.current.innerHTML = prefillCompose.composeBody;
+        }
+        window.history.replaceState({}, '');
+      }, 100);
+    }
+  }, [prefillCompose]);
 
   // ── Fetch real emails from API ��─
   const fetchEmails = useCallback(async () => {
@@ -342,6 +365,14 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
     fetchEmails();
   }, [fetchEmails]);
 
+  // Auto-refresh inbox every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchEmails();
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, [fetchEmails]);
+
   // Fetch Gmail labels with counts
   useEffect(() => {
     if (activeProvider !== 'gmail') return;
@@ -381,9 +412,51 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
     if (value) {
       composeRef.current?.focus();
       restoreSelection();
-      document.execCommand(command, false, value);
+      if (command === 'createLink') {
+        // If no text is selected, insert the URL as clickable text
+        const sel = window.getSelection();
+        if (sel && sel.toString().trim() === '') {
+          document.execCommand('insertHTML', false, `<a href="${value}" target="_blank">${value}</a>`);
+        } else {
+          document.execCommand('createLink', false, value);
+        }
+      } else {
+        document.execCommand(command, false, value);
+      }
       saveSelection();
     }
+  };
+
+  const handleImageFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      alert('Please select an image file');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      composeRef.current?.focus();
+      restoreSelection();
+      document.execCommand('insertHTML', false, `<img src="${reader.result}" alt="${file.name}" style="max-width: 100%; height: auto; margin: 8px 0; border-radius: 6px;" />`);
+      saveSelection();
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleAttachFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    const newAttachments = Array.from(files).map(f => ({ file: f, name: f.name, size: f.size }));
+    setComposeAttachments(prev => [...prev, ...newAttachments]);
+    e.target.value = '';
+  };
+
+  const formatAttachmentSize = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
   const connectedProvider = integrations.find(i => connectedIds.has(i.id));
@@ -468,7 +541,7 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
   }, []);
 
   const moveToTrash = useCallback(async (ids: Set<string>) => {
-    setEmails(prev => prev.map(e => ids.has(e.id) ? { ...e, folder: 'trash' } : e));
+    setEmails(prev => prev.filter(e => !ids.has(e.id)));
     setSelectedIds(new Set());
     setSelectedEmail(null);
     for (const id of ids) {
@@ -484,8 +557,24 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
     }
   }, [activeProvider]);
 
+  const permanentlyDelete = useCallback(async (ids: Set<string>) => {
+    if (!confirm(`Permanently delete ${ids.size} email${ids.size > 1 ? 's' : ''}? This cannot be undone.`)) return;
+    setEmails(prev => prev.filter(e => !ids.has(e.id)));
+    setSelectedIds(new Set());
+    setSelectedEmail(null);
+    for (const id of ids) {
+      try {
+        if (activeProvider === 'gmail') {
+          await gmailDeleteEmail(id);
+        }
+      } catch (err) {
+        console.error('Failed to permanently delete email:', err);
+      }
+    }
+  }, [activeProvider]);
+
   const archiveEmails = useCallback(async (ids: Set<string>) => {
-    setEmails(prev => prev.map(e => ids.has(e.id) ? { ...e, folder: 'archive' } : e));
+    setEmails(prev => prev.filter(e => !ids.has(e.id)));
     setSelectedIds(new Set());
     setSelectedEmail(null);
     for (const id of ids) {
@@ -519,9 +608,18 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
     setSelectedEmail(email);
     if (!email.read) {
       setEmails(prev => prev.map(e => e.id === email.id ? { ...e, read: true } : e));
+      // Optimistically decrement unread count in label badges
+      setGmailLabels(prev => prev.map(l => {
+        if (email.labels?.includes(l.id) && l.messagesUnread && l.messagesUnread > 0) {
+          return { ...l, messagesUnread: l.messagesUnread - 1 };
+        }
+        return l;
+      }));
       try {
         if (activeProvider === 'gmail') await gmailMarkAsRead(email.id);
         else if (activeProvider === 'outlook') await outlookMarkAsRead(email.id);
+        // Notify sidebar to update unread badge
+        window.dispatchEvent(new Event('adminEmailRead'));
       } catch (err) {
         console.error('Failed to mark as read:', err);
       }
@@ -734,7 +832,7 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
             <div style={{ width: 1, height: 18, background: 'var(--border-color)', margin: '0 4px' }} />
 
             {toolbarBtn({ onClick: () => archiveEmails(selectedIds), title: 'Archive', disabled: selectedIds.size === 0, children: <Archive style={{ width: 15, height: 15 }} /> })}
-            {toolbarBtn({ onClick: () => moveToTrash(selectedIds), title: 'Delete', disabled: selectedIds.size === 0, children: <Trash2 style={{ width: 15, height: 15 }} /> })}
+            {toolbarBtn({ onClick: () => activeFolder === 'trash' ? permanentlyDelete(selectedIds) : moveToTrash(selectedIds), title: activeFolder === 'trash' ? 'Delete permanently' : 'Delete', disabled: selectedIds.size === 0, children: <Trash2 style={{ width: 15, height: 15 }} /> })}
             {toolbarBtn({ onClick: () => toggleRead(selectedIds), title: 'Mark read/unread', disabled: selectedIds.size === 0, children: <MailOpen style={{ width: 15, height: 15 }} /> })}
             {toolbarBtn({ onClick: () => snoozeEmails(selectedIds), title: 'Snooze', disabled: selectedIds.size === 0, children: <BellOff style={{ width: 15, height: 15 }} /> })}
 
@@ -980,7 +1078,7 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
             {toolbarBtn({ onClick: () => setSelectedEmail(null), title: 'Back', children: <ChevronLeft style={{ width: 18, height: 18 }} /> })}
             <div style={{ flex: 1 }} />
             {toolbarBtn({ onClick: () => archiveEmails(new Set([selectedEmail.id])), title: 'Archive', children: <Archive style={{ width: 16, height: 16 }} /> })}
-            {toolbarBtn({ onClick: () => moveToTrash(new Set([selectedEmail.id])), title: 'Delete', children: <Trash2 style={{ width: 16, height: 16 }} /> })}
+            {toolbarBtn({ onClick: () => activeFolder === 'trash' ? permanentlyDelete(new Set([selectedEmail.id])) : moveToTrash(new Set([selectedEmail.id])), title: activeFolder === 'trash' ? 'Delete permanently' : 'Delete', children: <Trash2 style={{ width: 16, height: 16 }} /> })}
             {toolbarBtn({ onClick: () => toggleRead(new Set([selectedEmail.id])), title: 'Mark unread', children: <MailOpen style={{ width: 16, height: 16 }} /> })}
             {toolbarBtn({ onClick: () => snoozeEmails(new Set([selectedEmail.id])), title: 'Snooze', children: <BellOff style={{ width: 16, height: 16 }} /> })}
 
@@ -1188,6 +1286,16 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
       )}
 
       {/* ── Compose Dialog ── */}
+      {/* Backdrop when expanded */}
+      {showCompose && composeExpanded && (
+        <div
+          onClick={() => setComposeExpanded(false)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 99,
+            background: 'rgba(0,0,0,0.3)',
+          }}
+        />
+      )}
       {showCompose && (
         <div style={{
           position: 'fixed', zIndex: 100,
@@ -1201,16 +1309,6 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
           overflow: 'hidden',
           transition: 'all 0.2s ease',
         }}>
-          {/* Backdrop when expanded */}
-          {composeExpanded && (
-            <div
-              onClick={() => setComposeExpanded(false)}
-              style={{
-                position: 'fixed', inset: 0, zIndex: -1,
-                background: 'rgba(0,0,0,0.3)',
-              }}
-            />
-          )}
           {/* Compose header */}
           <div style={{
             padding: '12px 16px', background: 'var(--surface-elevated)',
@@ -1229,7 +1327,7 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
               }
             </button>
             <button
-              onClick={() => { setShowCompose(false); setComposeExpanded(false); }}
+              onClick={() => { setShowCompose(false); setComposeExpanded(false); setComposeAttachments([]); }}
               style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: 4 }}
             >
               <X style={{ width: 16, height: 16 }} />
@@ -1276,8 +1374,38 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
             {toolbarBtn({ onClick: () => execFormat('insertOrderedList'), title: 'Numbered list', children: <ListOrdered style={{ width: 14, height: 14 }} /> })}
             <div style={{ width: 1, height: 18, background: 'var(--border-color)', margin: '0 4px' }} />
             {toolbarBtn({ onClick: () => execFormatWithPrompt('createLink', 'Enter URL:'), title: 'Insert link', children: <LinkIcon style={{ width: 14, height: 14 }} /> })}
-            {toolbarBtn({ onClick: () => execFormatWithPrompt('insertImage', 'Enter image URL:'), title: 'Insert image', children: <Image style={{ width: 14, height: 14 }} /> })}
-            {toolbarBtn({ onClick: () => {}, title: 'Attach file', children: <Paperclip style={{ width: 14, height: 14 }} /> })}
+            <button
+              onClick={() => { saveSelection(); setTimeout(() => imageFileInputRef.current?.click(), 0); }}
+              title="Insert image"
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: 'var(--text-secondary)', opacity: 1,
+                padding: 6, borderRadius: 6,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'background 0.15s',
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'var(--surface-elevated)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
+            >
+              <Image style={{ width: 14, height: 14 }} />
+            </button>
+            <button
+              onClick={() => { setTimeout(() => attachFileInputRef.current?.click(), 0); }}
+              title="Attach file"
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: 'var(--text-secondary)', opacity: 1,
+                padding: 6, borderRadius: 6,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'background 0.15s',
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'var(--surface-elevated)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
+            >
+              <Paperclip style={{ width: 14, height: 14 }} />
+            </button>
+            <input ref={imageFileInputRef} type="file" accept="image/*" onChange={handleImageFileSelect} style={{ display: 'none' }} />
+            <input ref={attachFileInputRef} type="file" multiple onChange={handleAttachFileSelect} style={{ display: 'none' }} />
           </div>
 
           {/* Compose body - contentEditable for rich text */}
@@ -1301,6 +1429,33 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
             onMouseUp={saveSelection}
           />
 
+          {/* Attachments preview */}
+          {composeAttachments.length > 0 && (
+            <div style={{
+              padding: '8px 16px', borderTop: '1px solid var(--border-color)',
+              display: 'flex', flexWrap: 'wrap', gap: 6,
+            }}>
+              {composeAttachments.map((att, idx) => (
+                <div key={idx} style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '4px 10px', background: 'var(--surface-elevated)',
+                  borderRadius: 6, border: '1px solid var(--border-color)', fontSize: 12,
+                }}>
+                  <File style={{ width: 12, height: 12, color: 'var(--text-secondary)' }} />
+                  <span style={{ color: 'var(--text-primary)', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{att.name}</span>
+                  <span style={{ color: 'var(--text-secondary)' }}>({formatAttachmentSize(att.size)})</span>
+                  <button
+                    onClick={() => setComposeAttachments(prev => prev.filter((_, i) => i !== idx))}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: 2, display: 'flex' }}
+                    title="Remove attachment"
+                  >
+                    <X style={{ width: 12, height: 12 }} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Send bar */}
           <div style={{
             padding: '10px 16px', borderTop: '1px solid var(--border-color)',
@@ -1322,7 +1477,10 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
                   setComposeExpanded(false);
                   setComposeTo('');
                   setComposeSubject('');
+                  setComposeAttachments([]);
                   if (composeRef.current) composeRef.current.innerHTML = '';
+                  // Refresh inbox after sending (slight delay for Gmail to process)
+                  setTimeout(() => fetchEmails(), 1500);
                 } catch (err) {
                   console.error('Failed to send email:', err);
                   alert(err instanceof Error ? err.message : 'Failed to send email');
@@ -1346,6 +1504,7 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
                 setComposeExpanded(false);
                 setComposeTo('');
                 setComposeSubject('');
+                setComposeAttachments([]);
                 if (composeRef.current) composeRef.current.innerHTML = '';
               }}
               style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: 6 }}
@@ -1438,6 +1597,8 @@ const OAUTH_ERROR_MESSAGES: Record<string, { title: string; message: string; sev
 
 export default function AdminCommunicationsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
+  const prefill = location.state as { composeTo?: string; composeSubject?: string; composeBody?: string } | null;
   const [dialogOpen, setDialogOpen] = useState(false);
   const [connectedIds, setConnectedIds] = useState<Set<string>>(new Set());
   const [connecting, setConnecting] = useState<string | null>(null);
@@ -1736,6 +1897,7 @@ export default function AdminCommunicationsPage() {
           onManageIntegrations={() => setDialogOpen(true)}
           activeProvider={activeProvider}
           connectedEmail={connectedEmail}
+          prefillCompose={prefill ?? undefined}
         />
       ) : (
         <div

@@ -5,6 +5,8 @@ import {
 } from 'lucide-react';
 import { Avatar, AvatarImage, AvatarFallback } from '../../components/ui/avatar';
 import { useAppointments } from '../../hooks/useAppointments';
+import { usePets } from '../../hooks/usePets';
+import { useOwnerClient } from '../../hooks/useOwnerClient';
 
 // ─── Brand ───────────────────────────────────────────────────
 const BRAND = '#2D6A4F';
@@ -75,7 +77,16 @@ export default function OwnerAppointmentsPage() {
   const today = new Date();
   const [viewYear, setViewYear]   = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
-  const { appointments: supaAppts } = useAppointments();
+  const { appointments: allAppts } = useAppointments();
+  const { pets: allPets } = usePets();
+  const { clientId } = useOwnerClient();
+
+  // Filter appointments to only this owner's pets
+  const supaAppts = useMemo(() => {
+    if (!clientId) return allAppts;
+    const myPetIds = new Set(allPets.filter(p => p.client_id === clientId).map(p => p.id));
+    return allAppts.filter(a => a.pet_id && myPetIds.has(a.pet_id));
+  }, [allAppts, allPets, clientId]);
 
   const mappedAppts: Appointment[] = useMemo(() =>
     supaAppts.map((a, idx) => {

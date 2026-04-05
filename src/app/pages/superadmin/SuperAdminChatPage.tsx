@@ -217,6 +217,7 @@ export default function SuperAdminChatPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const lastReadAtRef = useRef<string | null>(null);
+  const [otherLastReadAt, setOtherLastReadAt] = useState<string | null>(null);
 
   const selectedConv = conversations.find((c) => c.id === selectedId) ?? null;
 
@@ -518,12 +519,13 @@ export default function SuperAdminChatPage() {
   async function handleSelectConversation(convId: string) {
     setSelectedId(convId);
     setInputValue('');
+    setOtherLastReadAt(null);
     closeMsgSearch();
     clearImagePreview();
     clearAttachedFile();
     await fetchMessages(convId);
 
-    // Mark as read
+    // Mark as read + fetch other participant's last_read_at
     if (saProfileId) {
       const { organizationId } = await getOrgContext();
       const now = new Date().toISOString();
@@ -534,6 +536,19 @@ export default function SuperAdminChatPage() {
         .eq('organization_id', organizationId)
         .eq('conversation_id', convId)
         .eq('profile_id', saProfileId);
+
+      // Fetch the other participant's last_read_at
+      const { data: otherParts } = await supabase
+        .from('conversation_participants')
+        .select('last_read_at')
+        .eq('organization_id', organizationId)
+        .eq('conversation_id', convId)
+        .neq('profile_id', saProfileId);
+      if (otherParts && otherParts.length > 0) {
+        // For 1:1 chats use their last_read_at; for groups use the earliest
+        const readAts = otherParts.map(p => p.last_read_at).filter(Boolean) as string[];
+        setOtherLastReadAt(readAts.length > 0 ? readAts.sort()[0] : null);
+      }
 
       // Clear unread in local state
       setConversations(prev => prev.map(c =>
@@ -737,6 +752,13 @@ export default function SuperAdminChatPage() {
     if (!saProfileId) return;
     const channel = supabase
       .channel('superadmin-chat')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversation_participants' }, (payload) => {
+        const row = payload.new as any;
+        // If the other person (not me) updated their last_read_at on the selected conversation
+        if (row.conversation_id === selectedId && row.profile_id !== saProfileId && row.last_read_at) {
+          setOtherLastReadAt(row.last_read_at);
+        }
+      })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
         const msg = payload.new as any;
         // Check if this message is for the currently selected conversation
@@ -1168,8 +1190,9 @@ export default function SuperAdminChatPage() {
                             <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '3px' }}>
                               <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{formatTime(msg.timestamp)}</span>
                               {isMe && isLastMine && (
-                                <span style={{ display: 'flex', alignItems: 'center', gap: '2px', fontSize: '11px', color: 'var(--text-secondary)' }}>
-                                  <CheckCheck style={{ width: '12px', height: '12px' }} /> Read
+                                <span style={{ display: 'flex', alignItems: 'center', gap: '2px', fontSize: '11px', color: otherLastReadAt && msg.timestamp.toISOString() <= otherLastReadAt ? '#2D6A4F' : 'var(--text-secondary)' }}>
+                                  <CheckCheck style={{ width: '12px', height: '12px' }} />
+                                  {otherLastReadAt && msg.timestamp.toISOString() <= otherLastReadAt ? ' Read' : ' Delivered'}
                                 </span>
                               )}
                             </div>
