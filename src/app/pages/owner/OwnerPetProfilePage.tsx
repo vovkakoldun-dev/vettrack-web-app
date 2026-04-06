@@ -18,7 +18,7 @@ import { useOwnerClient } from '../../hooks/useOwnerClient';
 import { supabase } from '../../../lib/supabase';
 
 // ─── Brand ───────────────────────────────────────────────────
-const BRAND = '#2D6A4F';
+const BRAND = 'var(--brand-green-text)';
 const BRAND_TEXT = 'var(--brand-green-text)';
 
 // ─── Helpers ─────────────────────────────────────────────────
@@ -34,7 +34,7 @@ function calcAge(dob: string | null): string {
 
 // ─── Banner presets ───────────────────────────────────────────
 const BANNER_PRESETS = [
-  { id: 'forest',  label: 'Forest',  gradient: 'linear-gradient(135deg, #1B4332 0%, #2D6A4F 50%, #52B788 100%)' },
+  { id: 'forest',  label: 'Forest',  gradient: 'linear-gradient(135deg, #1B4332 0%, var(--brand-green-text) 50%, #52B788 100%)' },
   { id: 'ocean',   label: 'Ocean',   gradient: 'linear-gradient(135deg, #0C4A6E 0%, #0369A1 50%, #38BDF8 100%)' },
   { id: 'sunset',  label: 'Sunset',  gradient: 'linear-gradient(135deg, #7C2D12 0%, #C2410C 50%, #FB923C 100%)' },
   { id: 'lavender',label: 'Lavender',gradient: 'linear-gradient(135deg, #3B0764 0%, #6D28D9 50%, #A78BFA 100%)' },
@@ -504,7 +504,7 @@ export default function OwnerPetProfilePage() {
                     {pet.lastVetName ? (
                       <>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-                          <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'linear-gradient(135deg, #2D6A4F, #52B788)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'linear-gradient(135deg, var(--brand-green-text), #52B788)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                             <span style={{ fontSize: '11px', fontWeight: 700, color: '#fff' }}>{pet.lastVetName.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase()}</span>
                           </div>
                           <div>
@@ -512,7 +512,7 @@ export default function OwnerPetProfilePage() {
                             <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: 0 }}>{pet.lastVetDate}</p>
                           </div>
                         </div>
-                        <div style={{ padding: '12px', borderRadius: '9px', backgroundColor: `${BRAND}08`, border: `1px solid ${BRAND}20` }}>
+                        <div style={{ padding: '12px', borderRadius: '9px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 3%, transparent)', border: '1px solid color-mix(in srgb, var(--brand-green-text) 12%, transparent)' }}>
                           <p style={{ fontSize: '13px', color: 'var(--text-primary)', lineHeight: 1.6, margin: 0 }}>
                             {pet.clientNotes || 'No notes from this visit.'}
                           </p>
@@ -595,7 +595,7 @@ export default function OwnerPetProfilePage() {
                       padding: '16px 20px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left',
                     }}
                   >
-                    <div style={{ width: '40px', height: '40px', borderRadius: '10px', backgroundColor: `${BRAND}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <div style={{ width: '40px', height: '40px', borderRadius: '10px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                       <FileText style={{ width: '18px', height: '18px', color: BRAND_TEXT }} />
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -718,14 +718,14 @@ export default function OwnerPetProfilePage() {
                   key={appt.id}
                   style={{
                     backgroundColor: 'var(--surface-white)',
-                    border: `1px solid ${BRAND}30`,
+                    border: '1px solid color-mix(in srgb, var(--brand-green-text) 19%, transparent)',
                     borderRadius: '12px', padding: '18px 20px',
                     borderLeft: `4px solid ${BRAND}`,
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px',
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                    <div style={{ width: '44px', height: '44px', borderRadius: '10px', backgroundColor: `${BRAND}15`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <div style={{ width: '44px', height: '44px', borderRadius: '10px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       <Calendar style={{ width: '20px', height: '20px', color: BRAND_TEXT }} />
                     </div>
                     <div>
@@ -734,7 +734,7 @@ export default function OwnerPetProfilePage() {
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    <button style={{ padding: '7px 16px', borderRadius: '8px', backgroundColor: `${BRAND}15`, border: `1px solid ${BRAND}30`, color: BRAND_TEXT, fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>
+                    <button style={{ padding: '7px 16px', borderRadius: '8px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--brand-green-text) 19%, transparent)', color: BRAND_TEXT, fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>
                       Reschedule
                     </button>
                     <button style={{ padding: '7px 16px', borderRadius: '8px', backgroundColor: '#d4183d10', border: '1px solid #d4183d25', color: '#d4183d', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>

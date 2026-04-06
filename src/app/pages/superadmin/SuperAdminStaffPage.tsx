@@ -12,6 +12,7 @@ import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '../../components/ui/select';
 import { supabase } from '../../../lib/supabase';
+import { useTenantDb } from '../../context/TenantContext';
 import { getOrgContext } from '../../hooks/useOrgContext';
 
 // ─── Theme ────────────────────────────────────────────────────
@@ -57,7 +58,7 @@ interface StaffMember {
 // ─── Config ───────────────────────────────────────────────────
 const ROLE_CONFIG: Record<Role, { color: string; bg: string }> = {
   'Senior Veterinarian': { color: '#16A34A', bg: '#22C55E15' },
-  'Veterinarian':        { color: '#2D6A4F', bg: '#2D6A4F15' },
+  'Veterinarian':        { color: 'var(--brand-green-text)', bg: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)' },
   'Vet Technician':      { color: '#2563EB', bg: '#3B82F615' },
   'Lead Vet Tech':       { color: '#1D4ED8', bg: '#3B82F620' },
   'Receptionist':        { color: '#7C3AED', bg: '#8B5CF615' },
@@ -101,7 +102,7 @@ const UI_ROLE_TO_DB: Record<Role, string> = Object.fromEntries(
   Object.entries(DB_ROLE_TO_UI).map(([k, v]) => [v, k])
 ) as Record<Role, string>;
 
-const AVATAR_COLORS = ['#2D6A4F', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261', '#06B6D4', '#6366F1', '#DC2626', '#0EA5E9', '#14B8A6'];
+const AVATAR_COLORS = ['var(--brand-green-text)', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261', '#06B6D4', '#6366F1', '#DC2626', '#0EA5E9', '#14B8A6'];
 
 function roleToDept(role: Role): Department {
   if (['Veterinarian', 'Senior Veterinarian', 'Specialist'].includes(role)) return 'Clinical';
@@ -223,7 +224,7 @@ function StaffDetailDrawer({
   useEffect(() => {
     (async () => {
       const { organizationId } = await getOrgContext();
-      const { data } = await supabase
+      const { data } = await db
         .from('staff_time_blocks')
         .select('type, status')
         .eq('organization_id', organizationId)
@@ -720,6 +721,7 @@ const labelStyle: React.CSSProperties = {
 
 // ─── Main Page ────────────────────────────────────────────────
 export default function SuperAdminStaffPage() {
+  const db = useTenantDb();
   const [staff, setStaff]               = useState<StaffMember[]>([]);
   const [loading, setLoading]           = useState(true);
   const [clinicNames, setClinicNames]   = useState<string[]>([]);
@@ -739,7 +741,7 @@ export default function SuperAdminStaffPage() {
     (async () => {
       try {
         const { organizationId } = await getOrgContext();
-        const { data } = await supabase.from('clinics').select('id, name').eq('organization_id', organizationId);
+        const { data } = await db.from('clinics').select('id, name').eq('organization_id', organizationId);
         if (data) {
           const map: Record<string, string> = {};
           data.forEach((c: any) => { map[c.id] = c.name; });
@@ -753,9 +755,9 @@ export default function SuperAdminStaffPage() {
   // ── Fetch staff from Supabase ──────────────────────────────
   const fetchStaff = useCallback(async () => {
     const { organizationId } = await getOrgContext();
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('staff')
-      .select('*, profiles:profiles!staff_profile_id_fkey(first_name, last_name, email, phone, avatar_url)')
+      .select('*, profiles:profiles!staff_profile_org_fkey(first_name, last_name, email, phone, avatar_url)')
       .eq('organization_id', organizationId)
       .order('first_name');
 
@@ -838,7 +840,7 @@ export default function SuperAdminStaffPage() {
     if (!current) return;
     const next: StaffStatus = (current.status === 'Active' || current.status === 'Probation') ? 'Inactive' : 'Active';
     const { organizationId } = await getOrgContext();
-    await supabase.from('staff').update({ status: next }).eq('id', id).eq('organization_id', organizationId);
+    await db.from('staff').update({ status: next }).eq('id', id).eq('organization_id', organizationId);
     setStaff(prev => prev.map(s => s.id !== id ? s : { ...s, status: next }));
     setSelectedStaff(prev => {
       if (!prev || prev.id !== id) return prev;
@@ -870,9 +872,9 @@ export default function SuperAdminStaffPage() {
 
     if (isEdit && editStaff) {
       const { organizationId: orgId } = await getOrgContext();
-      await supabase.from('staff').update(dbPayload).eq('id', editStaff.id).eq('organization_id', orgId);
+      await db.from('staff').update(dbPayload).eq('id', editStaff.id).eq('organization_id', orgId);
       // Also update profiles table for name/email/phone
-      await supabase.from('profiles').update({
+      await db.from('profiles').update({
         first_name: form.firstName,
         last_name: form.lastName,
         email: form.email,
@@ -915,7 +917,7 @@ export default function SuperAdminStaffPage() {
       }
 
       // Update the staff record with additional fields the trigger didn't set
-      await supabase.from('staff').update({
+      await db.from('staff').update({
         phone: form.phone || null,
         schedule: form.schedule || null,
         license_no: form.licenseNo || null,
@@ -933,7 +935,7 @@ export default function SuperAdminStaffPage() {
 
   const handleDelete = async (id: string) => {
     const { organizationId } = await getOrgContext();
-    await supabase.from('staff').delete().eq('id', id).eq('organization_id', organizationId);
+    await db.from('staff').delete().eq('id', id).eq('organization_id', organizationId);
     setStaff(prev => prev.filter(s => s.id !== id));
     if (selectedStaff?.id === id) setSelectedStaff(null);
     setOpenMenuId(null);

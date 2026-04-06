@@ -3,9 +3,10 @@ import { useLocation } from 'react-router';
 import {
   Bell, Calendar, FlaskConical, User, Syringe, AlertTriangle,
   Check, CheckCheck, Trash2, Clock, ChevronRight, Loader2,
+  ListTodo, CheckCircle2,
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
-import { supabase } from '../../lib/supabase';
+import { useTenantDb } from '../context/TenantContext';
 import { getOrgContext } from '../hooks/useOrgContext';
 import { useAuth } from '../context/AuthContext';
 
@@ -22,16 +23,19 @@ interface Notification {
   timeISO: string;
   read: boolean;
   petName?: string;
+  petId?: string;
   ownerName?: string;
+  clientId?: string;
   actionLabel?: string;
   actionPath?: string;
+  actionType?: 'link' | 'create-task';
   urgent?: boolean;
 }
 
 // ─── Color Maps ──────────────────────────────────────────────
 
 const categoryConfig: Record<NotifCategory, { bg: string; text: string; hex: string; icon: React.ElementType }> = {
-  Appointment: { bg: '#2D6A4F20', text: 'var(--brand-green-text)', hex: '#2D6A4F', icon: Calendar },
+  Appointment: { bg: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)', text: 'var(--brand-green-text)', hex: 'var(--brand-green-text)', icon: Calendar },
   'Lab Result': { bg: '#8B5CF620', text: '#8B5CF6',                hex: '#8B5CF6', icon: FlaskConical },
   Patient:      { bg: '#3B82F620', text: '#3B82F6',                hex: '#3B82F6', icon: User },
   Vaccine:      { bg: '#06B6D420', text: '#06B6D4',                hex: '#06B6D4', icon: Syringe },
@@ -87,7 +91,7 @@ const FILTER_TABS: { label: string; value: FilterTab }[] = [
 
 // ─── Data Fetching ───────────────────────────────────────────
 
-async function fetchNotificationsFromSupabase(isAdmin: boolean, userId?: string): Promise<Notification[]> {
+async function fetchNotificationsFromSupabase(db: any, isAdmin: boolean, userId?: string): Promise<Notification[]> {
   const { organizationId } = await getOrgContext();
   const now = new Date();
   const today = localDateString(now);
@@ -116,8 +120,8 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean, userId?: string)
     ...rest
   ] = await Promise.all([
     (() => {
-      let q = supabase.from('appointments')
-        .select('id, scheduled_at, duration_minutes, status, reason, pets(id, name, species, breed), clients(id, first_name, last_name), staff(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
+      let q = db.from('appointments')
+        .select('id, scheduled_at, duration_minutes, status, reason, pets(id, name, species, breed), clients(id, first_name, last_name), staff(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name))')
         .eq('organization_id', organizationId)
         .gte('scheduled_at', `${today}T00:00:00`).lte('scheduled_at', `${today}T23:59:59`)
         .in('status', ['Scheduled', 'Confirmed']).order('scheduled_at', { ascending: true });
@@ -125,7 +129,7 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean, userId?: string)
       return q;
     })(),
     (() => {
-      let q = supabase.from('appointments')
+      let q = db.from('appointments')
         .select('id, scheduled_at, status, reason, pets(id, name, species, breed), clients(id, first_name, last_name)')
         .eq('organization_id', organizationId)
         .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`).lt('scheduled_at', `${today}T00:00:00`)
@@ -134,7 +138,7 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean, userId?: string)
       return q;
     })(),
     (() => {
-      let q = supabase.from('appointments')
+      let q = db.from('appointments')
         .select('id, scheduled_at, reason, pets(id, name), clients(id, first_name, last_name)')
         .eq('organization_id', organizationId)
         .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`).eq('status', 'Cancelled')
@@ -142,18 +146,18 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean, userId?: string)
       if (!isAdmin && userId) q = q.eq('vet_id', userId);
       return q;
     })(),
-    supabase.from('vaccinations')
-      .select('id, vaccine_name, next_due_date, administered_date, pets(id, name, species, breed)')
-      .eq('organization_id', organizationId)
+    db.from('vaccinations')
+      .select('id, vaccine_name, next_due_date, administered_date, pets!inner(id, name, species, breed, organization_id, client_id, clients:clients!pets_client_org_fkey(id, first_name, last_name, phone))')
+      .eq('pets.organization_id', organizationId)
       .not('next_due_date', 'is', null).lte('next_due_date', thirtyDaysFromNowStr)
       .order('next_due_date', { ascending: true }).limit(50),
-    supabase.from('clients')
+    db.from('clients')
       .select('id, first_name, last_name, created_at')
       .eq('organization_id', organizationId)
       .gte('created_at', `${sevenDaysAgoStr}T00:00:00`)
       .order('created_at', { ascending: false }).limit(50),
     (() => {
-      let q = supabase.from('appointments')
+      let q = db.from('appointments')
         .select('id, scheduled_at, reason, pets(id, name), clients(id, first_name, last_name)')
         .eq('organization_id', organizationId)
         .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`).eq('status', 'No Show')
@@ -162,16 +166,19 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean, userId?: string)
       return q;
     })(),
     ...(userId ? [
-      supabase.from('notification_events').select('*')
+      db.from('notification_events').select('*')
         .eq('organization_id', organizationId)
         .gte('timestamp', new Date(now.getTime() - 7 * 86400000).toISOString()),
     ] : []),
   ]);
   const rawNotifEvents = userId ? (rest[0] as any)?.data : null;
-  // Filter notification events to only show ones targeting the current vet
+  // Filter notification events — admins see all org events, vets only see their own
   const notifEvents = rawNotifEvents
     ? (rawNotifEvents as any[]).filter((evt: any) => {
+        if (isAdmin) return true; // Admins see all notifications for the org
         const d = evt.data as any;
+        // Skip admin-only events for non-admin users
+        if (d?.adminOnly) return false;
         // Only show appt_assign / vet_assign / vet_unassign if vetId matches current user
         if (d?.vetId && d.vetId !== userId) return false;
         return true;
@@ -273,11 +280,13 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean, userId?: string)
   // ── 4. Vaccines due / overdue ─────────────────────────────
   if (vaccinesDue) {
     for (const vax of vaccinesDue) {
-      const pet = vax.pets as { id: string; name: string; species: string; breed: string | null } | null;
+      const pet = vax.pets as { id: string; name: string; species: string; breed: string | null; client_id?: string; clients?: { id: string; first_name: string; last_name: string; phone: string | null } | null } | null;
+      const client = pet?.clients;
       const dueDate = new Date(vax.next_due_date!);
       const daysUntilDue = Math.round((dueDate.getTime() - now.getTime()) / 86400000);
       const isOverdue = daysUntilDue < 0;
       const petLabel = pet ? `${pet.name}${pet.breed ? ` (${pet.breed})` : ''}` : 'Unknown pet';
+      const ownerLabel = client ? `${client.first_name} ${client.last_name}` : '';
 
       let title: string;
       let description: string;
@@ -304,8 +313,12 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean, userId?: string)
         timeISO: vax.next_due_date!,
         read: false,
         petName: pet?.name,
-        actionLabel: isOverdue ? 'Contact Owner' : 'Schedule Visit',
-        actionPath: '/appointments',
+        petId: pet?.id,
+        ownerName: ownerLabel,
+        clientId: client?.id,
+        actionLabel: isOverdue ? 'Create Follow-up Task' : 'Schedule Visit',
+        actionPath: isOverdue ? undefined : '/appointments',
+        actionType: isOverdue ? 'create-task' : 'link',
         urgent: isOverdue,
       });
     }
@@ -392,18 +405,59 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean, userId?: string)
     } else if (evt.type === 'request_resolved') {
       const decision = d.decision === 'approved' ? 'Approved' : 'Declined';
       const typeLabel = d.requestType === 'pto' ? 'PTO request' : d.requestType === 'shift_swap' ? 'Shift swap request' : d.requestType === 'overtime' ? 'Overtime request' : 'Request';
-      notifications.push({
-        id: evt.id,
-        category: 'System',
-        title: `${typeLabel} ${decision.toLowerCase()}`,
-        description: `Your ${typeLabel.toLowerCase()} has been ${decision.toLowerCase()} by management. ${d.detail || ''}`,
-        time: formatRelativeTime(evt.timestamp),
-        timeISO: evt.timestamp,
-        read: false,
-        actionLabel: 'View Schedule',
-        actionPath: '/shifts',
-        urgent: d.decision === 'declined',
-      });
+      const isMyRequest = d.vetId === userId;
+      // For admins viewing someone else's request, show it differently
+      if (isAdmin && !isMyRequest) {
+        const doctorName = d.title ? d.title.split(' — ')[0] : 'Staff member';
+        notifications.push({
+          id: evt.id,
+          category: 'System',
+          title: `${doctorName} — ${typeLabel} ${decision.toLowerCase()}`,
+          description: `${doctorName}'s ${typeLabel.toLowerCase()} has been ${decision.toLowerCase()}. ${d.detail || ''}`,
+          time: formatRelativeTime(evt.timestamp),
+          timeISO: evt.timestamp,
+          read: false,
+          actionLabel: 'View My Portal',
+          actionPath: isAdmin ? '/admin/my-portal' : '/my-portal',
+          urgent: d.decision === 'declined',
+        });
+      } else {
+        notifications.push({
+          id: evt.id,
+          category: 'System',
+          title: `${typeLabel} ${decision.toLowerCase()}`,
+          description: `Your ${typeLabel.toLowerCase()} has been ${decision.toLowerCase()} by management. ${d.detail || ''}`,
+          time: formatRelativeTime(evt.timestamp),
+          timeISO: evt.timestamp,
+          read: false,
+          actionLabel: 'View My Portal',
+          actionPath: isAdmin ? '/admin/my-portal' : '/my-portal',
+          urgent: d.decision === 'declined',
+        });
+      }
+    } else if (evt.type === 'pto_coverage_needed') {
+      // Only show to admins — this notification is about reassigning appointments
+      if (isAdmin) {
+        const appts = (d.appointments || []) as { petName: string; ownerName: string; date: string; time: string; reason: string }[];
+        const hasAppts = appts.length > 0;
+        const apptLines = appts.map((a: any) => `${a.petName} (${a.ownerName}) — ${a.date} at ${a.time}${a.reason ? `, ${a.reason}` : ''}`).join('; ');
+        notifications.push({
+          id: evt.id,
+          category: 'System',
+          title: hasAppts
+            ? `${d.doctorName} on ${d.blockType || 'PTO'} — ${d.appointmentCount} appointment${d.appointmentCount > 1 ? 's' : ''} need reassignment`
+            : `${d.doctorName} — ${d.blockType || 'PTO'} approved`,
+          description: hasAppts
+            ? `${d.doctorName} is on ${(d.blockType || 'PTO').toLowerCase()} ${d.dateRange}. Appointments that need reassignment: ${apptLines}`
+            : `${d.doctorName} is on approved ${(d.blockType || 'PTO').toLowerCase()} ${d.dateRange}. No appointments need reassignment.`,
+          time: formatRelativeTime(evt.timestamp),
+          timeISO: evt.timestamp,
+          read: false,
+          actionLabel: hasAppts ? 'View Appointments' : 'View Schedule',
+          actionPath: hasAppts ? (isAdmin ? '/admin/bookings' : '/appointments') : (isAdmin ? '/admin/shifts' : '/shifts'),
+          urgent: hasAppts,
+        });
+      }
     } else if (evt.type === 'appt_assign') {
       const dateLabel = d.date ? ` on ${d.date}` : '';
       const timeLabel = d.time ? ` at ${d.time}` : '';
@@ -436,6 +490,25 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean, userId?: string)
         actionPath: '/lab',
         urgent: false,
       });
+    } else if (evt.type === 'task_reminder') {
+      // Only show reminder if the snooze time has arrived
+      const reminderTime = new Date(evt.timestamp);
+      if (reminderTime <= now) {
+        notifications.push({
+          id: evt.id,
+          category: 'System',
+          title: `Task reminder — ${d.taskType}`,
+          description: `Reminder: "${d.taskType}" for ${d.petName}${d.ownerName ? ` (${d.ownerName})` : ''}${d.notes ? `. Notes: ${d.notes}` : ''}.${d.snoozedBy ? ` Snoozed by ${d.snoozedBy}.` : ''}`,
+          time: formatRelativeTime(evt.timestamp),
+          timeISO: evt.timestamp,
+          read: false,
+          petName: d.petName,
+          ownerName: d.ownerName,
+          actionLabel: 'View Tasks',
+          actionPath: isAdmin ? '/admin/tasks' : '/tasks',
+          urgent: false,
+        });
+      }
     }
   }
   }
@@ -452,6 +525,7 @@ async function fetchNotificationsFromSupabase(isAdmin: boolean, userId?: string)
 // ─── Component ───────────────────────────────────────────────
 
 export default function NotificationsPage() {
+  const db = useTenantDb();
   const { pathname } = useLocation();
   const { user } = useAuth();
   const isAdmin = pathname.startsWith('/admin');
@@ -464,12 +538,12 @@ export default function NotificationsPage() {
     setLoading(true);
     (async () => {
       try {
-        const data = await fetchNotificationsFromSupabase(isAdmin, user?.id);
+        const data = await fetchNotificationsFromSupabase(db, isAdmin, user?.id);
         if (cancelled) return;
 
         // Apply persisted read/dismissed state (do NOT auto-mark as read)
         const { organizationId } = await getOrgContext();
-        const { data: stateRows } = await supabase.from('notification_state').select('notification_id, status').eq('organization_id', organizationId);
+        const { data: stateRows } = await db.from('notification_state').select('notification_id, status').eq('organization_id', organizationId);
         const readSet = new Set<string>();
         const dismissedSet = new Set<string>();
         for (const row of (stateRows || [])) {
@@ -482,6 +556,46 @@ export default function NotificationsPage() {
 
         if (!cancelled) {
           setNotifications(afterPersist);
+
+          // Auto-mark all unread as read when the user visits the page (clears sidebar badge)
+          const unreadIds = afterPersist.filter(n => !n.read).map(n => n.id);
+          if (unreadIds.length > 0) {
+            const readRows = unreadIds.map(id => ({ notification_id: id, status: 'read' as const, updated_at: new Date().toISOString(), organization_id: organizationId }));
+            db.from('notification_state').upsert(readRows).then(() => {
+              // Also mark sidebar-generated IDs (completed appts, vax, etc.)
+              const todayStr = `${new Date().getFullYear()}-${(new Date().getMonth() + 1).toString().padStart(2, '0')}-${new Date().getDate().toString().padStart(2, '0')}`;
+              const weekAgoDate = new Date(Date.now() - 7 * 86400000);
+              const weekAgoStr = `${weekAgoDate.getFullYear()}-${(weekAgoDate.getMonth() + 1).toString().padStart(2, '0')}-${weekAgoDate.getDate().toString().padStart(2, '0')}`;
+              Promise.all([
+                db.from('appointments').select('id').eq('organization_id', organizationId)
+                  .gte('scheduled_at', `${todayStr}T00:00:00`).lte('scheduled_at', `${todayStr}T23:59:59`)
+                  .in('status', ['Scheduled', 'Confirmed']),
+                db.from('appointments').select('id').eq('organization_id', organizationId)
+                  .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Completed'),
+                db.from('appointments').select('id').eq('organization_id', organizationId)
+                  .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Cancelled'),
+                db.from('vaccinations').select('id, pets!inner(organization_id)')
+                  .eq('pets.organization_id', organizationId).lte('next_due_date', todayStr),
+                db.from('clients').select('id').eq('organization_id', organizationId)
+                  .gte('created_at', `${weekAgoStr}T00:00:00`),
+                db.from('notification_events').select('id').eq('organization_id', organizationId)
+                  .gte('timestamp', weekAgoDate.toISOString()),
+              ]).then(([apptToday, completed, cancelled, vacs, clients, notifEvts]) => {
+                const extraIds: string[] = [];
+                (apptToday.data || []).forEach(a => extraIds.push(`appt-today-${a.id}`));
+                (completed.data || []).forEach(a => extraIds.push(`appt-done-${a.id}`));
+                (cancelled.data || []).forEach(a => extraIds.push(`appt-cancel-${a.id}`));
+                (vacs.data || []).forEach(v => extraIds.push(`vax-${v.id}`));
+                (clients.data || []).forEach(c => extraIds.push(`client-${c.id}`));
+                (notifEvts.data || []).forEach(e => extraIds.push(e.id));
+                const allToMark = [...new Set([...unreadIds, ...extraIds])];
+                const markRows = allToMark.map(id => ({ notification_id: id, status: 'read' as const, updated_at: new Date().toISOString(), organization_id: organizationId }));
+                if (markRows.length > 0) db.from('notification_state').upsert(markRows);
+              });
+            });
+            // Update local state to show as read
+            setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+          }
         }
       } catch {}
       if (!cancelled) setLoading(false);
@@ -490,8 +604,6 @@ export default function NotificationsPage() {
   }, []);
 
   const unreadCount = notifications.filter((n) => !n.read).length;
-
-  // Do NOT auto-mark as read — user must click "Mark all as read" or individual notifications
 
   // Broadcast unread count so sidebar can pick it up
   useEffect(() => {
@@ -508,14 +620,14 @@ export default function NotificationsPage() {
     try {
       const { organizationId } = await getOrgContext();
       const rows = ids.map(id => ({ notification_id: id, status: 'read', updated_at: new Date().toISOString(), organization_id: organizationId }));
-      if (rows.length > 0) await supabase.from('notification_state').upsert(rows);
+      if (rows.length > 0) await db.from('notification_state').upsert(rows);
     } catch {}
   };
   const saveDismissedState = async (ids: string[]) => {
     try {
       const { organizationId } = await getOrgContext();
       const rows = ids.map(id => ({ notification_id: id, status: 'dismissed', updated_at: new Date().toISOString(), organization_id: organizationId }));
-      if (rows.length > 0) await supabase.from('notification_state').upsert(rows);
+      if (rows.length > 0) await db.from('notification_state').upsert(rows);
     } catch {}
   };
 
@@ -542,18 +654,19 @@ export default function NotificationsPage() {
       const weekAgo = new Date(Date.now() - 7 * 86400000);
       const weekAgoStr = `${weekAgo.getFullYear()}-${(weekAgo.getMonth() + 1).toString().padStart(2, '0')}-${weekAgo.getDate().toString().padStart(2, '0')}`;
       const [apptToday, completed, cancelled, vacs, clients, notifEvts] = await Promise.all([
-        supabase.from('appointments').select('id').eq('organization_id', organizationId)
+        db.from('appointments').select('id').eq('organization_id', organizationId)
           .gte('scheduled_at', `${todayStr}T00:00:00`).lte('scheduled_at', `${todayStr}T23:59:59`)
           .in('status', ['Scheduled', 'Confirmed']),
-        supabase.from('appointments').select('id').eq('organization_id', organizationId)
+        db.from('appointments').select('id').eq('organization_id', organizationId)
           .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Completed'),
-        supabase.from('appointments').select('id').eq('organization_id', organizationId)
+        db.from('appointments').select('id').eq('organization_id', organizationId)
           .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Cancelled'),
-        supabase.from('vaccinations').select('id').eq('organization_id', organizationId)
+        db.from('vaccinations').select('id, pets!inner(organization_id)')
+          .eq('pets.organization_id', organizationId)
           .lte('next_due_date', todayStr),
-        supabase.from('clients').select('id').eq('organization_id', organizationId)
+        db.from('clients').select('id').eq('organization_id', organizationId)
           .gte('created_at', `${weekAgoStr}T00:00:00`),
-        supabase.from('notification_events').select('id').eq('organization_id', organizationId)
+        db.from('notification_events').select('id').eq('organization_id', organizationId)
           .gte('timestamp', weekAgo.toISOString()),
       ]);
       const sidebarIds: string[] = [];
@@ -564,7 +677,7 @@ export default function NotificationsPage() {
       (clients.data || []).forEach(c => sidebarIds.push(`client-${c.id}`));
       (notifEvts.data || []).forEach(e => sidebarIds.push(e.id));
       if (sidebarIds.length > 0) {
-        const { data: existing } = await supabase.from('notification_state')
+        const { data: existing } = await db.from('notification_state')
           .select('notification_id').eq('organization_id', organizationId)
           .in('notification_id', sidebarIds);
         const existingSet = new Set((existing || []).map(r => r.notification_id));
@@ -588,8 +701,77 @@ export default function NotificationsPage() {
     setNotifications([]);
   };
 
+  // ── Create Follow-up Task for front desk ──────────────────
+  const [creatingTaskIds, setCreatingTaskIds] = useState<Set<string>>(new Set());
+  const [createdTaskIds, setCreatedTaskIds] = useState<Set<string>>(new Set());
+  const [taskToast, setTaskToast] = useState<string | null>(null);
+
+  const handleCreateTask = async (notif: Notification) => {
+    if (creatingTaskIds.has(notif.id) || createdTaskIds.has(notif.id)) return;
+    setCreatingTaskIds((prev) => new Set(prev).add(notif.id));
+    try {
+      const { organizationId } = await getOrgContext();
+      const todayStr = localDateString();
+      const { error } = await db.from('tasks').insert({
+        organization_id: organizationId,
+        type: 'Follow-up Call',
+        priority: 'High',
+        status: 'Pending',
+        due_date: todayStr,
+        due_time: null,
+        pet_id: notif.petId || null,
+        client_id: notif.clientId || null,
+        assigned_by_id: user?.id || null,
+        visit_date: todayStr,
+        doctor_notes: `Vaccine overdue for ${notif.petName || 'patient'}${notif.ownerName ? ` (owner: ${notif.ownerName})` : ''}. Contact owner to schedule vaccination appointment.`,
+        tags: ['vaccine', 'overdue', 'auto-created'],
+      });
+      if (error) throw error;
+      setCreatedTaskIds((prev) => new Set(prev).add(notif.id));
+      setTaskToast(`Follow-up task created for ${notif.petName || 'patient'} — assigned to front desk.`);
+      setTimeout(() => setTaskToast(null), 4000);
+      // Mark the notification as read since action was taken
+      markAsRead(notif.id);
+    } catch (err) {
+      console.error('Failed to create task:', err);
+      setTaskToast('Failed to create task. Please try again.');
+      setTimeout(() => setTaskToast(null), 4000);
+    } finally {
+      setCreatingTaskIds((prev) => {
+        const next = new Set(prev);
+        next.delete(notif.id);
+        return next;
+      });
+    }
+  };
+
   return (
     <div className="max-w-[1000px] mx-auto p-8">
+      {/* Task creation toast */}
+      {taskToast && (
+        <div
+          className="fixed top-6 right-6 z-50 flex items-center gap-3 px-5 py-3 shadow-lg animate-in slide-in-from-top-2 fade-in"
+          style={{
+            backgroundColor: taskToast.startsWith('Failed') ? '#d4183d' : 'var(--brand-green-text)',
+            color: taskToast.startsWith('Failed') ? '#fff' : '#000',
+            borderRadius: '12px',
+            fontSize: '14px',
+            fontWeight: 600,
+            maxWidth: '440px',
+            boxShadow: taskToast.startsWith('Failed')
+              ? '0 4px 24px rgba(212,24,61,0.3)'
+              : '0 4px 24px color-mix(in srgb, var(--brand-green-text) 40%, transparent)',
+          }}
+        >
+          {taskToast.startsWith('Failed') ? (
+            <AlertTriangle className="w-5 h-5 flex-shrink-0" />
+          ) : (
+            <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
+          )}
+          {taskToast}
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-start justify-between mb-8">
         <div>
@@ -804,12 +986,52 @@ export default function NotificationsPage() {
 
                         {/* Actions */}
                         <div className="flex items-center gap-2 flex-shrink-0">
-                          {notif.actionLabel && notif.actionPath && (
+                          {notif.actionType === 'create-task' && notif.actionLabel && (
+                            createdTaskIds.has(notif.id) ? (
+                              <span
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5"
+                                style={{
+                                  backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)',
+                                  color: 'var(--brand-green-text)',
+                                  borderRadius: '8px',
+                                  fontSize: '13px',
+                                  fontWeight: 600,
+                                }}
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                Task Created
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => handleCreateTask(notif)}
+                                disabled={creatingTaskIds.has(notif.id)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 transition-colors"
+                                style={{
+                                  backgroundColor: '#F4A26118',
+                                  color: '#F4A261',
+                                  borderRadius: '8px',
+                                  fontSize: '13px',
+                                  fontWeight: 600,
+                                  border: 'none',
+                                  cursor: creatingTaskIds.has(notif.id) ? 'wait' : 'pointer',
+                                  opacity: creatingTaskIds.has(notif.id) ? 0.6 : 1,
+                                }}
+                              >
+                                {creatingTaskIds.has(notif.id) ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <ListTodo className="w-3.5 h-3.5" />
+                                )}
+                                {creatingTaskIds.has(notif.id) ? 'Creating...' : notif.actionLabel}
+                              </button>
+                            )
+                          )}
+                          {notif.actionType !== 'create-task' && notif.actionLabel && notif.actionPath && (
                             <a
                               href={notif.actionPath}
                               className="inline-flex items-center gap-1 px-3 py-1.5 transition-colors"
                               style={{
-                                backgroundColor: '#2D6A4F10',
+                                backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 6%, transparent)',
                                 color: 'var(--brand-green-text)',
                                 borderRadius: '8px',
                                 fontSize: '13px',

@@ -56,7 +56,7 @@ const STATUS_CONFIG: Record<PetStatus, { bg: string; text: string; icon: React.E
 // ─── Vet Initials Helper ─────────────────────────────────────
 
 const VET_COLORS: Record<string, string> = {
-  'Dr. Chen':     '#2D6A4F',
+  'Dr. Chen':     'var(--brand-green-text)',
   'Dr. Patel':    '#3B82F6',
   'Dr. Williams': '#8B5CF6',
 };

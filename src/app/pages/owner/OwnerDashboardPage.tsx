@@ -12,7 +12,7 @@ import { useOwnerClient } from '../../hooks/useOwnerClient';
 
 // ─── Brand ────────────────────────────────────────────────────
 
-const BRAND = '#2D6A4F';
+const BRAND = 'var(--brand-green-text)';
 // For text/icon use — adapts to bright green in dark mode
 const BRAND_TEXT = 'var(--brand-green-text)';
 
@@ -308,7 +308,7 @@ export default function OwnerDashboardPage() {
                   cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px',
                   transition: 'background-color 0.15s',
                 }}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.backgroundColor = `${BRAND}10`; }}
+                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.backgroundColor = 'color-mix(in srgb, var(--brand-green-text) 6%, transparent)'; }}
                 onMouseLeave={e => { (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'; }}
               >
                 <MessageCircle style={{ width: '16px', height: '16px' }} />
@@ -531,13 +531,13 @@ export default function OwnerDashboardPage() {
                 <div style={{ padding: '0 20px 20px' }}>
                   <div style={{
                     padding: '16px', borderRadius: '10px',
-                    backgroundColor: `${BRAND}08`,
-                    border: `1px solid ${BRAND}30`,
+                    backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 3%, transparent)',
+                    border: '1px solid color-mix(in srgb, var(--brand-green-text) 19%, transparent)',
                   }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
                       <div style={{
                         width: '32px', height: '32px', borderRadius: '50%',
-                        background: 'linear-gradient(135deg, #2D6A4F, #52B788)',
+                        background: 'linear-gradient(135deg, var(--brand-green-text), #52B788)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         flexShrink: 0,
                       }}>
@@ -617,13 +617,13 @@ export default function OwnerDashboardPage() {
                       <button
                         style={{
                           width: '100%', padding: '7px', borderRadius: '7px',
-                          backgroundColor: `${BRAND}15`,
-                          border: `1px solid ${BRAND}30`,
+                          backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)',
+                          border: '1px solid color-mix(in srgb, var(--brand-green-text) 19%, transparent)',
                           color: BRAND_TEXT, fontSize: '12px', fontWeight: 700,
                           cursor: 'pointer', transition: 'background-color 0.15s',
                         }}
-                        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.backgroundColor = `${BRAND}25`; }}
-                        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.backgroundColor = `${BRAND}15`; }}
+                        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.backgroundColor = 'color-mix(in srgb, var(--brand-green-text) 14%, transparent)'; }}
+                        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.backgroundColor = 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)'; }}
                       >
                         Reschedule
                       </button>
@@ -675,7 +675,7 @@ export default function OwnerDashboardPage() {
               <div style={{ padding: '0 16px 16px' }}>
                 <div style={{
                   padding: '14px', borderRadius: '10px',
-                  background: 'linear-gradient(135deg, #2D6A4F12, #52B78812)',
+                  background: 'linear-gradient(135deg, color-mix(in srgb, var(--brand-green-text) 7%, transparent), #52B78812)',
                   border: '1px solid var(--border-color)',
                   marginBottom: '12px',
                 }}>
@@ -683,7 +683,7 @@ export default function OwnerDashboardPage() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <div style={{
                         width: '34px', height: '34px', borderRadius: '8px',
-                        backgroundColor: `${BRAND}20`,
+                        backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                       }}>
                         <Shield style={{ width: '18px', height: '18px', color: BRAND_TEXT }} />
@@ -727,7 +727,7 @@ export default function OwnerDashboardPage() {
           <Card>
             <div className="p-5 md:px-6" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', borderBottom: '1px solid var(--border-color)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div style={{ width: '34px', height: '34px', borderRadius: '8px', backgroundColor: `${BRAND}15`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ width: '34px', height: '34px', borderRadius: '8px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <Sparkles style={{ width: '18px', height: '18px', color: BRAND_TEXT }} />
                 </div>
                 <div>
@@ -742,7 +742,7 @@ export default function OwnerDashboardPage() {
                   ? { bg: '#d4183d12', text: '#d4183d', border: '#d4183d30' }
                   : svc.priority === 'Recommended'
                   ? { bg: '#F59E0B12', text: '#D97706', border: '#F59E0B30' }
-                  : { bg: '#2D6A4F12', text: BRAND_TEXT, border: '#2D6A4F30' };
+                  : { bg: 'color-mix(in srgb, var(--brand-green-text) 7%, transparent)', text: BRAND_TEXT, border: 'color-mix(in srgb, var(--brand-green-text) 19%, transparent)' };
 
                 return (
                   <div

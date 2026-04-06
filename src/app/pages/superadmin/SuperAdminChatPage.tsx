@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { Input } from '../../components/ui/input';
 import { supabase } from '../../../lib/supabase';
-
+import { useTenantDb } from '../../context/TenantContext';
 // ─── Emoji picker data ────────────────────────────────────────────────────────
 
 const EMOJI_GROUPS = [
@@ -86,7 +86,7 @@ const ROLE_LABELS: Record<string, string> = {
   superadmin: 'Super Administrator',
 };
 
-const AVATAR_COLORS: string[] = ['#2D6A4F', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261', '#06B6D4', '#DC2626', '#0891B2', '#7C3AED', '#059669'];
+const AVATAR_COLORS: string[] = ['var(--brand-green-text)', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261', '#06B6D4', '#DC2626', '#0891B2', '#7C3AED', '#059669'];
 
 function getAvatarColor(id: string): string {
   let hash = 0;
@@ -160,6 +160,7 @@ function DateSeparator({ label }: { label: string }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function SuperAdminChatPage() {
+  const db = useTenantDb();
   const [saProfileId, setSaProfileId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -170,7 +171,7 @@ export default function SuperAdminChatPage() {
   // Resolve the superadmin profile ID (not the auth user)
   useEffect(() => {
     (async () => {
-      const { data } = await supabase
+      const { data } = await db
         .from('profiles')
         .select('id')
         .eq('role', 'superadmin')
@@ -236,7 +237,7 @@ export default function SuperAdminChatPage() {
     const timer = setTimeout(async () => {
       const { organizationId } = await getOrgContext();
       const q = searchQuery.trim().toLowerCase();
-      const { data } = await supabase
+      const { data } = await db
         .from('profiles')
         .select('id, first_name, last_name, role, avatar_url')
         .eq('organization_id', organizationId)
@@ -254,13 +255,13 @@ export default function SuperAdminChatPage() {
   async function handleStartConversation(staff: StaffResult) {
     if (!saProfileId) return;
     const { organizationId } = await getOrgContext();
-    const { data: conv } = await supabase
+    const { data: conv } = await db
       .from('conversations')
       .insert({ organization_id: organizationId, type: 'direct', created_by: saProfileId })
       .select('id')
       .single();
     if (!conv) return;
-    await supabase.from('conversation_participants').insert([
+    await db.from('conversation_participants').insert([
       { organization_id: organizationId, conversation_id: conv.id, profile_id: saProfileId },
       { organization_id: organizationId, conversation_id: conv.id, profile_id: staff.id },
     ]);
@@ -276,7 +277,7 @@ export default function SuperAdminChatPage() {
   async function handleCreateGroup() {
     if (!saProfileId || groupSelectedIds.length < 2) return;
     const { organizationId } = await getOrgContext();
-    const { data: conv } = await supabase
+    const { data: conv } = await db
       .from('conversations')
       .insert({
         organization_id: organizationId,
@@ -292,7 +293,7 @@ export default function SuperAdminChatPage() {
       conversation_id: conv.id,
       profile_id: pid,
     }));
-    await supabase.from('conversation_participants').insert(participants);
+    await db.from('conversation_participants').insert(participants);
     setNewGroupOpen(false);
     setGroupName('');
     setGroupSelectedIds([]);
@@ -305,7 +306,7 @@ export default function SuperAdminChatPage() {
   async function openNewGroupDialog() {
     if (!saProfileId) return;
     const { organizationId } = await getOrgContext();
-    const { data } = await supabase
+    const { data } = await db
       .from('profiles')
       .select('id, first_name, last_name, role, avatar_url')
       .eq('organization_id', organizationId)
@@ -323,7 +324,7 @@ export default function SuperAdminChatPage() {
     if (!saProfileId) return;
     try {
     const { organizationId } = await getOrgContext();
-    const { data: parts } = await supabase
+    const { data: parts } = await db
       .from('conversation_participants')
       .select('conversation_id')
       .eq('organization_id', organizationId)
@@ -334,18 +335,18 @@ export default function SuperAdminChatPage() {
 
     // Batch all queries in parallel instead of sequential per-conversation loop
     const [convMetaRes, allPartsRes, myPartsRes, lastMsgsRes, unreadRes] = await Promise.all([
-      supabase.from('conversations').select('id, type, title').eq('organization_id', organizationId).in('id', convIds),
-      supabase.from('conversation_participants')
-        .select('conversation_id, profile_id, last_read_at, profiles:profiles!conversation_participants_profile_id_fkey(id, first_name, last_name, role, avatar_url)')
+      db.from('conversations').select('id, type, title').eq('organization_id', organizationId).in('id', convIds),
+      db.from('conversation_participants')
+        .select('conversation_id, profile_id, last_read_at, profiles:profiles!conv_participants_profile_org_fkey(id, first_name, last_name, role, avatar_url)')
         .eq('organization_id', organizationId).in('conversation_id', convIds).neq('profile_id', saProfileId),
-      supabase.from('conversation_participants')
+      db.from('conversation_participants')
         .select('conversation_id, last_read_at')
         .eq('organization_id', organizationId).in('conversation_id', convIds).eq('profile_id', saProfileId),
-      supabase.from('messages')
+      db.from('messages')
         .select('conversation_id, content, sender_id, created_at')
         .eq('organization_id', organizationId).in('conversation_id', convIds)
         .order('created_at', { ascending: false }).limit(convIds.length * 2),
-      supabase.from('messages')
+      db.from('messages')
         .select('conversation_id, created_at')
         .eq('organization_id', organizationId).in('conversation_id', convIds).neq('sender_id', saProfileId),
     ]);
@@ -442,7 +443,7 @@ export default function SuperAdminChatPage() {
     if (!saProfileId) return;
     const { organizationId } = await getOrgContext();
     setLoadingMsgs(true);
-    const { data } = await supabase
+    const { data } = await db
       .from('messages')
       .select('id, content, sender_id, image_url, file_url, file_name, file_size, created_at')
       .eq('organization_id', organizationId)
@@ -463,7 +464,7 @@ export default function SuperAdminChatPage() {
     }
     if (data && data.length > 0) {
       const msgIds = data.map((m: { id: string }) => m.id);
-      const { data: rxns } = await supabase
+      const { data: rxns } = await db
         .from('message_reactions')
         .select('message_id, emoji, user_id')
         .in('message_id', msgIds);
@@ -502,9 +503,9 @@ export default function SuperAdminChatPage() {
       return { ...prev, [messageId]: current };
     });
     if (alreadyReacted) {
-      await supabase.from('message_reactions').delete().eq('message_id', messageId).eq('user_id', saProfileId).eq('emoji', emoji);
+      await db.from('message_reactions').delete().eq('message_id', messageId).eq('user_id', saProfileId).eq('emoji', emoji);
     } else {
-      await supabase.from('message_reactions').insert({ message_id: messageId, user_id: saProfileId, emoji });
+      await db.from('message_reactions').insert({ message_id: messageId, user_id: saProfileId, emoji });
     }
   }
 
@@ -530,7 +531,7 @@ export default function SuperAdminChatPage() {
       const { organizationId } = await getOrgContext();
       const now = new Date().toISOString();
       lastReadAtRef.current = now;
-      await supabase
+      await db
         .from('conversation_participants')
         .update({ last_read_at: now })
         .eq('organization_id', organizationId)
@@ -538,7 +539,7 @@ export default function SuperAdminChatPage() {
         .eq('profile_id', saProfileId);
 
       // Fetch the other participant's last_read_at
-      const { data: otherParts } = await supabase
+      const { data: otherParts } = await db
         .from('conversation_participants')
         .select('last_read_at')
         .eq('organization_id', organizationId)
@@ -562,9 +563,9 @@ export default function SuperAdminChatPage() {
   async function handleDeleteConversation(convId: string) {
     if (!saProfileId) return;
     const { organizationId } = await getOrgContext();
-    await supabase.from('messages').delete().eq('organization_id', organizationId).eq('conversation_id', convId);
-    await supabase.from('conversation_participants').delete().eq('organization_id', organizationId).eq('conversation_id', convId);
-    await supabase.from('conversations').delete().eq('organization_id', organizationId).eq('id', convId);
+    await db.from('messages').delete().eq('organization_id', organizationId).eq('conversation_id', convId);
+    await db.from('conversation_participants').delete().eq('organization_id', organizationId).eq('conversation_id', convId);
+    await db.from('conversations').delete().eq('organization_id', organizationId).eq('id', convId);
     setConversations(prev => prev.filter(c => c.id !== convId));
     if (selectedId === convId) {
       setSelectedId(null);
@@ -709,7 +710,7 @@ export default function SuperAdminChatPage() {
     // Insert into Supabase
     const { organizationId } = await getOrgContext();
     const msgContent = content || (imageUrl ? '📷 Image' : fileName ? `📎 ${fileName}` : '');
-    const { data } = await supabase
+    const { data } = await db
       .from('messages')
       .insert({
         organization_id: organizationId,
@@ -738,7 +739,7 @@ export default function SuperAdminChatPage() {
     // Update my last_read_at
     const nowStr = now.toISOString();
     lastReadAtRef.current = nowStr;
-    await supabase
+    await db
       .from('conversation_participants')
       .update({ last_read_at: nowStr })
       .eq('organization_id', organizationId)
@@ -777,7 +778,7 @@ export default function SuperAdminChatPage() {
           const now = new Date().toISOString();
           lastReadAtRef.current = now;
           getOrgContext().then(({ organizationId: oid }) =>
-            supabase
+            db
               .from('conversation_participants')
               .update({ last_read_at: now })
               .eq('organization_id', oid)
@@ -945,7 +946,7 @@ export default function SuperAdminChatPage() {
                   onMouseLeave={(e) => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}
                 >
                   {conv.isGroup ? (
-                    <div style={{ width: 40, height: 40, borderRadius: '50%', backgroundColor: '#2D6A4F', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: '50%', backgroundColor: 'var(--brand-green-text)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                       <Users style={{ width: 20, height: 20, color: '#fff' }} />
                     </div>
                   ) : (
@@ -1006,7 +1007,7 @@ export default function SuperAdminChatPage() {
             <div style={{ height: '64px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--surface-white)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                 {selectedConv.isGroup ? (
-                  <div style={{ width: 40, height: 40, borderRadius: '50%', backgroundColor: '#2D6A4F', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <div style={{ width: 40, height: 40, borderRadius: '50%', backgroundColor: 'var(--brand-green-text)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     <Users style={{ width: 20, height: 20, color: '#fff' }} />
                   </div>
                 ) : (
@@ -1190,7 +1191,7 @@ export default function SuperAdminChatPage() {
                             <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '3px' }}>
                               <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{formatTime(msg.timestamp)}</span>
                               {isMe && isLastMine && (
-                                <span style={{ display: 'flex', alignItems: 'center', gap: '2px', fontSize: '11px', color: otherLastReadAt && msg.timestamp.toISOString() <= otherLastReadAt ? '#2D6A4F' : 'var(--text-secondary)' }}>
+                                <span style={{ display: 'flex', alignItems: 'center', gap: '2px', fontSize: '11px', color: otherLastReadAt && msg.timestamp.toISOString() <= otherLastReadAt ? 'var(--brand-green-text)' : 'var(--text-secondary)' }}>
                                   <CheckCheck style={{ width: '12px', height: '12px' }} />
                                   {otherLastReadAt && msg.timestamp.toISOString() <= otherLastReadAt ? ' Read' : ' Delivered'}
                                 </span>
@@ -1391,7 +1392,7 @@ export default function SuperAdminChatPage() {
                     onMouseEnter={(e) => { if (!selected) e.currentTarget.style.backgroundColor = 'var(--surface-elevated)'; }}
                     onMouseLeave={(e) => { if (!selected) e.currentTarget.style.backgroundColor = 'transparent'; }}
                   >
-                    <div style={{ width: '20px', height: '20px', borderRadius: '4px', border: selected ? 'none' : '2px solid var(--border-color)', backgroundColor: selected ? '#2D6A4F' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <div style={{ width: '20px', height: '20px', borderRadius: '4px', border: selected ? 'none' : '2px solid var(--border-color)', backgroundColor: selected ? 'var(--brand-green-text)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                       {selected && <CheckCheck style={{ width: '12px', height: '12px', color: '#fff' }} />}
                     </div>
                     <ChatAvatar name={`${s.first_name} ${s.last_name}`} color={getAvatarColor(s.id)} size={32} photoUrl={s.avatar_url || undefined} />
@@ -1408,7 +1409,7 @@ export default function SuperAdminChatPage() {
               <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{groupSelectedIds.length} selected</span>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button onClick={() => setNewGroupOpen(false)} style={{ padding: '8px 16px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-white)', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: 'var(--text-primary)' }}>Cancel</button>
-                <button onClick={handleCreateGroup} disabled={groupSelectedIds.length < 2} style={{ padding: '8px 16px', borderRadius: '8px', border: 'none', backgroundColor: groupSelectedIds.length < 2 ? 'var(--border-color)' : '#2D6A4F', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: groupSelectedIds.length < 2 ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <button onClick={handleCreateGroup} disabled={groupSelectedIds.length < 2} style={{ padding: '8px 16px', borderRadius: '8px', border: 'none', backgroundColor: groupSelectedIds.length < 2 ? 'var(--border-color)' : 'var(--brand-green-text)', color: 'var(--on-brand-green)', fontSize: '13px', fontWeight: 600, cursor: groupSelectedIds.length < 2 ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <Users style={{ width: '14px', height: '14px' }} /> Create Group
                 </button>
               </div>

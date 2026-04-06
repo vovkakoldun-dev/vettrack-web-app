@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
-import { supabase } from '../../lib/supabase'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { useTenantDb } from '../context/TenantContext';
 import { getOrgContext } from './useOrgContext'
 
 export interface AppointmentRow {
@@ -9,6 +9,7 @@ export interface AppointmentRow {
   status: string
   reason: string | null
   notes: string | null
+  room: string | null
   created_at: string
   pets: { id: string; name: string; species: string; breed: string | null; photo_url: string | null } | null
   clients: { id: string; first_name: string; last_name: string; phone: string | null } | null
@@ -29,6 +30,7 @@ export interface AddAppointmentValues {
 }
 
 export function useAppointments(dateFilter?: string) {
+  const db = useTenantDb();
   const [appointments, setAppointments] = useState<AppointmentRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -38,9 +40,9 @@ export function useAppointments(dateFilter?: string) {
     setError(null)
     try {
       const { organizationId } = await getOrgContext()
-      let query = supabase
+      let query = db
         .from('appointments')
-        .select('id, scheduled_at, duration_minutes, status, reason, notes, created_at, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name, phone), staff!appointments_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name)), services(id, name, price)')
+        .select('id, scheduled_at, duration_minutes, status, reason, notes, room, created_at, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name, phone), staff!appointments_vet_org_fkey(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name)), services(id, name, price)')
         .eq('organization_id', organizationId)
         .order('scheduled_at', { ascending: true })
 
@@ -66,20 +68,25 @@ export function useAppointments(dateFilter?: string) {
     fetchAppointments()
   }, [fetchAppointments])
 
-  // Listen for cross-page data changes (client/pet edits may affect joined data)
+  // Listen for cross-page data changes — debounced to prevent cascade refetch storms
+  const refetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    const handler = () => { fetchAppointments() }
+    const handler = () => {
+      if (refetchTimerRef.current) clearTimeout(refetchTimerRef.current);
+      refetchTimerRef.current = setTimeout(() => fetchAppointments(), 300);
+    }
     window.addEventListener('clientDataChanged', handler)
     window.addEventListener('petDataChanged', handler)
     return () => {
       window.removeEventListener('clientDataChanged', handler)
       window.removeEventListener('petDataChanged', handler)
+      if (refetchTimerRef.current) clearTimeout(refetchTimerRef.current);
     }
   }, [fetchAppointments])
 
   const addAppointment = useCallback(async (values: AddAppointmentValues) => {
     const { organizationId, clinicId } = await getOrgContext();
-    const { data, error: err } = await supabase
+    const { data, error: err } = await db
       .from('appointments')
       .insert([{
         organization_id: organizationId,
@@ -87,7 +94,7 @@ export function useAppointments(dateFilter?: string) {
         status: 'Scheduled',
         ...values,
       }])
-      .select('id, scheduled_at, duration_minutes, status, reason, notes, created_at, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name, phone), staff!appointments_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name)), services(id, name, price)')
+      .select('id, scheduled_at, duration_minutes, status, reason, notes, room, created_at, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name, phone), staff!appointments_vet_org_fkey(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name)), services(id, name, price)')
       .single()
     if (!err) {
       await fetchAppointments()
@@ -97,10 +104,29 @@ export function useAppointments(dateFilter?: string) {
   }, [fetchAppointments])
 
   const updateStatus = useCallback(async (id: string, status: string) => {
+    // Optimistic update — instant UI feedback
+    setAppointments(prev => prev.map(a => a.id === id ? { ...a, status } : a));
     const { organizationId } = await getOrgContext()
-    const { error: err } = await supabase
+    const { error: err } = await db
       .from('appointments')
       .update({ status })
+      .eq('id', id)
+      .eq('organization_id', organizationId)
+    if (err) {
+      await fetchAppointments() // Revert on error
+    } else {
+      window.dispatchEvent(new CustomEvent('appointmentDataChanged'))
+    }
+    return { error: err }
+  }, [fetchAppointments])
+
+  const updateStatusWithRoom = useCallback(async (id: string, status: string, room: string, scheduledAt?: string) => {
+    const { organizationId } = await getOrgContext()
+    const updatePayload: Record<string, unknown> = { status, room }
+    if (scheduledAt) updatePayload.scheduled_at = scheduledAt
+    const { error: err } = await db
+      .from('appointments')
+      .update(updatePayload)
       .eq('id', id)
       .eq('organization_id', organizationId)
     if (!err) {
@@ -111,14 +137,18 @@ export function useAppointments(dateFilter?: string) {
   }, [fetchAppointments])
 
   const deleteAppointment = useCallback(async (id: string) => {
+    // Optimistic delete — remove from UI immediately
+    const prev = appointments;
+    setAppointments(p => p.filter(a => a.id !== id));
     const { organizationId } = await getOrgContext()
-    const { error: err } = await supabase.from('appointments').delete().eq('id', id).eq('organization_id', organizationId)
-    if (!err) {
-      await fetchAppointments()
+    const { error: err } = await db.from('appointments').delete().eq('id', id).eq('organization_id', organizationId)
+    if (err) {
+      setAppointments(prev); // Revert on error
+    } else {
       window.dispatchEvent(new CustomEvent('appointmentDataChanged'))
     }
     return { error: err }
-  }, [fetchAppointments])
+  }, [appointments])
 
-  return { appointments, loading, error, refetch: fetchAppointments, addAppointment, updateStatus, deleteAppointment }
+  return { appointments, loading, error, refetch: fetchAppointments, addAppointment, updateStatus, updateStatusWithRoom, deleteAppointment }
 }

@@ -11,6 +11,7 @@ import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '../components/ui/select';
 import { supabase } from '../../lib/supabase';
+import { useTenantDb } from '../context/TenantContext';
 import { useAuth } from '../context/AuthContext';
 import { getOrgContext } from '../hooks/useOrgContext';
 import { useProfile } from '../hooks/useProfile';
@@ -37,6 +38,7 @@ interface LabFile {
   reviewStatus: ReviewStatus;
   reviewedByName: string;
   reviewedAt: string;
+  doctorName: string;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────
@@ -98,6 +100,7 @@ function StatCard({ label, value, color, sub }: { label: string; value: number; 
 // ─── Component ────────────────────────────────────────────────
 
 export default function LabPage() {
+  const db = useTenantDb();
   const { user } = useAuth();
   const navigate = useNavigate();
   const { pathname } = useLocation();
@@ -105,7 +108,7 @@ export default function LabPage() {
   const { profile: currentProfile } = useProfile(isAdmin ? 'admin' : 'doctor');
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
-  const [filterPet, setFilterPet] = useState<string>('all');
+  const [filterDoctor, setFilterDoctor] = useState<string>('all');
   const [labFiles, setLabFiles] = useState<LabFile[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -132,15 +135,15 @@ export default function LabPage() {
   // ─── Fetch lab files ────────────────────────────────────────
   const fetchLabFiles = async () => {
     const { organizationId } = await getOrgContext();
-    const { data } = await supabase
+    const { data } = await db
       .from('lab_results')
       .select(`
         id, file_name, file_url, file_type, test_panel, notes,
         review_status, reviewed_at, tested_at, created_at,
         pet_id,
-        pets!left(id, name, photo_url, client_id, clients!left(id, first_name, last_name, email)),
-        uploader:profiles!lab_results_uploaded_by_fkey(first_name, last_name),
-        reviewer:profiles!lab_results_reviewed_by_fkey(first_name, last_name)
+        pets!left(id, name, photo_url, client_id, assigned_vet_id, clients!left(id, first_name, last_name, email), vet:staff!pets_assigned_vet_org_fkey(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name))),
+        uploader:profiles!lab_results_uploaded_by_org_fkey(first_name, last_name),
+        reviewer:profiles!lab_results_reviewed_by_org_fkey(first_name, last_name)
       `)
       .eq('organization_id', organizationId)
       .not('file_url', 'is', null)
@@ -165,6 +168,7 @@ export default function LabPage() {
         reviewStatus: r.review_status || 'awaiting_review',
         reviewedByName: r.reviewer ? `Dr. ${r.reviewer.first_name} ${r.reviewer.last_name}`.trim() : '',
         reviewedAt: r.reviewed_at || '',
+        doctorName: r.pets?.vet?.profiles ? `Dr. ${r.pets.vet.profiles.first_name} ${r.pets.vet.profiles.last_name}`.trim() : '',
       }));
       setLabFiles(mapped);
     }
@@ -177,7 +181,7 @@ export default function LabPage() {
   useEffect(() => {
     (async () => {
       const { organizationId } = await getOrgContext();
-      const { data } = await supabase
+      const { data } = await db
         .from('pets')
         .select('id, name, species, photo_url, clients!left(first_name, last_name)')
         .eq('organization_id', organizationId)
@@ -216,7 +220,7 @@ export default function LabPage() {
     const fileUrl = urlData.publicUrl;
 
     const { organizationId } = await getOrgContext();
-    const { error: insertErr } = await supabase.from('lab_results').insert({
+    const { error: insertErr } = await db.from('lab_results').insert({
       pet_id: uploadPetId,
       file_url: fileUrl,
       file_name: uploadFile.name,
@@ -239,16 +243,16 @@ export default function LabPage() {
     // ── Notify the pet's assigned vet that a lab result is ready ──
     try {
       const selectedPet = pets.find(p => p.id === uploadPetId);
-      const { data: petRow } = await supabase
+      const { data: petRow } = await db
         .from('pets')
-        .select('assigned_vet_id, staff!pets_assigned_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
+        .select('assigned_vet_id, staff!pets_assigned_vet_org_fkey(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name))')
         .eq('id', uploadPetId)
         .single();
 
       if (petRow?.assigned_vet_id) {
         const vet = petRow.staff as any;
         const vetName = vet?.profiles ? `${vet.profiles.first_name} ${vet.profiles.last_name}`.trim() : '';
-        await supabase.from('notification_events').upsert({
+        await db.from('notification_events').upsert({
           id: `lab-ready-${uploadPetId}-${Date.now()}`,
           type: 'lab_ready',
           timestamp: new Date().toISOString(),
@@ -284,7 +288,7 @@ export default function LabPage() {
 
     const reviewedAt = new Date().toISOString();
 
-    await supabase
+    await db
       .from('lab_results')
       .update({
         review_status: 'reviewed',
@@ -294,7 +298,7 @@ export default function LabPage() {
       .eq('id', previewFile.id);
 
     // Fetch reviewer name from profiles
-    const { data: profile } = await supabase
+    const { data: profile } = await db
       .from('profiles')
       .select('first_name, last_name')
       .eq('id', user.id)
@@ -327,7 +331,7 @@ export default function LabPage() {
     }
 
     // Delete database row
-    await supabase.from('lab_results').delete().eq('id', file.id);
+    await db.from('lab_results').delete().eq('id', file.id);
 
     if (previewFile?.id === file.id) setPreviewFile(null);
     fetchLabFiles();
@@ -345,7 +349,7 @@ export default function LabPage() {
   }).length;
 
   // ─── Unique pets for filter ─────────────────────────────────
-  const uniquePets = Array.from(new Set(labFiles.map(f => f.petName))).filter(n => n !== '—').sort();
+  const uniqueDoctors = Array.from(new Set(labFiles.map(f => f.doctorName).filter(n => n && n !== ''))).sort();
 
   // ─── Filtered results ──────────────────────────────────────
   const filtered = labFiles.filter(f => {
@@ -358,7 +362,7 @@ export default function LabPage() {
       f.uploadedByName.toLowerCase().includes(q)
     )) return false;
     if (filterStatus !== 'all' && f.reviewStatus !== filterStatus) return false;
-    if (filterPet !== 'all' && f.petName !== filterPet) return false;
+    if (filterDoctor !== 'all' && f.doctorName !== filterDoctor) return false;
     return true;
   });
 
@@ -421,14 +425,14 @@ export default function LabPage() {
           </SelectContent>
         </Select>
 
-        <Select value={filterPet} onValueChange={setFilterPet}>
-          <SelectTrigger className="h-9 w-36">
-            <SelectValue placeholder="Patient" />
+        <Select value={filterDoctor} onValueChange={setFilterDoctor}>
+          <SelectTrigger className="h-9 w-40">
+            <SelectValue placeholder="Doctor" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Patients</SelectItem>
-            {uniquePets.map((p) => (
-              <SelectItem key={p} value={p}>{p}</SelectItem>
+            <SelectItem value="all">All Doctors</SelectItem>
+            {uniqueDoctors.map((d) => (
+              <SelectItem key={d} value={d}>{d}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -818,7 +822,7 @@ export default function LabPage() {
                 style={{
                   flex: 2, padding: '10px 0', borderRadius: 10, border: 'none',
                   backgroundColor: uploadFile && uploadPetId ? 'var(--brand-green-text)' : 'var(--border-color)',
-                  color: uploadFile && uploadPetId ? '#000' : 'var(--text-secondary)',
+                  color: uploadFile && uploadPetId ? 'var(--on-brand-green)' : 'var(--text-secondary)',
                   fontSize: 14, fontWeight: 700, cursor: uploadFile && uploadPetId ? 'pointer' : 'default',
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                 }}
@@ -1021,7 +1025,7 @@ export default function LabPage() {
                     style={{
                       padding: '10px 24px', borderRadius: 10, border: 'none',
                       backgroundColor: 'var(--brand-green-text)',
-                      color: '#000', fontSize: 14, fontWeight: 700,
+                      color: 'var(--on-brand-green)', fontSize: 14, fontWeight: 700,
                       cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
                       flexShrink: 0, whiteSpace: 'nowrap',
                     }}

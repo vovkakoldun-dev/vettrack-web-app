@@ -10,7 +10,7 @@ import { usePets } from '../../hooks/usePets';
 import { useOwnerClient } from '../../hooks/useOwnerClient';
 
 // ─── Brand ───────────────────────────────────────────────────
-const BRAND = '#2D6A4F';
+const BRAND = 'var(--brand-green-text)';
 const BRAND_TEXT = 'var(--brand-green-text)';
 
 const STATUS_CONFIG = {
@@ -52,7 +52,9 @@ export default function OwnerPetsPage() {
         activeConditions: [] as string[],
         allergies: [] as string[],
         nextAppointment: { reason: 'No upcoming', date: '—', time: '—' },
-        vet: 'Dr. Chen',
+        vet: p.assigned_vet
+          ? `Dr. ${p.assigned_vet.first_name} ${p.assigned_vet.last_name}`.trim()
+          : '—',
         lastVisit: new Date(p.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
         microchip: p.microchip_no ?? '—',
       };
@@ -102,7 +104,7 @@ export default function OwnerPetsPage() {
                   boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
                 }}
                 onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLDivElement).style.boxShadow = '0 6px 24px rgba(45,106,79,0.14)';
+                  (e.currentTarget as HTMLDivElement).style.boxShadow = '0 6px 24px color-mix(in srgb, var(--brand-green-text) 14%, transparent)';
                   (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-2px)';
                 }}
                 onMouseLeave={(e) => {
@@ -214,12 +216,12 @@ export default function OwnerPetsPage() {
                   {/* Next appointment */}
                   <div style={{
                     padding: '11px 14px', borderRadius: '10px',
-                    backgroundColor: `${BRAND}0c`,
-                    border: `1px solid ${BRAND}25`,
+                    backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 5%, transparent)',
+                    border: '1px solid color-mix(in srgb, var(--brand-green-text) 14%, transparent)',
                     marginBottom: '16px',
                     display: 'flex', alignItems: 'center', gap: '10px',
                   }}>
-                    <div style={{ width: '32px', height: '32px', borderRadius: '8px', backgroundColor: `${BRAND}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <div style={{ width: '32px', height: '32px', borderRadius: '8px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 9%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                       <Calendar style={{ width: '15px', height: '15px', color: BRAND_TEXT }} />
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -238,7 +240,7 @@ export default function OwnerPetsPage() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
                       <div style={{
                         width: '26px', height: '26px', borderRadius: '50%',
-                        background: 'linear-gradient(135deg, #2D6A4F, #52B788)',
+                        background: 'linear-gradient(135deg, var(--brand-green-text), #52B788)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                       }}>
                         <span style={{ fontSize: '9px', fontWeight: 700, color: '#fff' }}>DC</span>

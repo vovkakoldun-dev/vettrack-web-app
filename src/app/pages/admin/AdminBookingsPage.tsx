@@ -6,7 +6,7 @@ import {
   ChevronLeft, ChevronRight, LayoutList, LayoutGrid, CalendarDays,
   Pencil, Trash2, Bell, Stethoscope, UserCheck,
   Smartphone, ChevronDown, ChevronUp, Phone, MessageCircle, X,
-  CreditCard, Receipt, DollarSign, Banknote,
+  CreditCard, Receipt, DollarSign, Banknote, DoorOpen,
 } from 'lucide-react';
 import { useAppointments } from '../../hooks/useAppointments';
 import { Button } from '../../components/ui/button';
@@ -20,7 +20,7 @@ import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '../../components/ui/select';
 import { Calendar } from '../../components/ui/calendar';
-import { supabase } from '../../../lib/supabase';
+import { useTenantDb } from '../../context/TenantContext';
 import { getOrgContext } from '../../hooks/useOrgContext';
 import { useClients } from '../../hooks/useClients';
 import { usePets } from '../../hooks/usePets';
@@ -149,16 +149,20 @@ type FilterTab = typeof FILTER_TABS[number];
 // ─── Component ───────────────────────────────────────────────
 
 export default function AdminBookingsPage() {
+  const db = useTenantDb();
   const navigate = useNavigate();
   const location = useLocation();
-  const { appointments: supaAppts, loading: apptsLoading, updateStatus: updateApptStatus, deleteAppointment, addAppointment } = useAppointments();
+  const { appointments: supaAppts, loading: apptsLoading, updateStatus: updateApptStatus, updateStatusWithRoom, deleteAppointment, addAppointment } = useAppointments();
   const { clients: allClients } = useClients();
   const { pets: allPets } = usePets();
   const [selectedDate, setSelectedDate] = useState<Date>(() => new Date());
+  const [calendarMonth, setCalendarMonth] = useState<Date>(() => new Date());
   const [activeFilter, setActiveFilter] = useState<FilterTab>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'schedule' | 'month'>('list');
+  const [showAllDates, setShowAllDates] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(10);
   const [monthViewDate, setMonthViewDate] = useState<Date>(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [newApptTime, setNewApptTime] = useState('09:00');
   const [newApptDate, setNewApptDate] = useState(() => {
@@ -202,6 +206,7 @@ export default function AdminBookingsPage() {
         status: a.status as string,
         notes: a.notes ?? '',
         durationMinutes: dur,
+        room: a.room ?? null,
       };
     }),
     [supaAppts],
@@ -212,7 +217,7 @@ export default function AdminBookingsPage() {
     (async () => {
       const completedIds = supaAppts.filter((a) => a.status === 'Completed').map((a) => a.id);
       if (completedIds.length === 0) return;
-      const { data } = await supabase
+      const { data } = await db
         .from('invoices')
         .select('appointment_id')
         .in('appointment_id', completedIds);
@@ -263,6 +268,20 @@ export default function AdminBookingsPage() {
   const [dayPopupDate, setDayPopupDate] = useState('');
   const [dayPopupVet, setDayPopupVet] = useState('all');
 
+  // ── Room selection dialog ─────────────────────────────────────
+  const CLINIC_ROOMS = ['Room 1', 'Room 2', 'Room 3', 'Room 4', 'Room 5'];
+  const [roomSelectOpen, setRoomSelectOpen] = useState(false);
+  const [roomSelectAppt, setRoomSelectAppt] = useState<any>(null);
+  const occupiedRooms = useMemo(() => {
+    const map = new Map<string, { petName: string; ownerName: string }>();
+    appointments.forEach((a) => {
+      if (a.status === 'In Progress' && a.room) {
+        map.set(a.room, { petName: a.petName, ownerName: a.ownerName });
+      }
+    });
+    return map;
+  }, [appointments]);
+
   // ── Doctor filter ──────────────────────────────────────────
   const [selectedVetFilter, setSelectedVetFilter] = useState('all');
   const [staffList, setStaffList] = useState<{ id: string; name: string; initials: string }[]>([]);
@@ -270,7 +289,7 @@ export default function AdminBookingsPage() {
     (async () => {
       try {
         const { organizationId } = await getOrgContext();
-        const { data } = await supabase.from('staff').select('id, role, profiles:profiles!staff_profile_id_fkey(first_name, last_name)').eq('organization_id', organizationId).in('role', ['veterinarian', 'senior_veterinarian', 'specialist']).eq('status', 'Active').order('first_name');
+        const { data } = await db.from('staff').select('id, role, profiles:profiles!staff_profile_org_fkey(first_name, last_name)').eq('organization_id', organizationId).in('role', ['veterinarian', 'senior_veterinarian', 'specialist']).eq('status', 'Active').order('first_name');
         if (data) setStaffList(data.map((s: any) => {
           const fn = s.profiles?.first_name || '';
           const ln = s.profiles?.last_name || '';
@@ -376,11 +395,15 @@ export default function AdminBookingsPage() {
 
   const datesWithAppointments = getDatesWithAppointments(appointments);
 
-  const dayAppointments = appointments.filter((a) => {
-    if (!isSameDay(a.date, selectedDate)) return false;
-    if (selectedVetFilter !== 'all' && (a as any).vetId !== selectedVetFilter) return false;
-    return true;
-  });
+  const dayAppointments = showAllDates
+    ? [...appointments]
+        .filter((a) => selectedVetFilter === 'all' || (a as any).vetId === selectedVetFilter)
+        .sort((a, b) => a.date.localeCompare(b.date) || a.timeStart.localeCompare(b.timeStart))
+    : appointments.filter((a) => {
+        if (!isSameDay(a.date, selectedDate)) return false;
+        if (selectedVetFilter !== 'all' && (a as any).vetId !== selectedVetFilter) return false;
+        return true;
+      });
 
   const filteredByStatus = dayAppointments.filter((a) => {
     if (activeFilter === 'All') return true;
@@ -497,7 +520,7 @@ export default function AdminBookingsPage() {
 
   const fetchVetTimeBlocks = async (vetId: string) => {
     if (!vetId) { setVetTimeBlocks([]); return; }
-    const { data } = await supabase
+    const { data } = await db
       .from('staff_time_blocks')
       .select('date, time_start, time_end, type')
       .eq('staff_id', vetId);
@@ -517,12 +540,34 @@ export default function AdminBookingsPage() {
 
   const handleClientArrived = () => {
     if (!selectedAppt) return;
-    setAppointments((prev) =>
-      prev.map((a) => (a.id === selectedAppt.id ? { ...a, status: 'In Progress' as const } : a)),
-    );
+    setRoomSelectAppt(selectedAppt);
     setDetailOpen(false);
-    setArrivedToast(`${selectedAppt.petName} (${selectedAppt.ownerName}) has arrived and is ready — ${selectedAppt.vet} has been notified.`);
-    setTimeout(() => setArrivedToast(null), 4000);
+    setRoomSelectOpen(true);
+  };
+
+  const handleRoomConfirm = async (room: string) => {
+    if (!roomSelectAppt) return;
+    setRoomSelectOpen(false);
+
+    // Move appointment time to NOW (patient arrived — could be early)
+    const now = new Date();
+    const dur = roomSelectAppt.durationMinutes || 30;
+    const end = new Date(now.getTime() + dur * 60000);
+    const fmt12 = (d: Date) => {
+      let h = d.getUTCHours(); const m = d.getUTCMinutes();
+      const ap = h >= 12 ? 'PM' : 'AM';
+      if (h > 12) h -= 12; if (h === 0) h = 12;
+      return `${h}:${m.toString().padStart(2, '0')} ${ap}`;
+    };
+    const nowISO = now.toISOString();
+
+    setAppointments((prev) =>
+      prev.map((a) => (a.id === roomSelectAppt.id ? { ...a, status: 'In Progress' as const, room, timeStart: fmt12(now), timeEnd: fmt12(end) } : a)),
+    );
+    await updateStatusWithRoom(roomSelectAppt.id, 'In Progress', room, nowISO);
+    setArrivedToast(`${roomSelectAppt.petName} (${roomSelectAppt.ownerName}) has arrived → assigned to ${room}. ${roomSelectAppt.vet || 'Vet'} has been notified.`);
+    setTimeout(() => setArrivedToast(null), 5000);
+    setRoomSelectAppt(null);
   };
 
   const handleSaveChanges = () => {
@@ -624,7 +669,7 @@ export default function AdminBookingsPage() {
           {/* Section header */}
           <button
             onClick={() => setPortalPanelOpen(o => !o)}
-            style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', background: 'linear-gradient(135deg, #3B82F608, #2D6A4F08)', border: 'none', cursor: 'pointer', borderBottom: portalPanelOpen ? '1px solid var(--border-color)' : 'none' }}
+            style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', background: 'linear-gradient(135deg, #3B82F608, color-mix(in srgb, var(--brand-green-text) 3%, transparent))', border: 'none', cursor: 'pointer', borderBottom: portalPanelOpen ? '1px solid var(--border-color)' : 'none' }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <div style={{ width: '32px', height: '32px', borderRadius: '9px', backgroundColor: '#3B82F615', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -694,7 +739,7 @@ export default function AdminBookingsPage() {
                     {/* Approve */}
                     <button
                       onClick={() => approveRequest(req)}
-                      style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '7px 14px', borderRadius: '8px', backgroundColor: '#2D6A4F', color: 'var(--on-brand-green)', border: 'none', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
+                      style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '7px 14px', borderRadius: '8px', backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)', border: 'none', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
                     >
                       <CheckCircle2 style={{ width: '13px', height: '13px' }} /> Approve
                     </button>
@@ -731,7 +776,7 @@ export default function AdminBookingsPage() {
       {/* ─── Change Time Dialog ─────────────────────── */}
       {changeTimeReq && (() => {
         const VET_OPTIONS = [
-          { name: 'Dr. Chen',   initials: 'DC', color: '#2D6A4F' },
+          { name: 'Dr. Chen',   initials: 'DC', color: 'var(--brand-green-text)' },
           { name: 'Dr. Patel',  initials: 'SP', color: '#3B82F6' },
           { name: 'Dr. Garcia', initials: 'MG', color: '#8B5CF6' },
         ];
@@ -812,7 +857,7 @@ export default function AdminBookingsPage() {
                     {changeTimeDate && (
                       <div style={{ display: 'flex', gap: '10px' }}>
                         <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', color: 'var(--text-secondary)' }}>
-                          <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#2D6A4F', display: 'inline-block' }} /> Available
+                          <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: 'var(--brand-green-text)', display: 'inline-block' }} /> Available
                         </span>
                         <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', color: 'var(--text-secondary)' }}>
                           <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#d4183d', display: 'inline-block' }} /> Booked
@@ -850,7 +895,7 @@ export default function AdminBookingsPage() {
                               transition: 'all 0.12s',
                             }}
                           >
-                            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: isBooked ? '#d4183d' : '#2D6A4F', display: 'block' }} />
+                            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: isBooked ? '#d4183d' : 'var(--brand-green-text)', display: 'block' }} />
                             {slot.time}
                             {isBooked && <span style={{ fontSize: '9px', color: '#d4183d', fontWeight: 700 }}>Booked</span>}
                           </button>
@@ -959,24 +1004,24 @@ export default function AdminBookingsPage() {
         <div>
           {/* Date + Filters + Search */}
           <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-5 mb-4" style={{ borderRadius: '12px' }}>
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <div className="flex items-center gap-2 min-w-0">
                 {viewMode === 'month' ? (
                   <>
-                    <button onClick={goToPrevMonth} className="p-1 hover:bg-[var(--surface-elevated)] transition-colors" style={{ borderRadius: '6px' }}>
+                    <button onClick={goToPrevMonth} className="p-1 hover:bg-[var(--surface-elevated)] transition-colors flex-shrink-0" style={{ borderRadius: '6px' }}>
                       <ChevronLeft className="w-5 h-5 text-[var(--text-secondary)]" />
                     </button>
-                    <CalendarIcon className="w-5 h-5 text-[var(--brand-green-text)]" />
-                    <h2 className="text-[var(--text-primary)]" style={{ fontSize: '18px', fontWeight: 600 }}>
+                    <CalendarIcon className="w-5 h-5 text-[var(--brand-green-text)] flex-shrink-0" />
+                    <h2 className="text-[var(--text-primary)] truncate" style={{ fontSize: '18px', fontWeight: 600 }}>
                       {MONTH_NAMES[mvMonth]} {mvYear}
                     </h2>
-                    <button onClick={goToNextMonth} className="p-1 hover:bg-[var(--surface-elevated)] transition-colors" style={{ borderRadius: '6px' }}>
+                    <button onClick={goToNextMonth} className="p-1 hover:bg-[var(--surface-elevated)] transition-colors flex-shrink-0" style={{ borderRadius: '6px' }}>
                       <ChevronRight className="w-5 h-5 text-[var(--text-secondary)]" />
                     </button>
                     {!isCurrentMonthView && (
                       <button
                         onClick={goToCurrentMonth}
-                        className="ml-2 px-3 py-1 text-[var(--brand-green-text)] border border-[#2D6A4F] hover:bg-[#2D6A4F10] transition-colors"
+                        className="ml-2 px-3 py-1 text-[var(--brand-green-text)] border border-[var(--brand-green-text)] hover:bg-[color-mix(in_srgb,var(--brand-green-text)_6%,transparent)] transition-colors flex-shrink-0"
                         style={{ borderRadius: '6px', fontSize: '13px', fontWeight: 500 }}
                       >
                         Today
@@ -985,33 +1030,60 @@ export default function AdminBookingsPage() {
                   </>
                 ) : (
                   <>
-                    <button onClick={goToPrevDay} className="p-1 hover:bg-[var(--surface-elevated)] transition-colors" style={{ borderRadius: '6px' }}>
-                      <ChevronLeft className="w-5 h-5 text-[var(--text-secondary)]" />
-                    </button>
-                    <CalendarIcon className="w-5 h-5 text-[var(--brand-green-text)]" />
-                    <h2 className="text-[var(--text-primary)]" style={{ fontSize: '18px', fontWeight: 600 }}>
-                      {isToday(selectedDate) ? 'Today, ' : ''}
-                      {formatDate(selectedDate)}
+                    {!showAllDates && (
+                      <button onClick={goToPrevDay} className="p-1 hover:bg-[var(--surface-elevated)] transition-colors flex-shrink-0" style={{ borderRadius: '6px' }}>
+                        <ChevronLeft className="w-5 h-5 text-[var(--text-secondary)]" />
+                      </button>
+                    )}
+                    <CalendarIcon className="w-5 h-5 text-[var(--brand-green-text)] flex-shrink-0" />
+                    <h2 className="text-[var(--text-primary)] truncate" style={{ fontSize: '18px', fontWeight: 600 }}>
+                      {showAllDates ? 'All Appointments' : (
+                        <>
+                          {isToday(selectedDate) ? 'Today, ' : ''}
+                          {formatDate(selectedDate)}
+                        </>
+                      )}
                     </h2>
-                    <button onClick={goToNextDay} className="p-1 hover:bg-[var(--surface-elevated)] transition-colors" style={{ borderRadius: '6px' }}>
-                      <ChevronRight className="w-5 h-5 text-[var(--text-secondary)]" />
-                    </button>
-                    {!isToday(selectedDate) && (
+                    {!showAllDates && (
+                      <button onClick={goToNextDay} className="p-1 hover:bg-[var(--surface-elevated)] transition-colors flex-shrink-0" style={{ borderRadius: '6px' }}>
+                        <ChevronRight className="w-5 h-5 text-[var(--text-secondary)]" />
+                      </button>
+                    )}
+                    {!isToday(selectedDate) && !showAllDates && (
                       <button
                         onClick={goToToday}
-                        className="ml-2 px-3 py-1 text-[var(--brand-green-text)] border border-[#2D6A4F] hover:bg-[#2D6A4F10] transition-colors"
+                        className="ml-2 px-3 py-1 text-[var(--brand-green-text)] border border-[var(--brand-green-text)] hover:bg-[color-mix(in_srgb,var(--brand-green-text)_6%,transparent)] transition-colors flex-shrink-0"
                         style={{ borderRadius: '6px', fontSize: '13px', fontWeight: 500 }}
                       >
                         Today
                       </button>
                     )}
+                    <button
+                      onClick={() => {
+                        const next = !showAllDates;
+                        setShowAllDates(next);
+                        setVisibleCount(10);
+                        if (next && viewMode !== 'list') setViewMode('list');
+                      }}
+                      className="ml-2 px-3 py-1 transition-colors flex-shrink-0"
+                      style={{
+                        borderRadius: '6px',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        backgroundColor: showAllDates ? 'var(--brand-green-text)' : 'transparent',
+                        color: showAllDates ? 'var(--on-brand-green)' : 'var(--brand-green-text)',
+                        border: showAllDates ? '1px solid var(--brand-green-text)' : '1px solid var(--brand-green-text)',
+                      }}
+                    >
+                      {showAllDates ? <><ChevronLeft className="w-3.5 h-3.5 inline -ml-0.5 mr-0.5" />Back to Day</> : 'View All'}
+                    </button>
                   </>
                 )}
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 flex-shrink-0">
                 {viewMode !== 'month' && (
                   <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>
-                    {totalToday} booking{totalToday !== 1 ? 's' : ''}
+                    {totalToday} booking{totalToday !== 1 ? 's' : ''}{showAllDates ? ' total' : ''}
                   </span>
                 )}
                 {/* Doctor Filter – always visible */}
@@ -1072,9 +1144,9 @@ export default function AdminBookingsPage() {
             </div>
 
             {viewMode !== 'month' && (
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
                 {/* Filter Tabs */}
-                <div className="flex gap-1 p-1 bg-[var(--surface-elevated)]" style={{ borderRadius: '8px' }}>
+                <div className="flex gap-1 p-1 bg-[var(--surface-elevated)] flex-shrink-0" style={{ borderRadius: '8px' }}>
                   {FILTER_TABS.map((tab) => (
                     <button
                       key={tab}
@@ -1095,7 +1167,7 @@ export default function AdminBookingsPage() {
                 </div>
 
                 {/* Search */}
-                <div className="relative flex-1">
+                <div className="relative flex-1" style={{ minWidth: '200px' }}>
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-secondary)]" />
                   <Input
                     placeholder="Search pet, owner, or service..."
@@ -1118,50 +1190,62 @@ export default function AdminBookingsPage() {
                 </p>
                 <p className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>
                   {dayAppointments.length === 0
-                    ? 'No bookings scheduled for this date.'
+                    ? (showAllDates ? 'No bookings found.' : 'No bookings scheduled for this date.')
                     : 'Try adjusting your filters or search.'}
                 </p>
               </div>
             ) : (
               <div className="space-y-3">
-                {filteredAppointments.map((appt) => {
+                {(() => {
+                  const visibleItems = filteredAppointments.slice(0, visibleCount);
+                  const hasMore = visibleCount < filteredAppointments.length;
+                  return (
+                    <>
+                      {visibleItems.map((appt, idx) => {
                   const isPaid = paidApptIds.has(appt.id);
                   const displayStatus = isPaid ? 'Paid' : appt.status;
                   const s = statusStyles[displayStatus] || statusStyles.Completed;
                   const StatusIcon = s.icon;
                   const serviceColor = serviceColors[appt.service] || serviceColors.Other;
+                  const showDateHeader = showAllDates && (idx === 0 || filteredAppointments[idx - 1].date !== appt.date);
                   return (
+                    <div key={appt.id}>
+                      {showDateHeader && (
+                        <p className="text-[var(--text-secondary)] mb-1 mt-3 first:mt-0" style={{ fontSize: '13px', fontWeight: 600 }}>
+                          {new Date(appt.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+                        </p>
+                      )}
                     <div
-                      key={appt.id}
-                      className="bg-[var(--surface-white)] border border-[var(--border-color)] p-4 hover:border-[#2D6A4F] transition-colors cursor-pointer"
+                      className="bg-[var(--surface-white)] border border-[var(--border-color)] p-4 hover:border-[var(--brand-green-text)] transition-colors cursor-pointer"
                       style={{ borderRadius: '12px' }}
                       onClick={() => openApptDetail(appt)}
                     >
-                      <div className="flex items-center gap-4">
+                      {/* Row 1: Time + Pet/Owner + Service + Status + Actions */}
+                      <div className="flex flex-wrap items-center gap-3">
                         {/* Time */}
-                        <div className="w-28 flex-shrink-0 text-center">
-                          <p className="text-[var(--text-primary)]" style={{ fontSize: '15px', fontWeight: 600 }}>
+                        <div className="w-20 flex-shrink-0 text-center">
+                          <p className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 600 }}>
                             {appt.timeStart}
                           </p>
-                          <p className="text-[var(--text-secondary)]" style={{ fontSize: '12px' }}>
+                          <p className="text-[var(--text-secondary)]" style={{ fontSize: '11px' }}>
                             to {appt.timeEnd}
                           </p>
                         </div>
 
                         {/* Divider */}
-                        <div className="w-px h-12 bg-[var(--border-color)]" />
+                        <div className="w-px h-10 bg-[var(--border-color)] hidden sm:block" />
 
                         {/* Pet + Owner */}
-                        <div className="flex items-center gap-3 flex-1">
-                          <Avatar className="w-10 h-10">
+                        <div className="flex items-center gap-3 flex-1 min-w-[180px]">
+                          <Avatar className="w-9 h-9">
                             <AvatarImage src={appt.petImage} alt={appt.petName} className="object-cover" />
                             <AvatarFallback>{appt.petName.slice(0, 2)}</AvatarFallback>
                           </Avatar>
                           <div className="flex-1 min-w-0">
-                            <p className="text-[var(--text-primary)]" style={{ fontSize: '16px', fontWeight: 600 }}>
+                            <p className="text-[var(--text-primary)] truncate" style={{ fontSize: '15px', fontWeight: 600 }}>
                               {appt.petName}
                             </p>
-                            <p className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>
+                            <p className="text-[var(--text-secondary)] truncate" style={{ fontSize: '12px' }}>
                               {appt.ownerName} · {appt.species}
                             </p>
                           </div>
@@ -1169,12 +1253,12 @@ export default function AdminBookingsPage() {
 
                         {/* Service Badge */}
                         <span
-                          className="inline-block px-2.5 py-1 flex-shrink-0"
+                          className="inline-block px-2 py-0.5 flex-shrink-0"
                           style={{
                             backgroundColor: serviceColor + '15',
                             color: serviceColor,
                             borderRadius: '6px',
-                            fontSize: '13px',
+                            fontSize: '12px',
                             fontWeight: 600,
                           }}
                         >
@@ -1182,19 +1266,19 @@ export default function AdminBookingsPage() {
                         </span>
 
                         {/* Vet */}
-                        <div className="flex items-center gap-1.5 flex-shrink-0 w-24">
-                          <User className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
-                          <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{appt.vet}</span>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <User className="w-3 h-3 text-[var(--text-secondary)]" />
+                          <span className="text-[var(--text-secondary)]" style={{ fontSize: '12px' }}>{appt.vet}</span>
                         </div>
 
                         {/* Status */}
                         <span
-                          className="inline-flex items-center gap-1 px-2.5 py-1 flex-shrink-0"
+                          className="inline-flex items-center gap-1 px-2 py-0.5 flex-shrink-0"
                           style={{
                             backgroundColor: s.bg,
                             color: s.text,
                             borderRadius: '9999px',
-                            fontSize: '12px',
+                            fontSize: '11px',
                             fontWeight: 600,
                           }}
                         >
@@ -1202,22 +1286,35 @@ export default function AdminBookingsPage() {
                           {displayStatus}
                         </span>
 
-                        {/* Patient Arrived / Start Appointment button */}
+                        {/* Room badge */}
+                        {appt.room && appt.status === 'In Progress' && (
+                          <span
+                            className="inline-flex items-center gap-1 px-2 py-0.5 flex-shrink-0"
+                            style={{
+                              backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)',
+                              color: 'var(--brand-green-text)',
+                              borderRadius: '9999px',
+                              fontSize: '11px',
+                              fontWeight: 600,
+                            }}
+                          >
+                            <DoorOpen className="w-3 h-3" />
+                            {appt.room}
+                          </span>
+                        )}
+
+                        {/* Patient Arrived → open room selection */}
                         {(appt.status === 'Confirmed' || appt.status === 'Pending') && (
                           <button
-                            onClick={async (e) => {
+                            onClick={(e) => {
                               e.stopPropagation();
-                              setAppointments((prev) =>
-                                prev.map((a) => (a.id === appt.id ? { ...a, status: 'In Progress' as const } : a)),
-                              );
-                              await updateApptStatus(appt.id, 'In Progress');
-                              setArrivedToast(`${appt.petName} (${appt.ownerName}) has arrived and is ready — ${appt.vet || 'Vet'} has been notified.`);
-                              setTimeout(() => setArrivedToast(null), 4000);
+                              setRoomSelectAppt(appt);
+                              setRoomSelectOpen(true);
                             }}
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 flex-shrink-0 hover:opacity-90 transition-opacity"
                             style={{
-                              backgroundColor: '#2D6A4F',
-                              color: '#fff',
+                              backgroundColor: 'var(--brand-green-text)',
+                              color: 'var(--on-brand-green)',
                               borderRadius: '8px',
                               fontSize: '12px',
                               fontWeight: 600,
@@ -1257,13 +1354,36 @@ export default function AdminBookingsPage() {
 
                       {/* Notes preview */}
                       {appt.notes && (
-                        <p className="text-[var(--text-secondary)] mt-2 ml-32 pl-4" style={{ fontSize: '13px', borderLeft: '2px solid var(--border-color)' }}>
+                        <p className="text-[var(--text-secondary)] mt-2 ml-24 pl-4 sm:ml-24" style={{ fontSize: '13px', borderLeft: '2px solid var(--border-color)' }}>
                           {appt.notes}
                         </p>
                       )}
                     </div>
+                    </div>
                   );
                 })}
+
+                      {/* Load More */}
+                      {hasMore && (
+                        <div className="pt-2">
+                          <button
+                            onClick={() => setVisibleCount((c) => c + 10)}
+                            className="w-full py-2 transition-colors hover:bg-[color-mix(in_srgb,var(--brand-green-text)_6%,transparent)]"
+                            style={{
+                              borderRadius: '8px',
+                              fontSize: '13px',
+                              fontWeight: 600,
+                              color: 'var(--brand-green-text)',
+                              border: '1px solid var(--brand-green-text)',
+                            }}
+                          >
+                            Load More ({filteredAppointments.length - visibleCount} remaining)
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             )
           )}
@@ -1328,7 +1448,7 @@ export default function AdminBookingsPage() {
                             borderRadius: '9999px',
                             fontSize: '14px',
                             fontWeight: isTodayDay || isSelectedDay ? 700 : 400,
-                            backgroundColor: isTodayDay ? 'var(--brand-green-text)' : isSelectedDay ? '#2D6A4F20' : 'transparent',
+                            backgroundColor: isTodayDay ? 'var(--brand-green-text)' : isSelectedDay ? 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)' : 'transparent',
                             color: isTodayDay ? '#fff' : isSelectedDay ? 'var(--brand-green-text)' : 'var(--text-primary)',
                           }}
                         >
@@ -1486,21 +1606,41 @@ export default function AdminBookingsPage() {
         {viewMode === 'list' && (
         <div className="space-y-6">
           {/* Mini Calendar */}
-          <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-4 flex justify-center" style={{ borderRadius: '12px' }}>
-            <Calendar
-              mode="single"
-              selected={selectedDate}
-              onSelect={(date) => date && setSelectedDate(date)}
-              modifiers={{ hasAppointment: datesWithAppointments }}
-              modifiersStyles={{
-                hasAppointment: {
-                  fontWeight: 700,
-                  textDecoration: 'underline',
-                  textDecorationColor: 'var(--brand-green-text)',
-                  textUnderlineOffset: '4px',
-                },
-              }}
-            />
+          <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-4" style={{ borderRadius: '12px' }}>
+            <div className="flex justify-center">
+              <Calendar
+                mode="single"
+                selected={selectedDate}
+                month={calendarMonth}
+                onMonthChange={setCalendarMonth}
+                onSelect={(date) => { if (date) { setSelectedDate(date); setCalendarMonth(date); } }}
+                modifiers={{ hasAppointment: datesWithAppointments }}
+                modifiersStyles={{
+                  hasAppointment: {
+                    fontWeight: 700,
+                    textDecoration: 'underline',
+                    textDecorationColor: 'var(--brand-green-text)',
+                    textUnderlineOffset: '4px',
+                  },
+                }}
+              />
+            </div>
+            {(calendarMonth.getMonth() !== new Date().getMonth() || calendarMonth.getFullYear() !== new Date().getFullYear()) && (
+              <button
+                onClick={() => { const t = new Date(); setSelectedDate(t); setCalendarMonth(t); }}
+                className="w-full mt-2 py-1.5 text-center transition-colors hover:bg-[color-mix(in_srgb,var(--brand-green-text)_6%,transparent)]"
+                style={{
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  color: 'var(--brand-green-text)',
+                  border: '1px solid var(--brand-green-text)',
+                }}
+              >
+                <ChevronLeft className="w-3.5 h-3.5 inline -ml-0.5 mr-0.5" />
+                Back to Today
+              </button>
+            )}
           </div>
 
           {/* Daily Stats */}
@@ -1511,7 +1651,7 @@ export default function AdminBookingsPage() {
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-[#2D6A4F]" />
+                  <div className="w-2 h-2 rounded-full bg-[var(--brand-green-text)]" />
                   <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>Total</span>
                 </div>
                 <span className="text-[var(--text-primary)]" style={{ fontSize: '20px', fontWeight: 700 }}>{totalToday}</span>
@@ -1549,7 +1689,7 @@ export default function AdminBookingsPage() {
               </div>
               <div className="w-full h-2 bg-[var(--border-color)] overflow-hidden" style={{ borderRadius: '9999px' }}>
                 <div
-                  className="h-full bg-[#2D6A4F] transition-all"
+                  className="h-full bg-[var(--brand-green-text)] transition-all"
                   style={{
                     width: totalToday > 0 ? `${(completedToday / totalToday) * 100}%` : '0%',
                     borderRadius: '9999px',
@@ -1570,7 +1710,7 @@ export default function AdminBookingsPage() {
                 return (
                   <div key={vet} className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 bg-[#2D6A4F15] flex items-center justify-center" style={{ borderRadius: '9999px' }}>
+                      <div className="w-7 h-7 bg-[color-mix(in_srgb,var(--brand-green-text)_8%,transparent)] flex items-center justify-center" style={{ borderRadius: '9999px' }}>
                         <User className="w-3.5 h-3.5 text-[var(--brand-green-text)]" />
                       </div>
                       <span className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 500 }}>{vet}</span>
@@ -1590,18 +1730,18 @@ export default function AdminBookingsPage() {
       {/* ─── New Booking Dialog ────────────────────── */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent
-          className="p-0 gap-0 overflow-hidden [&>button]:top-[14px] [&>button]:right-[14px] [&>button]:w-8 [&>button]:h-8 [&>button]:flex [&>button]:items-center [&>button]:justify-center [&>button]:rounded-[8px] [&>button]:!bg-white/15 [&>button]:!text-white [&>button]:!opacity-100 [&>button]:hover:!bg-white/25 [&>button]:transition-colors [&>button>svg]:w-4 [&>button>svg]:h-4"
+          className="p-0 gap-0 overflow-hidden [&>button]:top-[14px] [&>button]:right-[14px] [&>button]:w-8 [&>button]:h-8 [&>button]:flex [&>button]:items-center [&>button]:justify-center [&>button]:rounded-[8px] [&>button]:!bg-[var(--surface-white)] [&>button]:!text-[var(--text-secondary)] [&>button]:!opacity-100 [&>button]:hover:!bg-[var(--surface-elevated)] [&>button]:!border [&>button]:!border-[var(--border-color)] [&>button]:transition-colors [&>button>svg]:w-4 [&>button>svg]:h-4"
           style={{ maxWidth: '780px', width: '95vw', maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}
         >
           {/* ── Header ── */}
-          <div style={{ background: '#2D6A4F', padding: '18px 24px', flexShrink: 0 }}>
+          <div style={{ background: 'var(--surface-elevated)', padding: '18px 24px', flexShrink: 0, borderBottom: '1px solid var(--border-color)', borderLeft: '4px solid var(--brand-green-text)' }}>
             <div className="flex items-center gap-3">
-              <div style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: 'rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <CalendarIcon style={{ width: '18px', height: '18px', color: '#fff' }} />
+              <div style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <CalendarIcon style={{ width: '18px', height: '18px', color: 'var(--brand-green-text)' }} />
               </div>
               <div>
-                <h2 style={{ fontSize: '17px', fontWeight: 700, color: '#fff', lineHeight: 1.2 }}>New Booking</h2>
-                <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginTop: '1px' }}>Schedule a visit for a patient</p>
+                <h2 style={{ fontSize: '17px', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.2 }}>New Booking</h2>
+                <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '1px' }}>Schedule a visit for a patient</p>
               </div>
             </div>
           </div>
@@ -1731,7 +1871,7 @@ export default function AdminBookingsPage() {
                 <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Service Type</p>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
                   {[
-                    { label: 'Annual Checkup',  color: '#2D6A4F', emoji: '🩺' },
+                    { label: 'Annual Checkup',  color: 'var(--brand-green-text)', emoji: '🩺' },
                     { label: 'Vaccination',      color: '#3B82F6', emoji: '💉' },
                     { label: 'Dental Cleaning',  color: '#8B5CF6', emoji: '🦷' },
                     { label: 'Surgery',          color: '#EC4899', emoji: '🔬' },
@@ -1778,7 +1918,7 @@ export default function AdminBookingsPage() {
                       {getSlotAvailability(newApptDate).map(slot => (
                         <SelectItem key={slot.time24} value={slot.time24} disabled={!!slot.booked}>
                           <span className="flex items-center gap-2">
-                            <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: slot.booked ? '#d4183d' : '#2D6A4F' }} />
+                            <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: slot.booked ? '#d4183d' : 'var(--brand-green-text)' }} />
                             <span>{slot.time}</span>
                             {slot.booked && <span className="text-[var(--text-secondary)]" style={{ fontSize: '12px' }}>— {slot.booked.petName}</span>}
                           </span>
@@ -1799,8 +1939,8 @@ export default function AdminBookingsPage() {
                       <button key={d} onClick={() => setNewApptDuration(d)} style={{
                         padding: '6px 13px', borderRadius: '7px', fontSize: '13px',
                         fontWeight: active ? 700 : 500,
-                        border: `1.5px solid ${active ? '#2D6A4F' : 'var(--border-color)'}`,
-                        backgroundColor: active ? '#2D6A4F18' : 'transparent',
+                        border: `1.5px solid ${active ? 'var(--brand-green-text)' : 'var(--border-color)'}`,
+                        backgroundColor: active ? 'color-mix(in srgb, var(--brand-green-text) 9%, transparent)' : 'transparent',
                         color: active ? 'var(--brand-green-text)' : 'var(--text-secondary)',
                         cursor: 'pointer', transition: 'all 0.15s',
                       }}>{d}</button>
@@ -1814,7 +1954,7 @@ export default function AdminBookingsPage() {
                 <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Veterinarian</p>
                 <div className="flex gap-2 flex-wrap">
                   {[
-                    { name: 'Dr. Chen',   initials: 'SC', color: '#2D6A4F' },
+                    { name: 'Dr. Chen',   initials: 'SC', color: 'var(--brand-green-text)' },
                     { name: 'Dr. Patel',  initials: 'RP', color: '#3B82F6' },
                     { name: 'Dr. Garcia', initials: 'MG', color: '#8B5CF6' },
                   ].map(v => {
@@ -1895,7 +2035,7 @@ export default function AdminBookingsPage() {
 
                 <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>Status</p>
                 <div className="flex gap-1.5" style={{ marginBottom: '12px' }}>
-                  {[{ label: 'Confirmed', color: '#2D6A4F' }, { label: 'Pending', color: '#F4A261' }].map(s => {
+                  {[{ label: 'Confirmed', color: 'var(--brand-green-text)' }, { label: 'Pending', color: '#F4A261' }].map(s => {
                     const active = newApptStatus === s.label;
                     return (
                       <button key={s.label} onClick={() => setNewApptStatus(s.label)} style={{
@@ -1913,7 +2053,7 @@ export default function AdminBookingsPage() {
                 <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>Priority</p>
                 <div className="flex gap-1.5" style={{ marginBottom: '14px' }}>
                   {[
-                    { label: 'Normal',    color: '#2D6A4F' },
+                    { label: 'Normal',    color: 'var(--brand-green-text)' },
                     { label: 'Urgent',    color: '#F4A261' },
                     { label: 'Emergency', color: '#d4183d' },
                   ].map(p => {
@@ -1934,7 +2074,7 @@ export default function AdminBookingsPage() {
                 <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>Pet Health Status</p>
                 <div className="flex gap-1.5">
                   {([
-                    { label: 'Healthy' as const,   color: '#2D6A4F', emoji: '✅' },
+                    { label: 'Healthy' as const,   color: 'var(--brand-green-text)', emoji: '✅' },
                     { label: 'Follow-up' as const, color: '#F4A261', emoji: '🔔' },
                     { label: 'Critical' as const,  color: '#d4183d', emoji: '🚨' },
                   ]).map(s => {
@@ -1971,8 +2111,8 @@ export default function AdminBookingsPage() {
                       <button key={m} onClick={() => setConfirmMethod(m)} style={{
                         flex: 1, padding: '4px 2px', borderRadius: '6px', fontSize: '11px',
                         fontWeight: active ? 700 : 400,
-                        border: `1.5px solid ${active ? '#2D6A4F' : 'var(--border-color)'}`,
-                        backgroundColor: active ? '#2D6A4F15' : 'transparent',
+                        border: `1.5px solid ${active ? 'var(--brand-green-text)' : 'var(--border-color)'}`,
+                        backgroundColor: active ? 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)' : 'transparent',
                         color: active ? 'var(--brand-green-text)' : 'var(--text-secondary)',
                         cursor: 'pointer',
                       }}>{m}</button>
@@ -1994,8 +2134,8 @@ export default function AdminBookingsPage() {
                       <button key={m} onClick={() => setReminderMethod(m)} style={{
                         flex: 1, padding: '4px 2px', borderRadius: '6px', fontSize: '11px',
                         fontWeight: active ? 700 : 400,
-                        border: `1.5px solid ${active ? '#2D6A4F' : 'var(--border-color)'}`,
-                        backgroundColor: active ? '#2D6A4F15' : 'transparent',
+                        border: `1.5px solid ${active ? 'var(--brand-green-text)' : 'var(--border-color)'}`,
+                        backgroundColor: active ? 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)' : 'transparent',
                         color: active ? 'var(--brand-green-text)' : 'var(--text-secondary)',
                         cursor: 'pointer',
                       }}>{m}</button>
@@ -2012,8 +2152,8 @@ export default function AdminBookingsPage() {
                           <button key={t} onClick={() => setReminderTiming(t)} style={{
                             padding: '4px 9px', borderRadius: '5px', fontSize: '11px',
                             fontWeight: active ? 700 : 400,
-                            border: `1.5px solid ${active ? '#2D6A4F' : 'var(--border-color)'}`,
-                            backgroundColor: active ? '#2D6A4F15' : 'transparent',
+                            border: `1.5px solid ${active ? 'var(--brand-green-text)' : 'var(--border-color)'}`,
+                            backgroundColor: active ? 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)' : 'transparent',
                             color: active ? 'var(--brand-green-text)' : 'var(--text-secondary)',
                             cursor: 'pointer',
                           }}>{t}</button>
@@ -2029,7 +2169,7 @@ export default function AdminBookingsPage() {
           {/* ── Footer ── */}
           <div style={{ borderTop: '1px solid var(--border-color)', padding: '14px 24px', display: 'flex', justifyContent: 'flex-end', gap: '10px', flexShrink: 0, backgroundColor: 'var(--surface-white)' }}>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button onClick={() => setDialogOpen(false)} style={{ backgroundColor: '#2D6A4F', color: 'var(--on-brand-green)' }}>
+            <Button onClick={() => setDialogOpen(false)} style={{ backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)' }}>
               <CalendarIcon className="w-4 h-4 mr-1.5" />
               Schedule Booking
             </Button>
@@ -2076,14 +2216,14 @@ export default function AdminBookingsPage() {
                       className="flex flex-col items-center gap-1.5 py-3 transition-all"
                       style={{
                         borderRadius: 10,
-                        border: paymentMethod === key ? '2px solid #2D6A4F' : '1px solid var(--border-color)',
-                        backgroundColor: paymentMethod === key ? '#2D6A4F10' : 'transparent',
+                        border: paymentMethod === key ? '2px solid var(--brand-green-text)' : '1px solid var(--border-color)',
+                        backgroundColor: paymentMethod === key ? 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)' : 'transparent',
                         cursor: 'pointer',
-                        background: paymentMethod === key ? '#2D6A4F10' : 'var(--surface-white)',
+                        background: paymentMethod === key ? 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)' : 'var(--surface-white)',
                       }}
                     >
-                      <Icon style={{ width: 20, height: 20, color: paymentMethod === key ? '#2D6A4F' : 'var(--text-secondary)' }} />
-                      <span style={{ fontSize: 12, fontWeight: 600, color: paymentMethod === key ? '#2D6A4F' : 'var(--text-secondary)' }}>{label}</span>
+                      <Icon style={{ width: 20, height: 20, color: paymentMethod === key ? 'var(--brand-green-text)' : 'var(--text-secondary)' }} />
+                      <span style={{ fontSize: 12, fontWeight: 600, color: paymentMethod === key ? 'var(--brand-green-text)' : 'var(--text-secondary)' }}>{label}</span>
                     </button>
                   ))}
                 </div>
@@ -2115,7 +2255,7 @@ export default function AdminBookingsPage() {
                     const orgCtx = await getOrgContext();
                     const now = new Date();
                     const recNum = `VT-${now.getFullYear()}-${String(now.getTime()).slice(-6)}`;
-                    await supabase.from('medical_records').insert({
+                    await db.from('medical_records').insert({
                       record_number: recNum,
                       appointment_id: paymentAppt.id,
                       pet_id: paymentAppt.petId,
@@ -2136,7 +2276,7 @@ export default function AdminBookingsPage() {
                     const taxAmount = parseFloat((subtotal * 0.08).toFixed(2));
                     const total = subtotal + taxAmount;
                     const invNum = `INV-${now.getFullYear()}-${String(now.getTime()).slice(-6)}`;
-                    const { data: invData } = await supabase.from('invoices').insert({
+                    const { data: invData } = await db.from('invoices').insert({
                       invoice_number: invNum,
                       client_id: paymentAppt.clientId,
                       clinic_id: orgCtx.clinicId,
@@ -2154,7 +2294,7 @@ export default function AdminBookingsPage() {
                     // Create payment record
                     if (invData) {
                       const methodMap: Record<string, string> = { card: 'Credit Card', cash: 'Cash', insurance: 'Insurance' };
-                      await supabase.from('payments').insert({
+                      await db.from('payments').insert({
                         invoice_id: invData.id,
                         amount: total,
                         method: methodMap[paymentMethod] || 'Credit Card',
@@ -2168,7 +2308,7 @@ export default function AdminBookingsPage() {
                 }}
                 disabled={paymentProcessing}
                 className="w-full hover:opacity-90"
-                style={{ backgroundColor: '#2D6A4F', color: 'var(--on-brand-green)', border: 'none', height: 42, fontSize: 14, fontWeight: 600 }}
+                style={{ backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)', border: 'none', height: 42, fontSize: 14, fontWeight: 600, boxShadow: '0 0 16px color-mix(in srgb, var(--brand-green-text) 50%, transparent)' }}
               >
                 {paymentProcessing ? 'Processing...' : `Confirm Payment — $70.20`}
               </Button>
@@ -2176,8 +2316,8 @@ export default function AdminBookingsPage() {
           )}
           {paymentDone && (
             <div className="text-center py-6 space-y-4">
-              <div className="mx-auto" style={{ width: 64, height: 64, borderRadius: '50%', backgroundColor: '#2D6A4F15', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <CheckCircle2 style={{ width: 32, height: 32, color: '#2D6A4F' }} />
+              <div className="mx-auto" style={{ width: 64, height: 64, borderRadius: '50%', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <CheckCircle2 style={{ width: 32, height: 32, color: 'var(--brand-green-text)' }} />
               </div>
               <div>
                 <p style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)' }}>Payment Received</p>
@@ -2185,9 +2325,71 @@ export default function AdminBookingsPage() {
                   {paymentAppt?.petName} — {paymentAppt?.ownerName} · {paymentMethod === 'card' ? 'Card' : paymentMethod === 'cash' ? 'Cash' : 'Insurance'}
                 </p>
               </div>
-              <Button onClick={() => setPaymentOpen(false)} className="hover:opacity-90" style={{ backgroundColor: '#2D6A4F', color: 'var(--on-brand-green)', border: 'none' }}>
+              <Button onClick={() => setPaymentOpen(false)} className="hover:opacity-90" style={{ backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)', border: 'none' }}>
                 Done
               </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Room Selection Dialog ─────────────────── */}
+      <Dialog open={roomSelectOpen} onOpenChange={(v) => { if (!v) { setRoomSelectOpen(false); setRoomSelectAppt(null); } }}>
+        <DialogContent style={{ maxWidth: 420 }}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <DoorOpen className="w-5 h-5" style={{ color: 'var(--brand-green-text)' }} />
+              Assign Room
+            </DialogTitle>
+          </DialogHeader>
+          {roomSelectAppt && (
+            <div className="space-y-4">
+              {/* Patient info */}
+              <div className="flex items-center gap-3 p-3 bg-[var(--surface-elevated)]" style={{ borderRadius: 10 }}>
+                <Avatar className="w-10 h-10">
+                  <AvatarImage src={roomSelectAppt.petImage} alt={roomSelectAppt.petName} className="object-cover" />
+                  <AvatarFallback>{(roomSelectAppt.petName || '').slice(0, 2)}</AvatarFallback>
+                </Avatar>
+                <div>
+                  <p className="text-[var(--text-primary)]" style={{ fontSize: 15, fontWeight: 600 }}>{roomSelectAppt.petName}</p>
+                  <p className="text-[var(--text-secondary)]" style={{ fontSize: 12 }}>{roomSelectAppt.ownerName} · {roomSelectAppt.service}</p>
+                </div>
+              </div>
+
+              {/* Room grid */}
+              <div>
+                <p className="text-[var(--text-secondary)] mb-2" style={{ fontSize: 13, fontWeight: 600 }}>Select a room</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {CLINIC_ROOMS.map((room) => {
+                    const occupied = occupiedRooms.get(room);
+                    const isBusy = !!occupied;
+                    return (
+                      <button
+                        key={room}
+                        disabled={isBusy}
+                        onClick={() => handleRoomConfirm(room)}
+                        className="flex flex-col items-center gap-1 py-4 transition-all"
+                        style={{
+                          borderRadius: 10,
+                          border: isBusy ? '1px solid var(--border-color)' : '1.5px solid var(--brand-green-text)',
+                          background: isBusy ? 'var(--surface-elevated)' : 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)',
+                          cursor: isBusy ? 'not-allowed' : 'pointer',
+                          opacity: isBusy ? 0.5 : 1,
+                        }}
+                      >
+                        <DoorOpen style={{ width: 22, height: 22, color: isBusy ? 'var(--text-secondary)' : 'var(--brand-green-text)' }} />
+                        <span style={{ fontSize: 14, fontWeight: 600, color: isBusy ? 'var(--text-secondary)' : 'var(--brand-green-text)' }}>{room}</span>
+                        {isBusy && (
+                          <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{occupied.petName}</span>
+                        )}
+                        {!isBusy && (
+                          <span style={{ fontSize: 10, color: 'var(--brand-green-text)' }}>Available</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           )}
         </DialogContent>
@@ -2204,15 +2406,15 @@ export default function AdminBookingsPage() {
             maxWidth: 360,
             borderRadius: 14,
             backgroundColor: 'var(--surface-white)',
-            border: '1.5px solid #2D6A4F40',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.16), 0 0 0 1px rgba(45,106,79,0.08)',
+            border: '1.5px solid color-mix(in srgb, var(--brand-green-text) 25%, transparent)',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.16), 0 0 0 1px color-mix(in srgb, var(--brand-green-text) 8%, transparent)',
             overflow: 'hidden',
             animation: 'slideUp 0.25s cubic-bezier(0.4,0,0.2,1)',
           }}
         >
-          <div style={{ height: 3, background: 'linear-gradient(90deg, #2D6A4F, #74C69D)' }} />
+          <div style={{ height: 3, background: 'linear-gradient(90deg, var(--brand-green-text), #74C69D)' }} />
           <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-            <div style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: '#2D6A4F15', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 }}>
+            <div style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 }}>
               <UserCheck style={{ width: 16, height: 16, color: 'var(--brand-green-text)' }} />
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -2226,14 +2428,14 @@ export default function AdminBookingsPage() {
       {/* ─── Booking Detail / Edit Dialog ─────────── */}
       <Dialog open={detailOpen} onOpenChange={(open) => { setDetailOpen(open); if (!open) setDetailMode('view'); }}>
         <DialogContent
-          className="p-0 overflow-hidden gap-0 [&>button]:top-[14px] [&>button]:right-[14px] [&>button]:w-8 [&>button]:h-8 [&>button]:flex [&>button]:items-center [&>button]:justify-center [&>button]:rounded-[8px] [&>button]:!bg-white/15 [&>button]:!text-white [&>button]:!opacity-100 [&>button]:hover:!bg-white/25 [&>button]:transition-colors [&>button>svg]:w-4 [&>button>svg]:h-4"
+          className="p-0 overflow-hidden gap-0 [&>button]:top-[14px] [&>button]:right-[14px] [&>button]:w-8 [&>button]:h-8 [&>button]:flex [&>button]:items-center [&>button]:justify-center [&>button]:rounded-[8px] [&>button]:!bg-[var(--surface-white)] [&>button]:!text-[var(--text-secondary)] [&>button]:!opacity-100 [&>button]:hover:!bg-[var(--surface-elevated)] [&>button]:!border [&>button]:!border-[var(--border-color)] [&>button]:transition-colors [&>button>svg]:w-4 [&>button>svg]:h-4"
           style={{
             maxWidth: '512px',
             width: '95vw',
             maxHeight: '92vh',
             display: 'flex',
             flexDirection: 'column',
-            boxShadow: '0 0 0 1px rgba(45,106,79,0.15), 0 8px 32px rgba(0,0,0,0.22), 0 0 60px rgba(45,106,79,0.18)',
+            boxShadow: '0 0 0 1px color-mix(in srgb, var(--brand-green-text) 15%, transparent), 0 8px 32px rgba(0,0,0,0.22), 0 0 60px color-mix(in srgb, var(--brand-green-text) 18%, transparent)',
           }}
         >
           {selectedAppt && (() => {
@@ -2247,7 +2449,7 @@ export default function AdminBookingsPage() {
             return (
               <>
                 {/* ── Coloured header strip (always shown) ── */}
-                <div className="pl-6 pr-16 py-4 flex items-center gap-4 flex-shrink-0" style={{ background: '#2D6A4F' }}>
+                <div className="pl-6 pr-16 py-4 flex items-center gap-4 flex-shrink-0" style={{ background: 'var(--brand-green-text)' }}>
                   <Avatar className="w-12 h-12 border-2 border-white/20 flex-shrink-0">
                     <AvatarImage src={selectedAppt.petImage} alt={selectedAppt.petName} className="object-cover" />
                     <AvatarFallback className="text-base font-bold">{selectedAppt.petName.slice(0, 2)}</AvatarFallback>
@@ -2268,7 +2470,7 @@ export default function AdminBookingsPage() {
                     <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
                       <div className="grid grid-cols-2 gap-3">
                         <div className="flex items-start gap-3 p-3 bg-[var(--surface-elevated)]" style={{ borderRadius: '10px' }}>
-                          <div style={{ width: 32, height: 32, borderRadius: 8, background: '#2D6A4F18', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><CalendarIcon style={{ width: 15, height: 15, color: 'var(--brand-green-text)' }} /></div>
+                          <div style={{ width: 32, height: 32, borderRadius: 8, background: 'color-mix(in srgb, var(--brand-green-text) 9%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><CalendarIcon style={{ width: 15, height: 15, color: 'var(--brand-green-text)' }} /></div>
                           <div><p className="text-[var(--text-secondary)]" style={{ fontSize: '11px', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Date</p><p className="text-[var(--text-primary)]" style={{ fontSize: '13px', fontWeight: 600 }}>{new Date(selectedAppt.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</p></div>
                         </div>
                         <div className="flex items-start gap-3 p-3 bg-[var(--surface-elevated)]" style={{ borderRadius: '10px' }}>
@@ -2305,7 +2507,7 @@ export default function AdminBookingsPage() {
                       <div className="flex gap-2 ml-auto">
                         <Button variant="outline" size="sm" onClick={() => setDetailMode('edit')}><Pencil className="w-3.5 h-3.5 mr-1.5" />Edit</Button>
                         {canCheckIn && (
-                          <Button size="sm" onClick={handleClientArrived} style={{ background: '#2D6A4F', color: 'white', border: 'none' }} className="hover:opacity-90">
+                          <Button size="sm" onClick={handleClientArrived} style={{ background: 'var(--brand-green-text)', color: 'var(--on-brand-green)', border: 'none' }} className="hover:opacity-90">
                             <UserCheck className="w-3.5 h-3.5 mr-1.5" />Patient Arrived
                           </Button>
                         )}
@@ -2375,18 +2577,18 @@ export default function AdminBookingsPage() {
       {/* ─── New Appointment Dialog ────────────────────── */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent
-          className="p-0 gap-0 overflow-hidden [&>button]:top-[14px] [&>button]:right-[14px] [&>button]:w-8 [&>button]:h-8 [&>button]:flex [&>button]:items-center [&>button]:justify-center [&>button]:rounded-[8px] [&>button]:!bg-white/15 [&>button]:!text-white [&>button]:!opacity-100 [&>button]:hover:!bg-white/25 [&>button]:transition-colors [&>button>svg]:w-4 [&>button>svg]:h-4"
+          className="p-0 gap-0 overflow-hidden [&>button]:top-[14px] [&>button]:right-[14px] [&>button]:w-8 [&>button]:h-8 [&>button]:flex [&>button]:items-center [&>button]:justify-center [&>button]:rounded-[8px] [&>button]:!bg-[var(--surface-white)] [&>button]:!text-[var(--text-secondary)] [&>button]:!opacity-100 [&>button]:hover:!bg-[var(--surface-elevated)] [&>button]:!border [&>button]:!border-[var(--border-color)] [&>button]:transition-colors [&>button>svg]:w-4 [&>button>svg]:h-4"
           style={{ maxWidth: '780px', width: '95vw', maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}
         >
           {/* Header */}
-          <div style={{ background: '#2D6A4F', padding: '18px 24px', flexShrink: 0 }}>
+          <div style={{ background: 'var(--surface-elevated)', padding: '18px 24px', flexShrink: 0, borderBottom: '1px solid var(--border-color)', borderLeft: '4px solid var(--brand-green-text)' }}>
             <div className="flex items-center gap-3">
-              <div style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: 'rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <CalendarIcon style={{ width: '18px', height: '18px', color: '#fff' }} />
+              <div style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <CalendarIcon style={{ width: '18px', height: '18px', color: 'var(--brand-green-text)' }} />
               </div>
               <div>
-                <h2 style={{ fontSize: '17px', fontWeight: 700, color: '#fff', lineHeight: 1.2 }}>New Appointment</h2>
-                <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginTop: '1px' }}>Schedule a visit for a patient</p>
+                <h2 style={{ fontSize: '17px', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.2 }}>New Appointment</h2>
+                <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '1px' }}>Schedule a visit for a patient</p>
               </div>
             </div>
           </div>
@@ -2479,7 +2681,7 @@ export default function AdminBookingsPage() {
                               }}
                               className="hover:bg-[var(--surface-elevated)] transition-colors"
                             >
-                              <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#2D6A4F20', color: '#2D6A4F', fontSize: '10px', fontWeight: 700 }}>
+                              <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)', color: 'var(--brand-green-text)', fontSize: '10px', fontWeight: 700 }}>
                                 {(c.first_name?.[0] || '').toUpperCase()}{(c.last_name?.[0] || '').toUpperCase()}
                               </div>
                               <div>
@@ -2586,7 +2788,7 @@ export default function AdminBookingsPage() {
                 <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Service Type</p>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
                   {[
-                    { label: 'Annual Checkup',  color: '#2D6A4F', emoji: '🩺' },
+                    { label: 'Annual Checkup',  color: 'var(--brand-green-text)', emoji: '🩺' },
                     { label: 'Vaccination',      color: '#3B82F6', emoji: '💉' },
                     { label: 'Dental Cleaning',  color: '#8B5CF6', emoji: '🦷' },
                     { label: 'Surgery',          color: '#EC4899', emoji: '🔬' },
@@ -2625,7 +2827,7 @@ export default function AdminBookingsPage() {
                 <div className="flex gap-2 flex-wrap">
                   {staffList.length === 0 && <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>No vets found</span>}
                   {staffList.map((v, i) => {
-                    const colors = ['#2D6A4F', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261'];
+                    const colors = ['var(--brand-green-text)', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261'];
                     const color = colors[i % colors.length];
                     const active = newApptVetId === v.id;
                     return (
@@ -2668,9 +2870,9 @@ export default function AdminBookingsPage() {
                         onClick={() => setNewApptTime(slot.time24)}
                         style={{
                           padding: '8px 4px', borderRadius: '8px', fontSize: '12px', fontWeight: isActive ? 700 : 500,
-                          border: `1.5px solid ${isActive ? '#2D6A4F' : 'var(--border-color)'}`,
-                          backgroundColor: isActive ? '#2D6A4F' : isUnavailable ? 'var(--surface-elevated)' : 'transparent',
-                          color: isActive ? '#fff' : isUnavailable ? 'var(--text-secondary)' : 'var(--text-primary)',
+                          border: `1.5px solid ${isActive ? 'var(--brand-green-text)' : 'var(--border-color)'}`,
+                          backgroundColor: isActive ? 'var(--brand-green-text)' : isUnavailable ? 'var(--surface-elevated)' : 'transparent',
+                          color: isActive ? 'var(--on-brand-green)' : isUnavailable ? 'var(--text-secondary)' : 'var(--text-primary)',
                           cursor: isUnavailable ? 'not-allowed' : 'pointer',
                           opacity: isUnavailable ? 0.5 : 1,
                           transition: 'all 0.15s',
@@ -2695,8 +2897,8 @@ export default function AdminBookingsPage() {
                       <button key={d} onClick={() => setNewApptDuration(d)} style={{
                         padding: '6px 13px', borderRadius: '7px', fontSize: '13px',
                         fontWeight: active ? 700 : 500,
-                        border: `1.5px solid ${active ? '#2D6A4F' : 'var(--border-color)'}`,
-                        backgroundColor: active ? '#2D6A4F18' : 'transparent',
+                        border: `1.5px solid ${active ? 'var(--brand-green-text)' : 'var(--border-color)'}`,
+                        backgroundColor: active ? 'color-mix(in srgb, var(--brand-green-text) 9%, transparent)' : 'transparent',
                         color: active ? 'var(--brand-green-text)' : 'var(--text-secondary)',
                         cursor: 'pointer', transition: 'all 0.15s',
                       }}>{d}</button>
@@ -2768,8 +2970,8 @@ export default function AdminBookingsPage() {
                       <button key={m} onClick={() => setConfirmMethod(m)} style={{
                         flex: 1, padding: '4px 2px', borderRadius: '6px', fontSize: '11px',
                         fontWeight: active ? 700 : 400,
-                        border: `1.5px solid ${active ? '#2D6A4F' : 'var(--border-color)'}`,
-                        backgroundColor: active ? '#2D6A4F15' : 'transparent',
+                        border: `1.5px solid ${active ? 'var(--brand-green-text)' : 'var(--border-color)'}`,
+                        backgroundColor: active ? 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)' : 'transparent',
                         color: active ? 'var(--brand-green-text)' : 'var(--text-secondary)',
                         cursor: 'pointer',
                       }}>{m}</button>
@@ -2790,8 +2992,8 @@ export default function AdminBookingsPage() {
                       <button key={m} onClick={() => setReminderMethod(m)} style={{
                         flex: 1, padding: '4px 2px', borderRadius: '6px', fontSize: '11px',
                         fontWeight: active ? 700 : 400,
-                        border: `1.5px solid ${active ? '#2D6A4F' : 'var(--border-color)'}`,
-                        backgroundColor: active ? '#2D6A4F15' : 'transparent',
+                        border: `1.5px solid ${active ? 'var(--brand-green-text)' : 'var(--border-color)'}`,
+                        backgroundColor: active ? 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)' : 'transparent',
                         color: active ? 'var(--brand-green-text)' : 'var(--text-secondary)',
                         cursor: 'pointer',
                       }}>{m}</button>
@@ -2808,8 +3010,8 @@ export default function AdminBookingsPage() {
                           <button key={t} onClick={() => setReminderTiming(t)} style={{
                             padding: '4px 9px', borderRadius: '5px', fontSize: '11px',
                             fontWeight: active ? 700 : 400,
-                            border: `1.5px solid ${active ? '#2D6A4F' : 'var(--border-color)'}`,
-                            backgroundColor: active ? '#2D6A4F15' : 'transparent',
+                            border: `1.5px solid ${active ? 'var(--brand-green-text)' : 'var(--border-color)'}`,
+                            backgroundColor: active ? 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)' : 'transparent',
                             color: active ? 'var(--brand-green-text)' : 'var(--text-secondary)',
                             cursor: 'pointer',
                           }}>{t}</button>
@@ -2842,7 +3044,7 @@ export default function AdminBookingsPage() {
                   if (visitType === 'new') {
                     if (!npOwnerName.trim() || !npPetName.trim() || !npSpecies) { alert('Please fill in owner name, pet name, and species.'); setSavingAppt(false); return; }
                     const nameParts = npOwnerName.trim().split(' ');
-                    const { data: newClient, error: cErr } = await supabase
+                    const { data: newClient, error: cErr } = await db
                       .from('clients')
                       .insert([{
                         organization_id: orgCtx2.organizationId,
@@ -2858,7 +3060,7 @@ export default function AdminBookingsPage() {
                     finalClientId = newClient.id;
 
                     const weightKg = npWeight ? parseFloat(npWeight) : undefined;
-                    const { data: newPet, error: pErr } = await supabase
+                    const { data: newPet, error: pErr } = await db
                       .from('pets')
                       .insert([{
                         client_id: finalClientId,
@@ -2880,7 +3082,7 @@ export default function AdminBookingsPage() {
                   if (!finalClientId || !finalPetId) { alert('Please select a patient (owner and pet).'); setSavingAppt(false); return; }
 
                   if (visitType === 'returning' && newApptVetId && finalPetId) {
-                    await supabase.from('pets').update({ assigned_vet_id: newApptVetId }).eq('id', finalPetId).eq('organization_id', orgCtx2.organizationId);
+                    await db.from('pets').update({ assigned_vet_id: newApptVetId }).eq('id', finalPetId).eq('organization_id', orgCtx2.organizationId);
                     window.dispatchEvent(new CustomEvent('petDataChanged'));
                   }
 
@@ -2900,7 +3102,7 @@ export default function AdminBookingsPage() {
                     try {
                       const petDisplayName = visitType === 'new' ? npPetName : newApptPet;
                       const ownerDisplayName = visitType === 'new' ? npOwnerName : ownerSearch;
-                      await supabase.from('notification_events').upsert({
+                      await db.from('notification_events').upsert({
                         id: `appt-assign-${finalPetId}-${Date.now()}`,
                         type: 'appt_assign',
                         timestamp: new Date().toISOString(),
@@ -2926,7 +3128,7 @@ export default function AdminBookingsPage() {
                   setSavingAppt(false);
                 }
               }}
-              style={{ backgroundColor: '#2D6A4F', color: 'var(--on-brand-green)' }}
+              style={{ backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)' }}
             >
               <CalendarIcon className="w-4 h-4 mr-1.5" />
               {savingAppt ? 'Saving…' : 'Schedule Appointment'}

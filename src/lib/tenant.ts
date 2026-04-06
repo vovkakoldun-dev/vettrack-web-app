@@ -19,16 +19,20 @@ export interface TenantIdentity {
 
 type AnyRecord = Record<string, unknown>;
 
-// Tables that do NOT have an organization_id column and use parent-join isolation.
-// These are already protected by RLS parent-join policies; the client wrapper
-// skips auto-inject for them (RLS is the authority).
+// Tables that genuinely do NOT have an organization_id column.
+// All other tables are org-scoped and the tenant wrapper auto-injects org_id.
+//
+// ⚠️  If a migration adds organization_id to a table listed here, REMOVE it
+//     from this set so the wrapper starts enforcing org isolation on it.
+//
+// Last updated: 2026-04-05 after composite FK + RLS child-table migrations
+// which added organization_id to 16 tables previously in this set.
 const TABLES_WITHOUT_ORG_ID = new Set([
-  'invoice_line_items', 'lab_results', 'login_activity', 'medical_records',
-  'medications', 'message_reactions', 'notification_preferences', 'organizations',
-  'payments', 'pet_allergies', 'pet_conditions', 'pet_treatments',
-  'pet_weight_history', 'record_diagnoses', 'record_treatments', 'record_vitals',
-  'staff_ratings', 'staff_specializations', 'user_sessions', 'vaccinations',
-  'vet_conditions_reference',
+  'login_activity',            // per-user auth log, no org column
+  'notification_preferences',  // per-user prefs, no org column
+  'organizations',             // IS the organization table itself
+  'user_sessions',             // session tracking, scoped by user_id
+  'vet_conditions_reference',  // global reference data, not org-scoped
 ]);
 
 // Fields that must never be set by client code — they are derived from the session.

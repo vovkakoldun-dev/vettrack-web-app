@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   ChevronLeft, ChevronRight, Clock, CalendarDays,
-  ArrowLeftRight, Users, Sun, Moon,
+  ArrowLeftRight, Users, Sun, Moon, Palmtree, ThermometerSun,
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -13,7 +13,7 @@ import {
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '../components/ui/select';
-import { supabase } from '../../lib/supabase';
+import { useTenantDb } from '../context/TenantContext';
 import { getOrgContext } from '../hooks/useOrgContext';
 import { useAuth } from '../context/AuthContext';
 
@@ -127,6 +127,7 @@ function formatRole(role: string): string {
 // ─── Component ──────────────────────────────────────────────
 
 export default function ShiftsPage() {
+  const db = useTenantDb();
   const { user } = useAuth();
 
   const [weekOffset, setWeekOffset] = useState(0);
@@ -134,6 +135,7 @@ export default function ShiftsPage() {
   const [myShifts, setMyShifts] = useState<Shift[]>([]);
   const [allShifts, setAllShifts] = useState<Shift[]>([]);
   const [allStaffList, setAllStaffList] = useState<{ id: string; role: string; first_name: string; last_name: string; avatar_url: string | null }[]>([]);
+  const [timeBlockMap, setTimeBlockMap] = useState<Record<string, { type: string; status: string }>>({});
   const [loading, setLoading] = useState(true);
   const [swapOpen, setSwapOpen] = useState(false);
   const [swapMyShift, setSwapMyShift] = useState('');
@@ -170,9 +172,9 @@ export default function ShiftsPage() {
       const { organizationId } = await getOrgContext();
 
       // Get current user's staff record
-      const { data: staffRow } = await supabase
+      const { data: staffRow } = await db
         .from('staff')
-        .select('id, profile_id, role, profiles:profiles!staff_profile_id_fkey(first_name, last_name, avatar_url)')
+        .select('id, profile_id, role, profiles:profiles!staff_profile_org_fkey(first_name, last_name, avatar_url)')
         .eq('id', user.id)
         .single();
 
@@ -181,7 +183,7 @@ export default function ShiftsPage() {
       }
 
       // Get my shifts
-      const { data: myShiftData } = await supabase
+      const { data: myShiftData } = await db
         .from('shifts')
         .select('*')
         .eq('organization_id', organizationId)
@@ -192,20 +194,36 @@ export default function ShiftsPage() {
 
       setMyShifts((myShiftData as Shift[]) || []);
 
-      // Get all team shifts + all staff members in parallel
-      const [{ data: allShiftData }, { data: staffData }] = await Promise.all([
-        supabase
+      // Get all team shifts + all staff members + time blocks in parallel
+      const [{ data: allShiftData }, { data: staffData }, { data: timeBlockData }] = await Promise.all([
+        db
           .from('shifts')
-          .select('*, staff:staff!shifts_staff_id_fkey(id, role, profiles:profiles!staff_profile_id_fkey(first_name, last_name, avatar_url))')
+          .select('*, staff:staff!shifts_staff_org_fkey(id, role, profiles:profiles!staff_profile_org_fkey(first_name, last_name, avatar_url))')
           .eq('organization_id', organizationId)
           .gte('date', weekStartStr)
           .lte('date', weekEndStr)
           .order('date'),
-        supabase
+        db
           .from('staff')
-          .select('id, role, profiles:profiles!staff_profile_id_fkey(first_name, last_name, avatar_url)')
+          .select('id, role, profiles:profiles!staff_profile_org_fkey(first_name, last_name, avatar_url)')
           .eq('organization_id', organizationId),
+        db
+          .from('staff_time_blocks')
+          .select('staff_id, date, type, status')
+          .eq('organization_id', organizationId)
+          .in('type', ['PTO', 'Sick Day'])
+          .gte('date', weekStartStr)
+          .lte('date', weekEndStr),
       ]);
+
+      // Build time block lookup: "staffId-date" → { type, status }
+      const tbMap: Record<string, { type: string; status: string }> = {};
+      if (timeBlockData) {
+        for (const tb of timeBlockData as any[]) {
+          tbMap[`${tb.staff_id}-${tb.date}`] = { type: tb.type, status: tb.status };
+        }
+      }
+      setTimeBlockMap(tbMap);
 
       setAllShifts((allShiftData as Shift[]) || []);
       setAllStaffList((staffData || []).map((s: any) => ({
@@ -331,13 +349,13 @@ export default function ShiftsPage() {
       const myRole = formatRole(myStaff.role);
 
       // Update shift status
-      await supabase
+      await db
         .from('shifts')
         .update({ status: 'Swap Pending', swap_with_staff_id: swapWithStaff })
         .eq('id', swapMyShift);
 
       // Create pending request for super admin
-      await supabase.from('pending_requests').insert({
+      await db.from('pending_requests').insert({
         organization_id: organizationId,
         type: 'shift_swap',
         avatar: myInitials,
@@ -371,7 +389,7 @@ export default function ShiftsPage() {
       const { organizationId } = await getOrgContext();
 
       // Insert overtime as a shift with type 'overtime'
-      await supabase.from('shifts').insert({
+      await db.from('shifts').insert({
         organization_id: organizationId,
         staff_id: user.id,
         date: overtimeDate,
@@ -388,7 +406,7 @@ export default function ShiftsPage() {
       const myInitials = prof ? `${prof.first_name[0]}${prof.last_name[0]}` : '??';
       const myRole = myStaff?.role || 'Staff';
 
-      await supabase.from('pending_requests').insert({
+      await db.from('pending_requests').insert({
         organization_id: organizationId,
         type: 'overtime',
         avatar: myInitials,
@@ -451,7 +469,7 @@ export default function ShiftsPage() {
             onClick={() => setSwapOpen(true)}
             style={{
               background: 'var(--brand-green-text)',
-              color: '#fff',
+              color: 'var(--on-brand-green)',
               fontWeight: 600,
               fontSize: 13,
               borderRadius: 6,
@@ -551,18 +569,25 @@ export default function ShiftsPage() {
                 const shift = myShiftMap[dateStr];
                 const isWeekend = i >= 5;
                 const isToday = fmtDate(new Date()) === dateStr;
+                const myTb = user ? timeBlockMap[`${user.id}-${dateStr}`] : null;
+                const myPto = myTb?.type === 'PTO';
+                const mySick = myTb?.type === 'Sick Day';
+                const myTimeOff = myPto || mySick;
+                const myTbColor = myPto ? '#3B82F6' : '#d4183d';
 
                 return (
                   <div
                     key={dateStr}
                     style={{
-                      background: isWeekend ? 'var(--surface-elevated)' : 'var(--surface-white)',
+                      background: myTimeOff ? (myPto ? '#3B82F60A' : '#d4183d0A') : isWeekend ? 'var(--surface-elevated)' : 'var(--surface-white)',
                       border: isToday
                         ? '2px solid var(--brand-green-text)'
+                        : myTimeOff
+                        ? `1px solid ${myTbColor}30`
                         : '1px solid var(--border-color)',
                       borderRadius: 10,
                       padding: '14px 12px',
-                      opacity: isWeekend ? 0.55 : 1,
+                      opacity: isWeekend && !myTimeOff ? 0.55 : 1,
                       minHeight: 100,
                       display: 'flex',
                       flexDirection: 'column',
@@ -592,7 +617,29 @@ export default function ShiftsPage() {
                       </span>
                     </div>
 
-                    {shift ? (
+                    {myTimeOff ? (
+                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+                        {myPto
+                          ? <Palmtree style={{ width: 18, height: 18, color: myTbColor }} />
+                          : <ThermometerSun style={{ width: 18, height: 18, color: myTbColor }} />
+                        }
+                        <span style={{ fontSize: 12, fontWeight: 700, color: myTbColor }}>
+                          {myPto ? 'PTO' : 'Sick Day'}
+                        </span>
+                        {myTb?.status && myTb.status !== 'Confirmed' && (
+                          <span style={{
+                            fontSize: 10,
+                            fontWeight: 600,
+                            color: myTb.status === 'Approved' ? '#16A34A' : myTb.status === 'Denied' ? '#EF4444' : '#F4A261',
+                            background: myTb.status === 'Approved' ? '#16A34A18' : myTb.status === 'Denied' ? '#EF444418' : '#F4A26118',
+                            borderRadius: 4,
+                            padding: '1px 6px',
+                          }}>
+                            {myTb.status}
+                          </span>
+                        )}
+                      </div>
+                    ) : shift ? (
                       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
                         <div
                           style={{
@@ -826,6 +873,13 @@ export default function ShiftsPage() {
                         const dateStr = fmtDate(day);
                         const shift = member.shifts[dateStr];
                         const isTodayCol = fmtDate(new Date()) === dateStr;
+                        const timeBlock = timeBlockMap[`${member.id}-${dateStr}`];
+                        const isPto = timeBlock?.type === 'PTO';
+                        const isSick = timeBlock?.type === 'Sick Day';
+                        const hasTimeOff = isPto || isSick;
+                        const tbStatus = timeBlock?.status;
+                        const tbColor = isPto ? '#3B82F6' : '#d4183d';
+                        const tbBg = isPto ? '#3B82F612' : '#d4183d12';
                         return (
                           <td
                             key={i}
@@ -833,10 +887,33 @@ export default function ShiftsPage() {
                               textAlign: 'center',
                               padding: '12px 8px',
                               borderBottom: '1px solid var(--border-color)',
-                              background: isTodayCol ? '#74C69D06' : 'transparent',
+                              background: hasTimeOff ? tbBg : isTodayCol ? '#74C69D06' : 'transparent',
                             }}
                           >
-                            {shift ? (
+                            {hasTimeOff ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+                                {isPto
+                                  ? <Palmtree style={{ width: 14, height: 14, color: tbColor }} />
+                                  : <ThermometerSun style={{ width: 14, height: 14, color: tbColor }} />
+                                }
+                                <div style={{ fontSize: 11, fontWeight: 700, color: tbColor, lineHeight: '14px' }}>
+                                  {isPto ? 'PTO' : 'Sick'}
+                                </div>
+                                {tbStatus && tbStatus !== 'Confirmed' && (
+                                  <span style={{
+                                    display: 'inline-block',
+                                    fontSize: 9,
+                                    fontWeight: 600,
+                                    color: tbStatus === 'Approved' ? '#16A34A' : tbStatus === 'Denied' ? '#EF4444' : '#F4A261',
+                                    background: tbStatus === 'Approved' ? '#16A34A18' : tbStatus === 'Denied' ? '#EF444418' : '#F4A26118',
+                                    borderRadius: 4,
+                                    padding: '1px 5px',
+                                  }}>
+                                    {tbStatus}
+                                  </span>
+                                )}
+                              </div>
+                            ) : shift ? (
                               <div>
                                 <div
                                   style={{
@@ -936,7 +1013,7 @@ export default function ShiftsPage() {
               style={{
                 borderRadius: 8, fontSize: 13, fontWeight: 600, padding: '8px 18px',
                 background: !overtimeDate || !overtimeStart || !overtimeEnd || overtimeSubmitting ? 'var(--surface-elevated)' : 'var(--brand-green-text)',
-                color: !overtimeDate || !overtimeStart || !overtimeEnd || overtimeSubmitting ? 'var(--text-secondary)' : '#fff',
+                color: !overtimeDate || !overtimeStart || !overtimeEnd || overtimeSubmitting ? 'var(--text-secondary)' : 'var(--on-brand-green)',
                 cursor: !overtimeDate || !overtimeStart || !overtimeEnd || overtimeSubmitting ? 'not-allowed' : 'pointer',
               }}
             >

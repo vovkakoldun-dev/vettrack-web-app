@@ -75,8 +75,8 @@ export default function ToastNotification() {
           <div style={{
             width: '36px', height: '36px', borderRadius: '10px', flexShrink: 0,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: toast.type === 'chat' ? '#3B82F615' : '#2D6A4F15',
-            color: toast.type === 'chat' ? '#3B82F6' : '#2D6A4F',
+            background: toast.type === 'chat' ? '#3B82F615' : 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)',
+            color: toast.type === 'chat' ? '#3B82F6' : 'var(--brand-green-text)',
           }}>
             {toast.type === 'chat' ? <MessageSquare size={18} /> : <Bell size={18} />}
           </div>

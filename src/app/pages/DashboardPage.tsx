@@ -642,8 +642,8 @@ export default function DashboardPage() {
             paddingLeft: '44px',
             paddingRight: searchQuery ? '44px' : '16px',
             fontSize: '15px',
-            boxShadow: isSearching && searchOpen ? '0 0 0 2px #2D6A4F40' : undefined,
-            borderColor: isSearching && searchOpen ? '#2D6A4F60' : undefined,
+            boxShadow: isSearching && searchOpen ? '0 0 0 2px color-mix(in srgb, var(--brand-green-text) 25%, transparent)' : undefined,
+            borderColor: isSearching && searchOpen ? 'color-mix(in srgb, var(--brand-green-text) 38%, transparent)' : undefined,
           }}
         />
         {searchQuery && (
@@ -696,7 +696,7 @@ export default function DashboardPage() {
                         onClick={() => { navigate(`/clients/${c.id}`); setSearchOpen(false); setSearchQuery(''); }}
                         className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-[var(--surface-elevated)] transition-colors border-b border-[var(--border-color)]"
                       >
-                        <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center" style={{ background: '#2D6A4F18' }}>
+                        <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center" style={{ background: 'color-mix(in srgb, var(--brand-green-text) 9%, transparent)' }}>
                           <Users className="w-4 h-4" style={{ color: 'var(--brand-green-text)' }} />
                         </div>
                         <div className="flex-1 min-w-0">
@@ -775,7 +775,7 @@ export default function DashboardPage() {
                           className="flex-shrink-0 px-2 py-0.5"
                           style={{
                             fontSize: '11px', fontWeight: 600, borderRadius: '9999px',
-                            backgroundColor: a.status === 'Confirmed' ? '#2D6A4F18' : a.status === 'Completed' ? '#3B82F618' : a.status === 'Cancelled' ? '#d4183d18' : '#F4A26118',
+                            backgroundColor: a.status === 'Confirmed' ? 'color-mix(in srgb, var(--brand-green-text) 9%, transparent)' : a.status === 'Completed' ? '#3B82F618' : a.status === 'Cancelled' ? '#d4183d18' : '#F4A26118',
                             color: a.status === 'Confirmed' ? 'var(--brand-green-text)' : a.status === 'Completed' ? '#3B82F6' : a.status === 'Cancelled' ? '#d4183d' : '#F4A261',
                           }}
                         >

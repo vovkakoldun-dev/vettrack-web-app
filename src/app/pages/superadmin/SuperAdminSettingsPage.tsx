@@ -82,7 +82,7 @@ const INITIAL_STAFF = [
 
 const ROLES = [
   { name: 'Administrator',    color: ACCENT,    bg: ACCENT_BG,    perms: ['Full clinic access', 'Manage staff', 'Billing access', 'Settings', 'Audit logs'] },
-  { name: 'Veterinarian',     color: '#2D6A4F', bg: '#2D6A4F12',  perms: ['Records', 'Prescriptions', 'Lab orders', 'Own schedule', 'Client comms'] },
+  { name: 'Veterinarian',     color: 'var(--brand-green-text)', bg: 'color-mix(in srgb, var(--brand-green-text) 7%, transparent)',  perms: ['Records', 'Prescriptions', 'Lab orders', 'Own schedule', 'Client comms'] },
   { name: 'Vet Technician',   color: '#8B5CF6', bg: '#8B5CF615',  perms: ['View records', 'Vitals entry', 'Lab prep', 'Med admin', 'Schedule view'] },
   { name: 'Front Desk',       color: '#06B6D4', bg: '#06B6D415',  perms: ['Appointments', 'Check-in/out', 'Invoicing', 'Client portal', 'Basic reports'] },
   { name: 'Read-Only',        color: '#6B7280', bg: '#6B728015',  perms: ['View records only', 'View schedule', 'View reports'] },

@@ -102,7 +102,7 @@ export default function LoginPage() {
 
   function selectRole(role: Role) {
     setSelected(role);
-    setEmail(ROLES.find(r => r.id === role)!.defaultEmail);
+    setEmail('');
     setPassword('');
     setAuthError(null);
     setSignUpSuccess(false);
@@ -194,8 +194,8 @@ export default function LoginPage() {
           position: 'fixed', top: '10%', left: '15%',
           width: '420px', height: '420px',
           background: isDark
-            ? 'radial-gradient(circle, rgba(45,106,79,0.18) 0%, transparent 70%)'
-            : 'radial-gradient(circle, rgba(45,106,79,0.12) 0%, transparent 70%)',
+            ? 'radial-gradient(circle, color-mix(in srgb, var(--brand-green-text) 18%, transparent) 0%, transparent 70%)'
+            : 'radial-gradient(circle, color-mix(in srgb, var(--brand-green-text) 12%, transparent) 0%, transparent 70%)',
           borderRadius: '50%', pointerEvents: 'none',
           filter: 'blur(60px)',
         }}
@@ -375,6 +375,7 @@ export default function LoginPage() {
                     type="email"
                     required
                     value={email}
+                    placeholder="you@example.com"
                     onChange={e => setEmail(e.target.value)}
                     style={{
                       width: '100%', padding: '11px 14px',
@@ -462,8 +463,8 @@ export default function LoginPage() {
                 {signUpSuccess && (
                   <div style={{
                     marginBottom: '16px', padding: '10px 14px', borderRadius: '10px',
-                    backgroundColor: 'rgba(45,106,79,0.08)', border: '1px solid rgba(45,106,79,0.2)',
-                    color: '#2D6A4F', fontSize: '13px', lineHeight: 1.5,
+                    backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--brand-green-text) 20%, transparent)',
+                    color: 'var(--brand-green-text)', fontSize: '13px', lineHeight: 1.5,
                   }}>
                     Account created! Check your email to confirm, then sign in.
                   </div>
@@ -477,7 +478,7 @@ export default function LoginPage() {
                   style={{
                     padding: '13px 20px',
                     background: (loading || signUpSuccess)
-                      ? 'rgba(45,106,79,0.5)'
+                      ? 'color-mix(in srgb, var(--brand-green-text) 50%, transparent)'
                       : `linear-gradient(135deg, ${activeRole.color}, ${activeRole.color}dd)`,
                     border: 'none',
                     borderRadius: '10px',
@@ -512,17 +513,6 @@ export default function LoginPage() {
                 </button>
               </form>
 
-              {/* Toggle sign in / sign up */}
-              <p style={{ marginTop: '20px', textAlign: 'center', fontSize: '13px', color: isDark ? '#94A3B8' : '#475569' }}>
-                {isSignUp ? 'Already have an account?' : "Don't have an account?"}{' '}
-                <button
-                  type="button"
-                  onClick={() => { setIsSignUp(v => !v); setAuthError(null); setSignUpSuccess(false); }}
-                  style={{ background: 'none', border: 'none', color: activeRole.color, cursor: 'pointer', fontWeight: 600, fontSize: '13px', padding: 0 }}
-                >
-                  {isSignUp ? 'Sign in' : 'Sign up'}
-                </button>
-              </p>
             </div>
           </>
         )}

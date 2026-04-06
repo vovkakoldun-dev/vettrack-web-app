@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   CheckSquare, Clock, AlertTriangle, CheckCircle2, Search,
   Phone, Calendar, Pill, FlaskConical, FileText, Bell,
   Filter, ChevronDown, User, Stethoscope, X, Trash2,
-  ArrowUpRight, MoreHorizontal, Circle, Plus,
+  ArrowUpRight, MoreHorizontal, Circle, Plus, AlarmClock,
+  UserCheck, UserPlus, Play, MoreVertical,
 } from 'lucide-react';
 import { Input } from '../../components/ui/input';
 import { Textarea } from '../../components/ui/textarea';
@@ -16,7 +17,10 @@ import {
 } from '../../components/ui/select';
 import { StatCard } from '../../components/StatCard';
 import { supabase } from '../../../lib/supabase';
+import { useTenantDb } from '../../context/TenantContext';
 import { getOrgContext } from '../../hooks/useOrgContext';
+import { useAuth } from '../../context/AuthContext';
+import { useProfile } from '../../hooks/useProfile';
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -47,26 +51,32 @@ interface Task {
   visitDate: string;
   doctorNotes: string;
   assignedTo?: string;          // front-desk staff display name
+  assignedToId?: string;        // profile id of assignee
   completedAt?: string;
+  completedBy?: string;         // display name of who completed the task
+  completedById?: string;       // profile id of who completed
   tags?: string[];
+  snoozedUntil?: string;        // ISO timestamp — task postponed until this time
 }
 
 // ─── Supabase select with joins ──────────────────────────────
 
 const TASKS_SELECT = `
   id, type, priority, status, due_date, due_time,
-  visit_date, doctor_notes, completed_at, tags,
-  pet:pets!tasks_pet_id_fkey(id, name, species),
-  client:clients!tasks_client_id_fkey(id, first_name, last_name, phone),
-  assignedByStaff:staff!tasks_assigned_by_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name)),
-  assignedToStaff:staff!tasks_assigned_to_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))
+  visit_date, doctor_notes, completed_at, tags, snoozed_until, assigned_to_id, completed_by_id,
+  pet:pets!tasks_pet_org_fkey(id, name, species),
+  client:clients!tasks_client_org_fkey(id, first_name, last_name, phone),
+  assignedByProfile:profiles!tasks_assigned_by_org_fkey(first_name, last_name),
+  assignedToProfile:profiles!tasks_assigned_to_org_fkey(first_name, last_name),
+  completedByProfile:profiles!tasks_completed_by_org_fkey(first_name, last_name)
 `;
 
 function mapRow(r: any): Task {
   const pet = r.pet;
   const client = r.client;
-  const byP = r.assignedByStaff?.profiles;
-  const toP = r.assignedToStaff?.profiles;
+  const byP = r.assignedByProfile;
+  const toP = r.assignedToProfile;
+  const cbP = r.completedByProfile;
   return {
     id: r.id,
     type: r.type,
@@ -82,8 +92,12 @@ function mapRow(r: any): Task {
     visitDate: r.visit_date,
     doctorNotes: r.doctor_notes || '',
     assignedTo: toP ? `${toP.first_name} ${toP.last_name}`.trim() : undefined,
+    assignedToId: r.assigned_to_id || undefined,
     completedAt: r.completed_at || undefined,
+    completedBy: cbP ? `${cbP.first_name} ${cbP.last_name}`.trim() : undefined,
+    completedById: r.completed_by_id || undefined,
     tags: r.tags || [],
+    snoozedUntil: r.snoozed_until || undefined,
   };
 }
 
@@ -92,18 +106,18 @@ function mapRow(r: any): Task {
 const PRIORITY_CONFIG: Record<Priority, { color: string; bg: string; dot: string }> = {
   Urgent: { color: '#d4183d', bg: 'rgba(212,24,61,0.1)',  dot: '#d4183d' },
   High:   { color: '#F4A261', bg: 'rgba(244,162,97,0.1)', dot: '#F4A261' },
-  Normal: { color: '#2D6A4F', bg: 'rgba(45,106,79,0.1)',  dot: '#2D6A4F' },
+  Normal: { color: 'var(--brand-green-text)', bg: 'color-mix(in srgb, var(--brand-green-text) 10%, transparent)',  dot: 'var(--brand-green-text)' },
   Low:    { color: '#6B7280', bg: 'rgba(107,114,128,0.1)',dot: '#6B7280' },
 };
 
 const STATUS_CONFIG: Record<TaskStatus, { color: string; bg: string; label: string }> = {
   'Pending':     { color: '#F4A261', bg: 'rgba(244,162,97,0.1)',  label: 'Pending'     },
-  'In Progress': { color: '#3B82F6', bg: 'rgba(45,106,79,0.1)',  label: 'In Progress' },
-  'Completed':   { color: '#2D6A4F', bg: 'rgba(45,106,79,0.1)',   label: 'Completed'   },
+  'In Progress': { color: '#3B82F6', bg: 'color-mix(in srgb, var(--brand-green-text) 10%, transparent)',  label: 'In Progress' },
+  'Completed':   { color: 'var(--brand-green-text)', bg: 'color-mix(in srgb, var(--brand-green-text) 10%, transparent)',   label: 'Completed'   },
 };
 
 const TYPE_CONFIG: Record<TaskType, { icon: React.ElementType; color: string }> = {
-  'Follow-up Call':      { icon: Phone,         color: '#2D6A4F' },
+  'Follow-up Call':      { icon: Phone,         color: 'var(--brand-green-text)' },
   'Medication Refill':   { icon: Pill,          color: '#8B5CF6' },
   'Lab Follow-up':       { icon: FlaskConical,  color: '#3B82F6' },
   'Schedule Appointment':{ icon: Calendar,      color: '#06B6D4' },
@@ -141,30 +155,56 @@ function TaskCard({
   task,
   onStatusChange,
   onDelete,
+  onSnooze,
+  onAssign,
+  currentUserId,
+  currentUserName,
 }: {
   task: Task;
   onStatusChange: (id: string, status: TaskStatus) => void;
   onDelete: (id: string) => void;
+  onSnooze: (id: string) => void;
+  onAssign: (id: string) => void;
+  currentUserId?: string;
+  currentUserName?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const isAssignedToMe = task.assignedToId === currentUserId;
+  const isSnoozed = task.snoozedUntil && new Date(task.snoozedUntil) > new Date();
   const TypeIcon = TYPE_CONFIG[task.type].icon;
   const typeColor = TYPE_CONFIG[task.type].color;
   const pCfg = PRIORITY_CONFIG[task.priority];
   const sCfg = STATUS_CONFIG[task.status];
   const overdue = isOverdue(task);
   const today = isDueToday(task);
+  const isCompleted = task.status === 'Completed';
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [menuOpen]);
 
   return (
     <div
-      className="bg-[var(--surface-white)] border border-[var(--border-color)] transition-all hover:border-[#2D6A4F]/40 hover:shadow-sm"
+      className="bg-[var(--surface-white)] border border-[var(--border-color)] transition-all hover:border-[var(--brand-green-text)]/40 hover:shadow-sm"
       style={{
         borderRadius: '12px',
         borderLeft: `3px solid ${pCfg.dot}`,
-        opacity: task.status === 'Completed' ? 0.7 : 1,
+        opacity: isCompleted ? 0.65 : 1,
       }}
     >
-      {/* Main row */}
-      <div style={{ padding: '14px 16px' }}>
+      {/* Main row — clickable to expand */}
+      <div
+        style={{ padding: '14px 16px', cursor: 'pointer' }}
+        onClick={() => setExpanded(e => !e)}
+      >
         <div className="flex items-start gap-3">
 
           {/* Type icon */}
@@ -207,11 +247,49 @@ function TaskCard({
               {today && !overdue && (
                 <span style={{
                   fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999,
-                  color: '#2D6A4F', backgroundColor: 'rgba(45,106,79,0.1)',
+                  color: 'var(--brand-green-text)', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 10%, transparent)',
                 }}>
                   Due Today
                 </span>
               )}
+              {isSnoozed && (
+                <span className="flex items-center gap-1" style={{
+                  fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999,
+                  color: '#8B5CF6', backgroundColor: 'rgba(139,92,246,0.1)',
+                }}>
+                  <AlarmClock style={{ width: 10, height: 10 }} />
+                  Snoozed until {new Date(task.snoozedUntil!).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                </span>
+              )}
+              {/* Assignment — always visible */}
+              {isAssignedToMe ? (
+                <span className="flex items-center gap-1" style={{
+                  fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999,
+                  color: '#3B82F6', backgroundColor: 'rgba(59,130,246,0.1)',
+                  border: '1px solid rgba(59,130,246,0.2)',
+                }}>
+                  <UserCheck style={{ width: 10, height: 10 }} />
+                  Assigned to me
+                </span>
+              ) : task.assignedTo ? (
+                <span className="flex items-center gap-1" style={{
+                  fontSize: 11, fontWeight: 500, padding: '2px 8px', borderRadius: 999,
+                  color: 'var(--text-secondary)', backgroundColor: 'var(--surface-elevated)',
+                  border: '1px solid var(--border-color)',
+                }}>
+                  <UserCheck style={{ width: 10, height: 10 }} />
+                  {task.assignedTo}
+                </span>
+              ) : !isCompleted ? (
+                <span className="flex items-center gap-1" style={{
+                  fontSize: 11, fontWeight: 500, padding: '2px 8px', borderRadius: 999,
+                  color: 'var(--text-secondary)', backgroundColor: 'transparent',
+                  border: '1px dashed var(--border-color)',
+                }}>
+                  <UserPlus style={{ width: 10, height: 10 }} />
+                  Unassigned
+                </span>
+              ) : null}
             </div>
 
             {/* Row 2: pet + owner */}
@@ -255,58 +333,149 @@ function TaskCard({
                   Due {formatDate(task.dueDate)}{task.dueTime ? ` · ${task.dueTime}` : ''}
                 </span>
               </div>
-              {task.assignedTo && (
-                <>
-                  <span style={{ color: 'var(--border-color)', fontSize: 12 }}>·</span>
-                  <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                    → {task.assignedTo}
-                  </span>
-                </>
-              )}
             </div>
           </div>
 
-          {/* Right: actions */}
-          <div className="flex items-center gap-2 flex-shrink-0">
-            {task.status !== 'Completed' && (
+          {/* Right side: primary action + overflow menu */}
+          <div className="flex items-center gap-2 flex-shrink-0" onClick={e => e.stopPropagation()}>
+            {!isCompleted && (
+              <>
+                {/* Primary action: Start (if Pending) or Done (if In Progress) */}
+                {task.status === 'Pending' ? (
+                  <button
+                    onClick={() => onStatusChange(task.id, 'In Progress')}
+                    className="flex items-center gap-1.5 transition-all hover:shadow-sm"
+                    style={{
+                      fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 8,
+                      backgroundColor: '#3B82F6', color: '#fff', border: 'none', cursor: 'pointer',
+                    }}
+                  >
+                    <Play style={{ width: 12, height: 12 }} />
+                    Start
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => onStatusChange(task.id, 'Completed')}
+                    className="flex items-center gap-1.5 transition-all hover:shadow-sm"
+                    style={{
+                      fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 8,
+                      backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)', border: 'none', cursor: 'pointer',
+                    }}
+                  >
+                    <CheckCircle2 style={{ width: 13, height: 13 }} />
+                    Done
+                  </button>
+                )}
+              </>
+            )}
+
+            {/* Overflow menu ··· */}
+            <div style={{ position: 'relative' }} ref={menuRef}>
               <button
-                onClick={() => onStatusChange(task.id, 'Completed')}
-                className="flex items-center gap-1.5 transition-colors hover:opacity-80"
+                onClick={() => setMenuOpen(o => !o)}
+                className="flex items-center justify-center transition-colors hover:bg-[var(--surface-elevated)]"
                 style={{
-                  fontSize: 12, fontWeight: 600, padding: '5px 10px', borderRadius: 8,
-                  backgroundColor: '#2D6A4F', color: 'var(--on-brand-green)', border: 'none', cursor: 'pointer',
+                  width: 32, height: 32, borderRadius: 8,
+                  border: '1px solid var(--border-color)',
+                  backgroundColor: menuOpen ? 'var(--surface-elevated)' : 'transparent',
+                  cursor: 'pointer',
                 }}
               >
-                <CheckCircle2 style={{ width: 13, height: 13 }} />
-                Done
+                <MoreVertical style={{ width: 15, height: 15, color: 'var(--text-secondary)' }} />
               </button>
-            )}
+
+              {menuOpen && (
+                <div
+                  className="bg-[var(--surface-white)] border border-[var(--border-color)]"
+                  style={{
+                    position: 'absolute', right: 0, top: 'calc(100% + 4px)',
+                    borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                    zIndex: 30, minWidth: 180, overflow: 'hidden', padding: '4px 0',
+                  }}
+                >
+                  {/* Claim / Unclaim */}
+                  {!isCompleted && (
+                    <button
+                      onClick={() => { onAssign(task.id); setMenuOpen(false); }}
+                      className="w-full flex items-center gap-2.5 transition-colors hover:bg-[var(--surface-elevated)]"
+                      style={{ padding: '9px 14px', border: 'none', background: 'none', cursor: 'pointer', fontSize: 13, color: 'var(--text-primary)' }}
+                    >
+                      {isAssignedToMe
+                        ? <><UserCheck style={{ width: 14, height: 14, color: '#3B82F6' }} /><span>Unassign from me</span></>
+                        : <><UserPlus style={{ width: 14, height: 14, color: 'var(--text-secondary)' }} /><span>Claim task</span></>
+                      }
+                    </button>
+                  )}
+
+                  {/* Snooze */}
+                  {!isCompleted && (
+                    <button
+                      onClick={() => { onSnooze(task.id); setMenuOpen(false); }}
+                      className="w-full flex items-center gap-2.5 transition-colors hover:bg-[var(--surface-elevated)]"
+                      style={{ padding: '9px 14px', border: 'none', background: 'none', cursor: 'pointer', fontSize: 13, color: 'var(--text-primary)' }}
+                    >
+                      <AlarmClock style={{ width: 14, height: 14, color: isSnoozed ? '#8B5CF6' : 'var(--text-secondary)' }} />
+                      <span>{isSnoozed ? 'Change snooze' : 'Snooze / Postpone'}</span>
+                    </button>
+                  )}
+
+                  {/* Mark Done (also accessible from expanded, as secondary path) */}
+                  {task.status !== 'Completed' && (
+                    <button
+                      onClick={() => { onStatusChange(task.id, 'Completed'); setMenuOpen(false); }}
+                      className="w-full flex items-center gap-2.5 transition-colors hover:bg-[var(--surface-elevated)]"
+                      style={{ padding: '9px 14px', border: 'none', background: 'none', cursor: 'pointer', fontSize: 13, color: 'var(--brand-green-text)' }}
+                    >
+                      <CheckCircle2 style={{ width: 14, height: 14, color: 'var(--brand-green-text)' }} />
+                      <span>Mark as done</span>
+                    </button>
+                  )}
+
+                  {/* Reopen completed task */}
+                  {isCompleted && (
+                    <button
+                      onClick={() => { onStatusChange(task.id, 'Pending'); setMenuOpen(false); }}
+                      className="w-full flex items-center gap-2.5 transition-colors hover:bg-[var(--surface-elevated)]"
+                      style={{ padding: '9px 14px', border: 'none', background: 'none', cursor: 'pointer', fontSize: 13, color: '#3B82F6' }}
+                    >
+                      <Play style={{ width: 14, height: 14, color: '#3B82F6' }} />
+                      <span>Reopen task</span>
+                    </button>
+                  )}
+
+                  {/* Divider */}
+                  <div style={{ height: 1, backgroundColor: 'var(--border-color)', margin: '4px 0' }} />
+
+                  {/* Delete */}
+                  <button
+                    onClick={() => { onDelete(task.id); setMenuOpen(false); }}
+                    className="w-full flex items-center gap-2.5 transition-colors hover:bg-red-50 dark:hover:bg-red-950/20"
+                    style={{ padding: '9px 14px', border: 'none', background: 'none', cursor: 'pointer', fontSize: 13, color: '#d4183d' }}
+                  >
+                    <Trash2 style={{ width: 14, height: 14 }} />
+                    <span>Delete task</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Expand chevron */}
             <button
               onClick={() => setExpanded(e => !e)}
               className="flex items-center justify-center transition-colors hover:bg-[var(--surface-elevated)]"
               style={{
-                width: 30, height: 30, borderRadius: 8, border: '1px solid var(--border-color)',
-                backgroundColor: 'transparent', cursor: 'pointer',
+                width: 32, height: 32, borderRadius: 8,
+                border: '1px solid var(--border-color)',
+                backgroundColor: 'transparent', cursor: 'pointer', flexShrink: 0,
               }}
             >
               <ChevronDown
                 style={{
-                  width: 14, height: 14, color: 'var(--text-secondary)',
+                  width: 15, height: 15, color: 'var(--text-secondary)',
                   transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
                   transition: 'transform 0.2s',
                 }}
               />
-            </button>
-            <button
-              onClick={() => onDelete(task.id)}
-              title="Delete task"
-              className="flex items-center justify-center transition-colors hover:bg-red-50 dark:hover:bg-red-950/30"
-              style={{
-                width: 30, height: 30, borderRadius: 8, border: '1px solid var(--border-color)',
-                backgroundColor: 'transparent', cursor: 'pointer',
-              }}
-            >
-              <Trash2 style={{ width: 14, height: 14, color: '#d4183d' }} />
             </button>
           </div>
         </div>
@@ -341,8 +510,8 @@ function TaskCard({
             </div>
           )}
           {task.completedAt && (
-            <p style={{ fontSize: 12, color: '#2D6A4F', marginTop: 10, fontWeight: 500 }}>
-              ✓ Completed {new Date(task.completedAt).toLocaleString()}{task.assignedTo ? ` by ${task.assignedTo}` : ''}
+            <p style={{ fontSize: 12, color: 'var(--brand-green-text)', marginTop: 10, fontWeight: 500 }}>
+              ✓ Completed {new Date(task.completedAt).toLocaleString()} by {task.completedBy || task.assignedTo || 'staff'}
             </p>
           )}
         </div>
@@ -367,6 +536,12 @@ const TYPE_OPTIONS: Array<TaskType | 'All'> = [
 ];
 
 export default function AdminTasksPage() {
+  const db = useTenantDb();
+  const { user } = useAuth();
+  const { profile } = useProfile('admin');
+  const currentUserId = user?.id;
+  const currentUserName = profile?.fullName || profile?.displayName || 'Me';
+
   const [tasks, setTasks] = useState<Task[]>([]);
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<'All' | TaskStatus>('All');
@@ -374,6 +549,95 @@ export default function AdminTasksPage() {
   const [type, setType] = useState<TaskType | 'All'>('All');
   const [priorityOpen, setPriorityOpen] = useState(false);
   const [typeOpen, setTypeOpen] = useState(false);
+
+  // ── Snooze dialog ────────────────────────────────────────────
+  const [snoozeOpen, setSnoozeOpen] = useState(false);
+  const [snoozeTaskId, setSnoozeTaskId] = useState<string | null>(null);
+  const [snoozeDate, setSnoozeDate] = useState('');
+  const [snoozeTime, setSnoozeTime] = useState('09:00');
+  const [snoozeSaving, setSnoozeSaving] = useState(false);
+
+  const SNOOZE_PRESETS = [
+    { label: 'Later today', hours: 3 },
+    { label: 'Tomorrow morning', hours: 24, setTime: '09:00' },
+    { label: 'In 2 days', hours: 48, setTime: '09:00' },
+    { label: 'Next week', hours: 168, setTime: '09:00' },
+  ];
+
+  const openSnooze = (id: string) => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    setSnoozeTaskId(id);
+    setSnoozeDate(`${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`);
+    setSnoozeTime('09:00');
+    setSnoozeOpen(true);
+  };
+
+  const handleSnooze = async (targetDate?: Date) => {
+    if (!snoozeTaskId) return;
+    setSnoozeSaving(true);
+    try {
+      const snoozedUntil = targetDate || new Date(`${snoozeDate}T${snoozeTime}`);
+      const { organizationId } = await getOrgContext();
+
+      // Update task due_date and snoozed_until
+      await db.from('tasks').update({
+        due_date: snoozedUntil.toISOString().split('T')[0],
+        snoozed_until: snoozedUntil.toISOString(),
+      }).eq('id', snoozeTaskId).eq('organization_id', organizationId);
+
+      // Create a notification_events entry for the reminder
+      const task = tasks.find(t => t.id === snoozeTaskId);
+      if (task) {
+        await db.from('notification_events').insert({
+          organization_id: organizationId,
+          type: 'task_reminder',
+          timestamp: snoozedUntil.toISOString(),
+          data: {
+            taskId: snoozeTaskId,
+            taskType: task.type,
+            petName: task.petName,
+            ownerName: task.ownerName,
+            notes: task.doctorNotes,
+            snoozedBy: currentUserName,
+          },
+        });
+      }
+
+      // Update local state
+      setTasks(prev => prev.map(t =>
+        t.id === snoozeTaskId
+          ? { ...t, dueDate: snoozedUntil.toISOString().split('T')[0], snoozedUntil: snoozedUntil.toISOString() }
+          : t
+      ));
+      setSnoozeOpen(false);
+      setSnoozeTaskId(null);
+    } catch {} finally {
+      setSnoozeSaving(false);
+    }
+  };
+
+  const handleAssign = async (id: string) => {
+    const task = tasks.find(t => t.id === id);
+    if (!task) return;
+    const { organizationId } = await getOrgContext();
+    const isCurrentlyMine = task.assignedToId === currentUserId;
+
+    // Toggle: if already mine, unassign; otherwise assign to me
+    const newAssignedToId = isCurrentlyMine ? null : currentUserId;
+    const newAssignedTo = isCurrentlyMine ? undefined : currentUserName;
+    const newStatus: TaskStatus = isCurrentlyMine ? 'Pending' : 'In Progress';
+
+    setTasks(prev => prev.map(t =>
+      t.id === id
+        ? { ...t, assignedToId: newAssignedToId || undefined, assignedTo: newAssignedTo, status: newStatus }
+        : t
+    ));
+    await db.from('tasks').update({
+      assigned_to_id: newAssignedToId,
+      status: newStatus,
+    }).eq('id', id).eq('organization_id', organizationId);
+  };
 
   // ── Add Task dialog ──────────────────────────────────────────
   const [addOpen, setAddOpen] = useState(false);
@@ -399,9 +663,9 @@ export default function AdminTasksPage() {
       try {
         const { organizationId } = await getOrgContext();
         const [petsRes, clientsRes, staffRes] = await Promise.all([
-          supabase.from('pets').select('id, name, species, client_id').eq('organization_id', organizationId).eq('is_active', true).order('name'),
-          supabase.from('clients').select('id, first_name, last_name').eq('organization_id', organizationId).order('last_name'),
-          supabase.from('staff').select('id, role, profile_id, profiles:profiles!staff_profile_id_fkey(first_name, last_name)').eq('organization_id', organizationId).in('role', ['veterinarian', 'senior_veterinarian', 'specialist']).eq('status', 'Active'),
+          db.from('pets').select('id, name, species, client_id').eq('organization_id', organizationId).eq('is_active', true).order('name'),
+          db.from('clients').select('id, first_name, last_name').eq('organization_id', organizationId).order('last_name'),
+          db.from('staff').select('id, role, profile_id, profiles:profiles!staff_profile_org_fkey(first_name, last_name)').eq('organization_id', organizationId).in('role', ['veterinarian', 'senior_veterinarian', 'specialist']).eq('status', 'Active'),
         ]);
         if (petsRes.data) setPetsList(petsRes.data.map((p: any) => ({ id: p.id, name: p.name, species: p.species || '', clientId: p.client_id })));
         if (clientsRes.data) setClientsList(clientsRes.data.map((c: any) => ({ id: c.id, name: `${c.first_name} ${c.last_name}`.trim() })));
@@ -442,7 +706,7 @@ export default function AdminTasksPage() {
       } else {
         assignedByStaffId = addAssignedById; // already a staff.id from staffList
       }
-      const { data, error } = await supabase.from('tasks').insert({
+      const { data, error } = await db.from('tasks').insert({
         organization_id: organizationId,
         type: addType,
         priority: addPriority,
@@ -470,7 +734,7 @@ export default function AdminTasksPage() {
   const loadTasks = useCallback(async () => {
     try {
       const { organizationId } = await getOrgContext();
-      const { data } = await supabase
+      const { data } = await db
         .from('tasks')
         .select(TASKS_SELECT)
         .eq('organization_id', organizationId)
@@ -482,25 +746,35 @@ export default function AdminTasksPage() {
   useEffect(() => { loadTasks(); }, [loadTasks]);
 
   const handleStatusChange = async (id: string, status: TaskStatus) => {
-    const completedAt = status === 'Completed' ? new Date().toISOString() : null;
+    const isCompleting = status === 'Completed';
+    const completedAt = isCompleting ? new Date().toISOString() : null;
+    const completedById = isCompleting ? user?.id || null : null;
+    const completedByName = isCompleting ? currentUserName : undefined;
     // Update locally immediately
     setTasks(prev => prev.map(t =>
       t.id === id
-        ? { ...t, status, completedAt: completedAt || t.completedAt }
+        ? {
+            ...t,
+            status,
+            completedAt: completedAt ?? undefined,
+            completedBy: completedByName,
+            completedById: completedById ?? undefined,
+          }
         : t
     ));
     // Persist to Supabase
     const { organizationId } = await getOrgContext();
-    await supabase.from('tasks').update({
+    await db.from('tasks').update({
       status,
       completed_at: completedAt,
+      completed_by_id: completedById,
     }).eq('id', id).eq('organization_id', organizationId);
   };
 
   const handleDelete = async (id: string) => {
     setTasks(prev => prev.filter(t => t.id !== id));
     const { organizationId } = await getOrgContext();
-    await supabase.from('tasks').delete().eq('id', id).eq('organization_id', organizationId);
+    await db.from('tasks').delete().eq('id', id).eq('organization_id', organizationId);
   };
 
   // Stats
@@ -546,7 +820,7 @@ export default function AdminTasksPage() {
         </div>
         <Button
           onClick={() => setAddOpen(true)}
-          style={{ backgroundColor: '#2D6A4F', color: 'var(--on-brand-green)', fontWeight: 600, fontSize: '14px', borderRadius: '10px', padding: '10px 20px' }}
+          style={{ backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)', fontWeight: 600, fontSize: '14px', borderRadius: '10px', padding: '10px 20px' }}
         >
           <Plus style={{ width: 16, height: 16, marginRight: 6 }} />
           Add Task
@@ -555,7 +829,7 @@ export default function AdminTasksPage() {
 
       {/* Stat cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '28px' }}>
-        <StatCard title="Total Tasks"     value={total}     icon={CheckSquare}    iconColor="#2D6A4F" />
+        <StatCard title="Total Tasks"     value={total}     icon={CheckSquare}    iconColor="var(--brand-green-text)" />
         <StatCard title="Urgent"          value={urgent}    icon={AlertTriangle}  iconColor="#d4183d"
           trend={urgent > 0 ? { value: `${urgent} need immediate action`, isPositive: false } : undefined} />
         <StatCard title="Due Today"       value={dueToday}  icon={Clock}          iconColor="#F4A261" />
@@ -598,7 +872,7 @@ export default function AdminTasksPage() {
                 {PRIORITY_OPTIONS.map(p => (
                   <button key={p} onClick={() => { setPriority(p); setPriorityOpen(false); }}
                     className="w-full text-left hover:bg-[var(--surface-elevated)] transition-colors"
-                    style={{ padding: '8px 14px', fontSize: '13px', color: priority === p ? '#2D6A4F' : 'var(--text-primary)', fontWeight: priority === p ? 700 : 400 }}>
+                    style={{ padding: '8px 14px', fontSize: '13px', color: priority === p ? 'var(--brand-green-text)' : 'var(--text-primary)', fontWeight: priority === p ? 700 : 400 }}>
                     {p}
                   </button>
                 ))}
@@ -623,7 +897,7 @@ export default function AdminTasksPage() {
                 {TYPE_OPTIONS.map(tt => (
                   <button key={tt} onClick={() => { setType(tt); setTypeOpen(false); }}
                     className="w-full text-left hover:bg-[var(--surface-elevated)] transition-colors"
-                    style={{ padding: '8px 14px', fontSize: '13px', color: type === tt ? '#2D6A4F' : 'var(--text-primary)', fontWeight: type === tt ? 700 : 400 }}>
+                    style={{ padding: '8px 14px', fontSize: '13px', color: type === tt ? 'var(--brand-green-text)' : 'var(--text-primary)', fontWeight: type === tt ? 700 : 400 }}>
                     {tt}
                   </button>
                 ))}
@@ -657,7 +931,7 @@ export default function AdminTasksPage() {
               style={{
                 padding: '7px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 600,
                 border: 'none', cursor: 'pointer',
-                backgroundColor: isActive ? '#2D6A4F' : 'transparent',
+                backgroundColor: isActive ? 'var(--brand-green-text)' : 'transparent',
                 color: isActive ? 'var(--on-brand-green)' : 'var(--text-secondary)',
               }}
             >
@@ -685,7 +959,16 @@ export default function AdminTasksPage() {
             <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: 4 }}>Try adjusting your filters</p>
           </div>
         ) : sorted.map(task => (
-          <TaskCard key={task.id} task={task} onStatusChange={handleStatusChange} onDelete={handleDelete} />
+          <TaskCard
+            key={task.id}
+            task={task}
+            onStatusChange={handleStatusChange}
+            onDelete={handleDelete}
+            onSnooze={openSnooze}
+            onAssign={handleAssign}
+            currentUserId={currentUserId}
+            currentUserName={currentUserName}
+          />
         ))}
       </div>
 
@@ -700,7 +983,7 @@ export default function AdminTasksPage() {
         <DialogContent style={{ maxWidth: '540px' }}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Plus style={{ width: 18, height: 18, color: '#2D6A4F' }} />
+              <Plus style={{ width: 18, height: 18, color: 'var(--brand-green-text)' }} />
               Add New Task
             </DialogTitle>
           </DialogHeader>
@@ -814,9 +1097,85 @@ export default function AdminTasksPage() {
             <Button
               onClick={handleAddTask}
               disabled={addSaving || !addPetId || !addAssignedById || !addDueDate}
-              style={{ backgroundColor: '#2D6A4F', color: 'var(--on-brand-green)' }}
+              style={{ backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)' }}
             >
               {addSaving ? 'Saving…' : 'Create Task'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Snooze Dialog ── */}
+      <Dialog open={snoozeOpen} onOpenChange={setSnoozeOpen}>
+        <DialogContent style={{ maxWidth: '420px' }}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlarmClock style={{ width: 18, height: 18, color: '#8B5CF6' }} />
+              Snooze Task
+            </DialogTitle>
+          </DialogHeader>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', paddingTop: '8px' }}>
+            {/* Quick presets */}
+            <div>
+              <label className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600, marginBottom: '8px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Quick Options
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {SNOOZE_PRESETS.map(preset => {
+                  const target = new Date(Date.now() + preset.hours * 3600000);
+                  if (preset.setTime) {
+                    const [h, m] = preset.setTime.split(':').map(Number);
+                    target.setHours(h, m, 0, 0);
+                    if (target <= new Date()) target.setDate(target.getDate() + 1);
+                  }
+                  return (
+                    <button
+                      key={preset.label}
+                      onClick={() => handleSnooze(target)}
+                      disabled={snoozeSaving}
+                      className="transition-colors hover:opacity-80"
+                      style={{
+                        fontSize: 13, fontWeight: 600, padding: '8px 14px', borderRadius: 8,
+                        border: '1px solid var(--border-color)',
+                        backgroundColor: 'var(--surface-elevated)',
+                        color: 'var(--text-primary)',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {preset.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Custom date/time */}
+            <div>
+              <label className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600, marginBottom: '8px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Or pick a date & time
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <Input type="date" value={snoozeDate} onChange={e => setSnoozeDate(e.target.value)} className="h-10" />
+                <Input type="time" value={snoozeTime} onChange={e => setSnoozeTime(e.target.value)} className="h-10" />
+              </div>
+            </div>
+
+            <p className="text-[var(--text-secondary)]" style={{ fontSize: '12px', lineHeight: 1.5 }}>
+              The task due date will be updated and a reminder notification will appear when the snooze time arrives.
+            </p>
+          </div>
+
+          <DialogFooter style={{ marginTop: '8px' }}>
+            <Button variant="outline" onClick={() => setSnoozeOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => handleSnooze()}
+              disabled={snoozeSaving || !snoozeDate}
+              style={{ backgroundColor: '#8B5CF6', color: '#fff' }}
+            >
+              {snoozeSaving ? 'Saving…' : 'Snooze Task'}
             </Button>
           </DialogFooter>
         </DialogContent>

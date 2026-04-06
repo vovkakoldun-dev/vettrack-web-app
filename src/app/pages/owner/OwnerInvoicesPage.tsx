@@ -55,7 +55,7 @@ function fmt(n: number) {
 // ─── Status Config ────────────────────────────────────────────
 
 const STATUS_CFG: Record<InvoiceStatus, { bg: string; color: string; label: string; Icon: typeof CheckCircle2 }> = {
-  Paid:    { bg: '#2D6A4F15', color: '#2D6A4F', label: 'Paid',    Icon: CheckCircle2 },
+  Paid:    { bg: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)', color: 'var(--brand-green-text)', label: 'Paid',    Icon: CheckCircle2 },
   Pending: { bg: '#F4A26115', color: '#D97706', label: 'Pending', Icon: Clock },
   Overdue: { bg: '#d4183d15', color: '#d4183d', label: 'Overdue', Icon: AlertCircle },
 };
@@ -99,14 +99,14 @@ function InvoiceModal({ inv, onClose }: { inv: OwnerInvoice; onClose: () => void
           width: '100%', maxWidth: '480px',
           boxShadow: '0 24px 64px rgba(0,0,0,0.2)', overflow: 'hidden',
         }}>
-          <div style={{ height: '4px', background: 'linear-gradient(90deg, #2D6A4F, #52B788)' }} />
+          <div style={{ height: '4px', background: 'linear-gradient(90deg, var(--brand-green-text), #52B788)' }} />
           <div style={{ padding: '40px 32px', textAlign: 'center' }}>
             <div style={{
               width: '72px', height: '72px', borderRadius: '50%',
-              backgroundColor: '#2D6A4F15', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center',
               margin: '0 auto 20px',
             }}>
-              <CheckCircle2 style={{ width: '36px', height: '36px', color: '#2D6A4F' }} />
+              <CheckCircle2 style={{ width: '36px', height: '36px', color: 'var(--brand-green-text)' }} />
             </div>
             <p style={{ fontSize: '22px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '8px' }}>
               Payment Successful
@@ -121,7 +121,7 @@ function InvoiceModal({ inv, onClose }: { inv: OwnerInvoice; onClose: () => void
               onClick={onClose}
               style={{
                 padding: '12px 32px', borderRadius: '10px',
-                backgroundColor: '#2D6A4F', color: '#fff',
+                backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)',
                 border: 'none', cursor: 'pointer',
                 fontSize: '15px', fontWeight: 700,
               }}
@@ -312,11 +312,11 @@ function InvoiceModal({ inv, onClose }: { inv: OwnerInvoice; onClose: () => void
             <div style={{
               display: 'flex', alignItems: 'center', gap: '8px',
               padding: '10px 14px', borderRadius: '8px',
-              backgroundColor: '#2D6A4F10', border: '1px solid #2D6A4F30',
+              backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--brand-green-text) 19%, transparent)',
               marginBottom: '16px',
             }}>
-              <CheckCircle2 style={{ width: '16px', height: '16px', color: '#2D6A4F', flexShrink: 0 }} />
-              <p style={{ fontSize: '13px', color: '#2D6A4F', fontWeight: 600 }}>
+              <CheckCircle2 style={{ width: '16px', height: '16px', color: 'var(--brand-green-text)', flexShrink: 0 }} />
+              <p style={{ fontSize: '13px', color: 'var(--brand-green-text)', fontWeight: 600 }}>
                 Paid on {inv.paidDate}
               </p>
             </div>
@@ -428,7 +428,7 @@ function InvoiceModal({ inv, onClose }: { inv: OwnerInvoice; onClose: () => void
               onClick={onClose}
               style={{
                 padding: '10px 22px', borderRadius: '9px',
-                backgroundColor: '#2D6A4F', color: '#fff',
+                backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)',
                 border: 'none', cursor: 'pointer',
                 fontSize: '14px', fontWeight: 700,
               }}
@@ -613,7 +613,7 @@ export default function OwnerInvoicesPage() {
                 <div style={{ textAlign: 'right' }}>
                   <p style={{ fontSize: '15px', fontWeight: 800, color: 'var(--text-primary)' }}>{fmt(total)}</p>
                   {inv.status === 'Paid' && (
-                    <p style={{ fontSize: '11px', color: '#2D6A4F', fontWeight: 600 }}>Paid</p>
+                    <p style={{ fontSize: '11px', color: 'var(--brand-green-text)', fontWeight: 600 }}>Paid</p>
                   )}
                   {inv.status !== 'Paid' && (
                     <p style={{ fontSize: '11px', color: inv.status === 'Overdue' ? '#d4183d' : '#D97706', fontWeight: 600 }}>

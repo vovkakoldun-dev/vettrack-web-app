@@ -190,11 +190,23 @@ const ADMIN_ROLES  = ['front_desk_manager', 'receptionist', 'clinic_manager', 's
 | `record_diagnoses` | Diagnoses | `record_id`, `type` (primary/secondary/differential), `name`, `icd_code` |
 | `record_treatments` | Treatments | `record_id`, `procedure_name`, `notes` |
 | `vaccinations` | Vaccine schedules | `id`, `pet_id`, `vaccine_name`, `administered_date`, `next_due_date`, `batch_number` |
+| `imaging_studies` | Radiology / imaging studies (per-pet) | `id`, `organization_id`, `clinic_id`, `pet_id`, `performed_by` (FK staff), `radiologist`, `title`, `modality`, `region`, `study_date`, `findings`, `impression`, `status` (pending/reviewed), `created_at` |
+| `imaging_study_files` | Images inside an imaging study | `id`, `study_id` (FK cascade), `file_url`, `storage_path`, `file_name`, `file_type`, `file_size`, `view_label`, `sort_order`, `uploaded_by`, `created_at` |
+| `surgeries` | Surgical procedures (per-pet) | `id`, `organization_id`, `clinic_id`, `pet_id`, `surgeon_id` (FK staff), `assistant`, `name`, `surgery_date`, `duration_minutes`, `anesthesia`, `pre_op`, `procedure_notes`, `post_op`, `complications`, `follow_up`, `status` (Scheduled / In Progress / Recovered / Complications / Deceased) |
 | `pet_allergies` | Allergies | `id`, `pet_id`, `allergen`, `severity` |
-| `pet_conditions` | Chronic conditions | `id`, `pet_id`, `condition_name`, `diagnosed_date` |
+| `pet_conditions` | Problems / chronic conditions (rendered as the "Problems" section inside Medical Overview). Each row supports severity + SOAP notes. | `id`, `organization_id`, `pet_id`, `name`, `severity` (mild/moderate/severe), `status` (active/resolved), `date_diagnosed`, `resolved_date`, `soap_s`, `soap_o`, `soap_a`, `soap_p`, `notes`, `updated_at`, `created_at` |
 | `pet_treatments` | Treatment history | `id`, `pet_id`, `treatment_name`, `date` |
 | `lab_results` | Lab tests | `id`, `record_id`, `test_name`, `result`, `reference_range`, `unit`, `flag` |
 | `medications` | Medication catalog | `id`, `name`, `dosage`, `route`, `frequency` |
+| `treatment_plans` | Long-term treatment plans per pet. Rendered as the "Plan" tab in ClientDetailPage. | `id`, `organization_id`, `clinic_id`, `pet_id`, `title`, `status` (active/completed/paused/cancelled), `last_review_date`, `next_review_date`, `notes`, `created_by` (FK staff), `created_at`, `updated_at` |
+| `treatment_plan_goals` | Goals inside a treatment plan (progress-tracked) | `id`, `plan_id` (FK cascade), `text`, `progress` (0–100), `status` (on-track/at-risk/off-track), `sort_order` |
+| `treatment_plan_milestones` | Timeline milestones for a plan | `id`, `plan_id` (FK cascade), `milestone_date`, `title`, `note`, `status` (upcoming/done), `sort_order` |
+| `treatment_plan_medications` | Medications in the plan's protocol | `id`, `plan_id` (FK cascade), `name`, `dose`, `purpose`, `sort_order` |
+| `diet_plans` | Current feeding regimen per pet. Rendered as the "Diet" tab in ClientDetailPage. | `id`, `organization_id`, `clinic_id`, `pet_id`, `food_brand`, `food_name`, `food_type`, `daily_amount`, `meals`, `calories`, `water_note`, `treats_note`, `target_weight_kg`, `started_on`, `status` (active/archived), `notes`, `created_by` (FK staff), `created_at`, `updated_at` |
+| `diet_restrictions` | Foods to avoid for a diet plan | `id`, `plan_id` (FK cascade), `item`, `reason`, `severity` (strict/moderate), `sort_order` |
+| `pet_weight_history` | Weight log entries (used by Diet tab Weight Progress chart) | `id`, `organization_id`, `pet_id`, `weight_kg`, `recorded_at` (date), `recorded_by` (FK staff), `notes`, `created_at` |
+| `pet_photos` | Photo gallery per pet. Rendered as the "Photos" tab in ClientDetailPage. Files stored in the `pet-photos` storage bucket. | `id`, `organization_id`, `clinic_id`, `pet_id`, `title`, `caption`, `category` (clinical/progress/general), `tags` (text[]), `photo_date`, `file_url`, `storage_path`, `file_name`, `file_type`, `file_size`, `uploaded_by` (FK staff), `created_at`, `updated_at` |
+| `pet_reports` | Auto-generated full-patient-snapshot PDFs. Rendered as the "Reports" tab (last tab) in ClientDetailPage. A new row+PDF is created every time data is logged in any other tab (diet, photo, plan, problem, injection, surgery, xray, visit, note, weight), plus manual generations. PDFs stored in the `pet-reports` storage bucket. Generated server-side via `src/app/utils/generatePetReport.ts` using jsPDF. | `id`, `organization_id`, `clinic_id`, `pet_id`, `title`, `summary`, `trigger_source` (manual/diet/photo/injection/surgery/xray/plan/problem/weight/visit/note), `sections_count`, `file_url`, `storage_path`, `file_name`, `file_size`, `generated_by` (FK staff), `created_at` |
 
 ### Financial Tables
 
@@ -283,6 +295,8 @@ const ADMIN_ROLES  = ['front_desk_manager', 'receptionist', 'clinic_manager', 's
 | `avatars` | User profile avatars | `user-{profileId}.png` (upsert) | Yes |
 | `pet-images` | Pet profile images | `{clientId}/{timestamp}.{ext}` | Yes |
 | `chat-images` | Chat message attachments | `msg-{timestamp}.png` | No (private) |
+| `lab-files` | Lab result files (PDF / images) | `{timestamp}-{rand}.{ext}` | Yes |
+| `imaging-studies` | Radiology images (X-ray / US / CT / MRI) | `{petId}/{studyId}/{timestamp}-{i}-{rand}.{ext}` | Yes |
 
 ### Rules
 

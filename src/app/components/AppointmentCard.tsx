@@ -12,7 +12,7 @@ interface AppointmentCardProps {
 export function AppointmentCard({ time, petName, ownerName, service, petImage, onClick }: AppointmentCardProps) {
   return (
     <div
-      className={`bg-[var(--surface-white)] p-4 border border-[var(--border-color)] hover:border-[#2D6A4F] transition-colors ${
+      className={`bg-[var(--surface-white)] p-4 border border-[var(--border-color)] hover:border-[var(--brand-green-text)] transition-colors ${
         onClick ? 'cursor-pointer' : ''
       }`}
       style={{ borderRadius: '12px' }}
@@ -29,7 +29,7 @@ export function AppointmentCard({ time, petName, ownerName, service, petImage, o
         ) : (
           <div
             className="w-12 h-12 flex items-center justify-center flex-shrink-0"
-            style={{ borderRadius: '9999px', backgroundColor: '#2D6A4F20', color: '#2D6A4F', fontSize: '16px', fontWeight: 700 }}
+            style={{ borderRadius: '9999px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)', color: 'var(--brand-green-text)', fontSize: '16px', fontWeight: 700 }}
           >
             {petName.slice(0, 2).toUpperCase()}
           </div>

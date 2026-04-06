@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import { Users, Loader2, Camera } from 'lucide-react';
 import type { AddClientValues } from '../hooks/useClients';
 import { supabase } from '../../lib/supabase';
+import { useTenantDb } from '../context/TenantContext';
 import { getOrgContext } from '../hooks/useOrgContext';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -102,7 +103,7 @@ function WeightPicker({ value, onChange }: { value: string; onChange: (v: string
                   style={{
                     display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px',
                     fontSize: '13px', fontWeight: w.value === value ? 600 : 400, cursor: 'pointer',
-                    backgroundColor: w.value === value ? '#2D6A4F15' : 'transparent',
+                    backgroundColor: w.value === value ? 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)' : 'transparent',
                     color: w.value === value ? 'var(--brand-green-text)' : 'var(--text-primary)',
                     border: 'none', outline: 'none',
                   }}
@@ -137,12 +138,24 @@ function WeightPicker({ value, onChange }: { value: string; onChange: (v: string
   );
 }
 
+const US_STATES = [
+  'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD',
+  'MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC',
+  'SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','DC',
+];
+const CA_PROVINCES = [
+  'AB','BC','MB','NB','NL','NS','NT','NU','ON','PE','QC','SK','YT',
+];
+
 const EMPTY = {
   petName: '', species: '', breed: '', sex: '', dob: '', weight: '',
-  ownerName: '', email: '', phone: '', address: '', assignedVetId: '',
+  ownerName: '', email: '', phone: '',
+  address: '', city: '', state: '', zip: '', country: 'US',
+  assignedVetId: '',
 };
 
 export function AddClientDialog({ open, onOpenChange, onSave }: AddClientDialogProps) {
+  const db = useTenantDb();
   const [form, setForm] = useState(EMPTY);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -156,7 +169,7 @@ export function AddClientDialog({ open, onOpenChange, onSave }: AddClientDialogP
     (async () => {
       try {
         const { organizationId } = await getOrgContext();
-        const { data } = await supabase
+        const { data } = await db
           .from('staff')
           .select('id, first_name, last_name, role')
           .eq('organization_id', organizationId)
@@ -195,6 +208,10 @@ export function AddClientDialog({ open, onOpenChange, onSave }: AddClientDialogP
       email: form.email || undefined,
       phone: form.phone || undefined,
       address: form.address || undefined,
+      city: form.city || undefined,
+      state: form.state || undefined,
+      zip: form.zip || undefined,
+      country: form.country || 'US',
     };
     try {
       let clientId: string | undefined;
@@ -218,7 +235,7 @@ export function AddClientDialog({ open, onOpenChange, onSave }: AddClientDialogP
               photoUrl = urlData.publicUrl + '?t=' + Date.now();
             }
           }
-          const { error: petErr } = await supabase.from('pets').insert([{
+          const { error: petErr } = await db.from('pets').insert([{
             client_id: clientId,
             name: form.petName.trim(),
             species: form.species,
@@ -238,9 +255,9 @@ export function AddClientDialog({ open, onOpenChange, onSave }: AddClientDialogP
             try {
               const { organizationId: notifOrgId } = await getOrgContext();
               const vet = vets.find(v => v.id === form.assignedVetId);
-              const petRes = await supabase.from('pets').select('id').eq('client_id', clientId).eq('name', form.petName.trim()).eq('organization_id', organizationId).limit(1).single();
+              const petRes = await db.from('pets').select('id').eq('client_id', clientId).eq('name', form.petName.trim()).eq('organization_id', organizationId).limit(1).single();
               const petId = petRes.data?.id || `new-${Date.now()}`;
-              await supabase.from('notification_events').upsert({
+              await db.from('notification_events').upsert({
                 id: `assign-${petId}-${Date.now()}`,
                 type: 'vet_assign',
                 timestamp: new Date().toISOString(),
@@ -270,18 +287,18 @@ export function AddClientDialog({ open, onOpenChange, onSave }: AddClientDialogP
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); }}>
       <DialogContent
-        className="p-0 gap-0 overflow-hidden [&>button]:top-[14px] [&>button]:right-[14px] [&>button]:w-8 [&>button]:h-8 [&>button]:flex [&>button]:items-center [&>button]:justify-center [&>button]:rounded-[8px] [&>button]:!bg-white/15 [&>button]:!text-white [&>button]:!opacity-100 [&>button]:hover:!bg-white/25 [&>button]:transition-colors [&>button>svg]:w-4 [&>button>svg]:h-4"
+        className="p-0 gap-0 overflow-hidden [&>button]:top-[14px] [&>button]:right-[14px] [&>button]:w-8 [&>button]:h-8 [&>button]:flex [&>button]:items-center [&>button]:justify-center [&>button]:rounded-[8px] [&>button]:!bg-[var(--surface-white)] [&>button]:!text-[var(--text-secondary)] [&>button]:!opacity-100 [&>button]:hover:!bg-[var(--surface-elevated)] [&>button]:!border [&>button]:!border-[var(--border-color)] [&>button]:transition-colors [&>button>svg]:w-4 [&>button>svg]:h-4"
         style={{ maxWidth: '560px', width: '95vw', maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}
       >
         {/* Header */}
-        <div style={{ background: '#2D6A4F', padding: '18px 24px', flexShrink: 0 }}>
+        <div style={{ background: 'var(--surface-elevated)', padding: '18px 24px', flexShrink: 0, borderBottom: '1px solid var(--border-color)', borderLeft: '4px solid var(--brand-green-text)' }}>
           <div className="flex items-center gap-3">
-            <div style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: 'rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <Users style={{ width: '18px', height: '18px', color: '#fff' }} />
+            <div style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <Users style={{ width: '18px', height: '18px', color: 'var(--brand-green-text)' }} />
             </div>
             <div>
-              <h2 style={{ fontSize: '17px', fontWeight: 700, color: '#fff', lineHeight: 1.2 }}>Add New Client</h2>
-              <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginTop: '1px' }}>Register a new patient and owner</p>
+              <h2 style={{ fontSize: '17px', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.2 }}>Add New Client</h2>
+              <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '1px' }}>Register a new patient and owner</p>
             </div>
           </div>
         </div>
@@ -392,8 +409,41 @@ export function AddClientDialog({ open, onOpenChange, onSave }: AddClientDialogP
                 </div>
               </div>
               <div>
-                <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Address</p>
-                <Input placeholder="123 Main St, City, State" value={form.address} onChange={e => set('address')(e.target.value)} />
+                <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Street Address</p>
+                <Input placeholder="123 Main St, Apt 4B" value={form.address} onChange={e => set('address')(e.target.value)} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div>
+                  <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>City</p>
+                  <Input placeholder="Springfield" value={form.city} onChange={e => set('city')(e.target.value)} />
+                </div>
+                <div>
+                  <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>{form.country === 'CA' ? 'Province' : 'State'}</p>
+                  <Select value={form.state} onValueChange={set('state')}>
+                    <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
+                    <SelectContent>
+                      {(form.country === 'CA' ? CA_PROVINCES : US_STATES).map(s => (
+                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div>
+                  <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>{form.country === 'CA' ? 'Postal Code' : 'ZIP Code'}</p>
+                  <Input placeholder={form.country === 'CA' ? 'A1A 1A1' : '12345'} value={form.zip} onChange={e => set('zip')(e.target.value)} />
+                </div>
+                <div>
+                  <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Country</p>
+                  <Select value={form.country} onValueChange={(v) => { set('country')(v); set('state')(''); }}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="US">United States</SelectItem>
+                      <SelectItem value="CA">Canada</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
           </div>
@@ -404,7 +454,7 @@ export function AddClientDialog({ open, onOpenChange, onSave }: AddClientDialogP
           {error && <p style={{ fontSize: '13px', color: '#d4183d', marginBottom: '4px' }}>{error}</p>}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
             <Button variant="outline" onClick={handleClose} disabled={saving}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving} style={{ backgroundColor: '#2D6A4F', color: '#fff', minWidth: '110px' }}>
+            <Button onClick={handleSave} disabled={saving} style={{ backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)', minWidth: '110px' }}>
               {saving ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Saving…</> : 'Add Client'}
             </Button>
           </div>

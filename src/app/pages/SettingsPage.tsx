@@ -11,7 +11,7 @@ import {
   Leaf, Sunrise,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import { hashSessionToken } from '../../lib/hashToken';
+import { useTenantDb } from '../context/TenantContext';// hashSessionToken no longer needed — using stable sessionStorage token
 import { useTheme as useThemeHook, LIGHT_THEMES, DARK_THEMES, type ThemeStyle } from '../hooks/useTheme';
 import { updateProfile, uploadAvatar, removeAvatar } from '../hooks/useProfile';
 import { getOrgContext } from '../hooks/useOrgContext';
@@ -355,7 +355,7 @@ function IntegrationsSection() {
               </span>
             )}
             <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--surface-elevated)]" style={{ borderRadius: '8px' }}>
-              <div className="w-2 h-2 rounded-full bg-[#2D6A4F]" />
+              <div className="w-2 h-2 rounded-full bg-[var(--brand-green-text)]" />
               <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{connected.length} connected</span>
             </div>
           </div>
@@ -469,7 +469,7 @@ function IntegrationsSection() {
                             className="inline-flex items-center gap-1 px-2 py-0.5"
                             style={{ backgroundColor: '#74C69D20', color: 'var(--brand-green-text)', borderRadius: '9999px', fontSize: '11px', fontWeight: 700 }}
                           >
-                            <span className="w-1.5 h-1.5 rounded-full bg-[#2D6A4F]" />
+                            <span className="w-1.5 h-1.5 rounded-full bg-[var(--brand-green-text)]" />
                             Connected
                           </span>
                         )}
@@ -623,7 +623,7 @@ function IntegrationsSection() {
           <div className="flex items-start justify-between gap-4">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1">
-                <span className="w-2 h-2 rounded-full bg-[#2D6A4F]" />
+                <span className="w-2 h-2 rounded-full bg-[var(--brand-green-text)]" />
                 <p className="text-[var(--text-primary)] font-mono truncate" style={{ fontSize: '13px', fontWeight: 600 }}>
                   https://api.myhospital.com/webhooks/vettrack
                 </p>
@@ -686,6 +686,7 @@ function IntegrationsSection() {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
+  const db = useTenantDb();
   const { user } = useAuth();
   const [activeSection, setActiveSection] = useState<SettingsSection>('profile');
   const [savedSection, setSavedSection] = useState<SettingsSection | null>(null);
@@ -701,7 +702,7 @@ export default function SettingsPage() {
       await updateProfile(staffId, { first_name: firstName, last_name: lastName, email, phone });
       // Staff-specific data → staff table
       const { organizationId } = await getOrgContext();
-      const { error } = await supabase.from('staff').update({
+      const { error } = await db.from('staff').update({
         job_title: jobTitle,
         specialization,
         license_no: licenseNo,
@@ -738,7 +739,7 @@ export default function SettingsPage() {
       setSaving(true);
       try {
         const { organizationId } = await getOrgContext();
-        await supabase
+        await db
           .from('organization_settings')
           .upsert({ organization_id: organizationId, key: 'session_timeout', value: sessionTimeout, updated_at: new Date().toISOString() }, { onConflict: 'organization_id,key' });
       } catch {}
@@ -751,7 +752,7 @@ export default function SettingsPage() {
       for (const [key, col] of Object.entries(NOTIF_DB_MAP)) {
         dbRow[col] = notifs[key as keyof typeof notifs];
       }
-      await supabase.from('notification_preferences').upsert(dbRow, { onConflict: 'user_id' });
+      await db.from('notification_preferences').upsert(dbRow, { onConflict: 'user_id' });
       setSaving(false);
     }
 
@@ -774,7 +775,7 @@ export default function SettingsPage() {
   useEffect(() => {
     if (!user) return;
     (async () => {
-      const { data: profileData } = await supabase
+      const { data: profileData } = await db
         .from('profiles')
         .select('id, first_name, last_name, email, phone, avatar_url')
         .eq('id', user.id)
@@ -787,7 +788,7 @@ export default function SettingsPage() {
         setPhone(profileData.phone || '');
         setProfilePhoto(profileData.avatar_url || '');
         // Fetch staff-specific fields
-        const { data: staffData } = await supabase
+        const { data: staffData } = await db
           .from('staff')
           .select('job_title, specialization, license_no')
           .eq('id', profileData.id)
@@ -847,7 +848,7 @@ export default function SettingsPage() {
   useEffect(() => {
     if (!user) return;
     (async () => {
-      const { data } = await supabase
+      const { data } = await db
         .from('notification_preferences')
         .select('*')
         .eq('user_id', user.id)
@@ -893,7 +894,7 @@ export default function SettingsPage() {
     (async () => {
       try {
         const { organizationId } = await getOrgContext();
-        const { data } = await supabase
+        const { data } = await db
           .from('organization_settings')
           .select('value')
           .eq('organization_id', organizationId)
@@ -953,68 +954,38 @@ export default function SettingsPage() {
     if (!user) return;
     setSessionsLoading(true);
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const rawToken = sessionData?.session?.access_token?.slice(-16) || 'current';
-      const tokenHash = await hashSessionToken(rawToken);
       const { device, browser } = parseUserAgent();
 
-      // Upsert current session (only the hash is stored, never the raw token)
-      await supabase.from('user_sessions').upsert(
-        {
-          user_id: user.id,
-          session_token_hash: tokenHash,
-          device,
-          browser,
-          location: 'Current Location',
-          is_current: true,
-          last_active_at: new Date().toISOString(),
-        },
-        { onConflict: 'session_token_hash' }
+      // Use a stable session token per tab (survives refresh, not new tabs)
+      let token = sessionStorage.getItem('vettrack_session_token');
+      if (!token) {
+        token = crypto.randomUUID();
+        sessionStorage.setItem('vettrack_session_token', token);
+      }
+
+      await db.from('user_sessions').upsert(
+        { user_id: user.id, session_token: token, device, browser, location: 'Unknown', is_current: true, last_active_at: new Date().toISOString() },
+        { onConflict: 'session_token' }
       );
 
-      // Mark all other sessions as not current
-      await supabase
-        .from('user_sessions')
-        .update({ is_current: false })
-        .eq('user_id', user.id)
-        .neq('session_token_hash', tokenHash);
+      await db.from('user_sessions').update({ is_current: false }).eq('user_id', user.id).neq('session_token', token);
 
-      // Fetch all sessions
-      const { data: allSessions } = await supabase
-        .from('user_sessions')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('last_active_at', { ascending: false });
-
-      setSessions(allSessions || []);
+      // Fetch only 5 most recent sessions, clean up the rest
+      const { data: allSessions } = await db.from('user_sessions').select('*').eq('user_id', user.id).order('last_active_at', { ascending: false });
+      if (allSessions && allSessions.length > 5) {
+        const staleIds = allSessions.slice(5).map(s => s.id);
+        await db.from('user_sessions').delete().in('id', staleIds);
+      }
+      setSessions((allSessions || []).slice(0, 5));
 
       // Log this login in activity (only if no recent entry in last 5 min)
       const fiveMinAgo = new Date(Date.now() - 5 * 60000).toISOString();
-      const { data: recentLog } = await supabase
-        .from('login_activity')
-        .select('id')
-        .eq('user_id', user.id)
-        .gte('created_at', fiveMinAgo)
-        .limit(1);
-
+      const { data: recentLog } = await db.from('login_activity').select('id').eq('user_id', user.id).gte('created_at', fiveMinAgo).limit(1);
       if (!recentLog || recentLog.length === 0) {
-        await supabase.from('login_activity').insert({
-          user_id: user.id,
-          device,
-          browser,
-          location: 'Current Location',
-          status: 'success',
-        });
+        await db.from('login_activity').insert({ user_id: user.id, device, browser, location: 'Unknown', status: 'success' });
       }
 
-      // Fetch recent login activity
-      const { data: activity } = await supabase
-        .from('login_activity')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(5);
-
+      const { data: activity } = await db.from('login_activity').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(5);
       setLoginActivity(activity || []);
     } catch (e) {
       console.error('Error loading sessions:', e);
@@ -1026,14 +997,14 @@ export default function SettingsPage() {
 
   // Revoke a single session
   const revokeSession = async (sessionId: string) => {
-    await supabase.from('user_sessions').delete().eq('id', sessionId);
+    await db.from('user_sessions').delete().eq('id', sessionId);
     setSessions(prev => prev.filter(s => s.id !== sessionId));
   };
 
   // Sign out all sessions
   const signOutAll = async () => {
     if (!user) return;
-    await supabase.from('user_sessions').delete().eq('user_id', user.id);
+    await db.from('user_sessions').delete().eq('user_id', user.id);
     await supabase.auth.signOut({ scope: 'global' });
   };
 
@@ -1842,7 +1813,7 @@ export default function SettingsPage() {
                               {s.device}
                             </p>
                             {s.is_current && (
-                              <Badge variant="outline" className="border-[#2D6A4F] text-[var(--brand-green-text)]" style={{ fontSize: '11px' }}>
+                              <Badge variant="outline" className="border-[var(--brand-green-text)] text-[var(--brand-green-text)]" style={{ fontSize: '11px' }}>
                                 Current
                               </Badge>
                             )}
@@ -1933,8 +1904,8 @@ export default function SettingsPage() {
                     <div className="flex items-center gap-3 mb-2">
                       <h3 className="text-[var(--text-primary)]">Hugory Pro</h3>
                       <span
-                        className="px-2.5 py-0.5 text-white"
-                        style={{ backgroundColor: 'var(--brand-green-text)', borderRadius: '9999px', fontSize: '12px', fontWeight: 700 }}
+                        className="px-2.5 py-0.5"
+                        style={{ backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)', borderRadius: '9999px', fontSize: '12px', fontWeight: 700 }}
                       >
                         Current plan
                       </span>
@@ -2050,7 +2021,7 @@ export default function SettingsPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="border-[#2D6A4F] text-[var(--brand-green-text)]" style={{ fontSize: '11px' }}>Default</Badge>
+                    <Badge variant="outline" className="border-[var(--brand-green-text)] text-[var(--brand-green-text)]" style={{ fontSize: '11px' }}>Default</Badge>
                     <Button variant="ghost" size="sm">Edit</Button>
                     <Button variant="ghost" size="sm" className="text-[#d4183d] hover:text-[#d4183d]">
                       <Trash2 className="w-4 h-4" />

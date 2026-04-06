@@ -5,7 +5,7 @@ import {
   Leaf, Sunrise, Smartphone, LogOut, Check, Zap,
 } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
-import { hashSessionToken } from '../../../lib/hashToken';
+import { useTenantDb } from '../../context/TenantContext';// hashSessionToken no longer needed — using stable sessionStorage token
 import { useAuth } from '../../context/AuthContext';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -29,7 +29,7 @@ interface NavItem {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const BRAND = '#2D6A4F';
+const BRAND = 'var(--brand-green-text)';
 const BRAND_TEXT = 'var(--brand-green-text)';
 
 const NAV_ITEMS: NavItem[] = [
@@ -98,6 +98,7 @@ function SaveBar({ onSave, saved, saving }: { onSave: () => void; saved: boolean
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function OwnerSettingsPage() {
+  const db = useTenantDb();
   const { user } = useAuth();
   const { client } = useOwnerClient();
   const [activeSection, setActiveSection] = useState<SettingsSection>('profile');
@@ -116,7 +117,7 @@ export default function OwnerSettingsPage() {
   useEffect(() => {
     if (!user) return;
     (async () => {
-      const { data: profileData } = await supabase
+      const { data: profileData } = await db
         .from('profiles')
         .select('id, first_name, last_name, email, phone, avatar_url')
         .eq('id', user.id)
@@ -188,37 +189,27 @@ export default function OwnerSettingsPage() {
     if (!user) return;
     setSessionsLoading(true);
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const rawToken = sessionData?.session?.access_token?.slice(-16) || 'current';
-      const tokenHash = await hashSessionToken(rawToken);
       const { device, browser } = parseUserAgent();
 
-      await supabase.from('user_sessions').upsert(
-        {
-          user_id: user.id,
-          session_token_hash: tokenHash,
-          device,
-          browser,
-          location: 'Current Location',
-          is_current: true,
-          last_active_at: new Date().toISOString(),
-        },
-        { onConflict: 'session_token_hash' }
+      let token = sessionStorage.getItem('vettrack_session_token');
+      if (!token) {
+        token = crypto.randomUUID();
+        sessionStorage.setItem('vettrack_session_token', token);
+      }
+
+      await db.from('user_sessions').upsert(
+        { user_id: user.id, session_token: token, device, browser, location: 'Unknown', is_current: true, last_active_at: new Date().toISOString() },
+        { onConflict: 'session_token' }
       );
 
-      await supabase
-        .from('user_sessions')
-        .update({ is_current: false })
-        .eq('user_id', user.id)
-        .neq('session_token_hash', tokenHash);
+      await db.from('user_sessions').update({ is_current: false }).eq('user_id', user.id).neq('session_token', token);
 
-      const { data: allSessions } = await supabase
-        .from('user_sessions')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('last_active_at', { ascending: false });
-
-      setSessions(allSessions || []);
+      const { data: allSessions } = await db.from('user_sessions').select('*').eq('user_id', user.id).order('last_active_at', { ascending: false });
+      if (allSessions && allSessions.length > 5) {
+        const staleIds = allSessions.slice(5).map(s => s.id);
+        await db.from('user_sessions').delete().in('id', staleIds);
+      }
+      setSessions((allSessions || []).slice(0, 5));
     } catch (e) {
       console.error('Error loading sessions:', e);
     }
@@ -228,13 +219,13 @@ export default function OwnerSettingsPage() {
   useEffect(() => { loadSessions(); }, [loadSessions]);
 
   const revokeSession = async (sessionId: string) => {
-    await supabase.from('user_sessions').delete().eq('id', sessionId);
+    await db.from('user_sessions').delete().eq('id', sessionId);
     setSessions(prev => prev.filter(s => s.id !== sessionId));
   };
 
   const signOutAll = async () => {
     if (!user) return;
-    await supabase.from('user_sessions').delete().eq('user_id', user.id);
+    await db.from('user_sessions').delete().eq('user_id', user.id);
     await supabase.auth.signOut({ scope: 'global' });
   };
 
@@ -687,7 +678,7 @@ export default function OwnerSettingsPage() {
                                 {s.device}
                               </p>
                               {s.is_current && (
-                                <Badge variant="outline" className="border-[#2D6A4F] text-[var(--brand-green-text)]" style={{ fontSize: '11px' }}>
+                                <Badge variant="outline" className="border-[var(--brand-green-text)] text-[var(--brand-green-text)]" style={{ fontSize: '11px' }}>
                                   Current
                                 </Badge>
                               )}

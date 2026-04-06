@@ -1,13 +1,21 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router';
-import { Search, Plus, Mail, Phone, ChevronDown, CheckCircle2, AlertCircle, AlertTriangle, Trash2, Copy, Send, Check } from 'lucide-react';
-import { supabase } from '../../../lib/supabase';
+import { Search, Plus, Mail, Phone, ChevronDown, CheckCircle2, AlertCircle, AlertTriangle, Trash2, Copy, Send, Check, Download, Upload, FileText, X, AlertCircle as AlertIcon, CheckCircle } from 'lucide-react';
+import { useTenantDb } from '../../context/TenantContext';
 import { getOrgContext } from '../../hooks/useOrgContext';
 import { AddClientDialog } from '../../components/AddClientDialog';
 import type { AddClientValues } from '../../hooks/useClients';
 import { Input } from '../../components/ui/input';
 import { Button } from '../../components/ui/button';
 import { useClients } from '../../hooks/useClients';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
+} from '../../components/ui/dialog';
 import {
   Table,
   TableHeader,
@@ -24,6 +32,80 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from '../../components/ui/dropdown-menu';
+
+// ─── CSV Helpers ─────────────────────────────────────────────
+
+const CSV_HEADERS = ['first_name', 'last_name', 'email', 'phone', 'address', 'city', 'state', 'zip', 'country', 'notes'] as const;
+
+function escapeCsvField(value: string): string {
+  if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
+function parseCSV(text: string): Record<string, string>[] {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length < 2) return [];
+  const headerLine = lines[0];
+  // Parse header respecting quotes
+  const headers = parseCsvLine(headerLine).map((h) => h.trim().toLowerCase().replace(/\s+/g, '_'));
+  const rows: Record<string, string>[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const values = parseCsvLine(lines[i]);
+    const row: Record<string, string> = {};
+    headers.forEach((h, idx) => {
+      row[h] = (values[idx] ?? '').trim();
+    });
+    rows.push(row);
+  }
+  return rows;
+}
+
+function parseCsvLine(line: string): string[] {
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"' && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else if (ch === '"') {
+        inQuotes = false;
+      } else {
+        current += ch;
+      }
+    } else {
+      if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === ',') {
+        result.push(current);
+        current = '';
+      } else {
+        current += ch;
+      }
+    }
+  }
+  result.push(current);
+  return result;
+}
+
+interface ImportRow {
+  first_name: string;
+  last_name: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  country?: string;
+  notes?: string;
+  _valid: boolean;
+  _error?: string;
+}
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -79,6 +161,7 @@ const STATUS_OPTIONS: {
 // ─── Page ─────────────────────────────────────────────────────
 
 export default function SuperAdminClientsPage() {
+  const db = useTenantDb();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const { clients: supabaseClients, loading, addClient, deleteClient, refetch } = useClients();
@@ -87,6 +170,93 @@ export default function SuperAdminClientsPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [copiedEmail, setCopiedEmail] = useState<string | null>(null);
   const [emailMenuOpen, setEmailMenuOpen] = useState<string | null>(null);
+
+  // CSV import state
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importRows, setImportRows] = useState<ImportRow[]>([]);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ success: number; failed: number } | null>(null);
+
+  // ── Export CSV ───────────────────────────────────────────────
+  const handleExportCSV = () => {
+    const header = CSV_HEADERS.join(',');
+    const rows = supabaseClients.map((c) =>
+      CSV_HEADERS.map((h) => escapeCsvField(String(c[h] ?? ''))).join(',')
+    );
+    const csv = [header, ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `clients_export_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // ── Import CSV — file select ────────────────────────────────
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      const parsed = parseCSV(text);
+      const rows: ImportRow[] = parsed.map((row) => {
+        const fn = row.first_name || row.firstname || row['first name'] || '';
+        const ln = row.last_name || row.lastname || row['last name'] || '';
+        const rawCountry = (row.country || '').toUpperCase().trim();
+        const country = rawCountry === 'CA' || rawCountry === 'CANADA' ? 'CA' : 'US';
+        const valid = fn.length > 0 && ln.length > 0;
+        return {
+          first_name: fn,
+          last_name: ln,
+          email: row.email || undefined,
+          phone: row.phone || row.phone_number || row['phone number'] || undefined,
+          address: row.address || row.street || row.street_address || row['street address'] || undefined,
+          city: row.city || undefined,
+          state: row.state || row.province || row.state_province || row['state/province'] || undefined,
+          zip: row.zip || row.zip_code || row['zip code'] || row.postal_code || row['postal code'] || undefined,
+          country,
+          notes: row.notes || undefined,
+          _valid: valid,
+          _error: valid ? undefined : 'Missing first or last name',
+        };
+      });
+      setImportRows(rows);
+      setImportResult(null);
+      setImportDialogOpen(true);
+    };
+    reader.readAsText(file);
+    // Reset so same file can be re-selected
+    e.target.value = '';
+  };
+
+  // ── Import CSV — bulk insert ────────────────────────────────
+  const handleImportConfirm = async () => {
+    const validRows = importRows.filter((r) => r._valid);
+    if (validRows.length === 0) return;
+    setImporting(true);
+    let success = 0;
+    let failed = 0;
+    for (const row of validRows) {
+      const { _valid, _error, ...values } = row;
+      const { error } = await addClient(values as AddClientValues);
+      if (error) {
+        failed++;
+      } else {
+        success++;
+      }
+    }
+    setImporting(false);
+    setImportResult({ success, failed });
+    if (success > 0) {
+      await refetch();
+      window.dispatchEvent(new CustomEvent('clientDataChanged'));
+    }
+  };
 
   const copyToClipboard = (text: string) => {
     const ta = document.createElement('textarea');
@@ -140,7 +310,7 @@ export default function SuperAdminClientsPage() {
       const supaId = (entry as Client & { _supaId: string })._supaId;
       setStatusOverrides((prev) => ({ ...prev, [supaId]: newStatus }));
       const { organizationId } = await getOrgContext();
-      await supabase.from('clients').update({ health_status: newStatus }).eq('id', supaId).eq('organization_id', organizationId);
+      await db.from('clients').update({ health_status: newStatus }).eq('id', supaId).eq('organization_id', organizationId);
       window.dispatchEvent(new CustomEvent('clientDataChanged'));
     }
   };
@@ -160,6 +330,15 @@ export default function SuperAdminClientsPage() {
     <>
     <div className="max-w-[1440px] mx-auto p-8">
 
+      {/* Hidden file input for CSV import */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".csv,text/csv"
+        style={{ display: 'none' }}
+        onChange={handleFileSelect}
+      />
+
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
@@ -168,10 +347,28 @@ export default function SuperAdminClientsPage() {
             Manage your clients and their pets.
           </p>
         </div>
-        <Button onClick={() => setAddClientOpen(true)}>
-          <Plus className="w-4 h-4" />
-          Add Client
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            onClick={handleExportCSV}
+            style={{ gap: '6px' }}
+          >
+            <Download className="w-4 h-4" />
+            Export CSV
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => fileInputRef.current?.click()}
+            style={{ gap: '6px' }}
+          >
+            <Upload className="w-4 h-4" />
+            Import CSV
+          </Button>
+          <Button onClick={() => setAddClientOpen(true)}>
+            <Plus className="w-4 h-4" />
+            Add Client
+          </Button>
+        </div>
       </div>
 
       {/* Search */}
@@ -242,7 +439,7 @@ export default function SuperAdminClientsPage() {
                           style={{
                             borderRadius: '9999px',
                             backgroundColor: 'var(--brand-green-bg, #74C69D20)',
-                            color: 'var(--brand-green-text, #2D6A4F)',
+                            color: 'var(--brand-green-text)',
                             fontSize: '14px',
                             fontWeight: 700,
                           }}
@@ -432,6 +629,127 @@ export default function SuperAdminClientsPage() {
     </div>
 
       <AddClientDialog open={addClientOpen} onOpenChange={(open) => { setAddClientOpen(open); if (!open) setTimeout(() => { refetch(); window.dispatchEvent(new CustomEvent('notifCountChanged')); }, 300); }} onSave={handleAddClient} />
+
+      {/* ── CSV Import Preview Dialog ── */}
+      <Dialog open={importDialogOpen} onOpenChange={(open) => { if (!importing) { setImportDialogOpen(open); if (!open) { setImportRows([]); setImportResult(null); } } }}>
+        <DialogContent style={{ maxWidth: '720px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+          <DialogHeader>
+            <DialogTitle style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <FileText className="w-5 h-5" style={{ color: 'var(--brand-green-text)' }} />
+              {importResult ? 'Import Complete' : 'Import Clients from CSV'}
+            </DialogTitle>
+            <DialogDescription>
+              {importResult
+                ? `${importResult.success} client${importResult.success !== 1 ? 's' : ''} imported successfully${importResult.failed > 0 ? `, ${importResult.failed} failed` : ''}.`
+                : `Preview ${importRows.length} row${importRows.length !== 1 ? 's' : ''} found in CSV. ${importRows.filter(r => r._valid).length} valid, ${importRows.filter(r => !r._valid).length} with errors.`
+              }
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Preview table */}
+          {!importResult && (
+            <div style={{ flex: 1, overflow: 'auto', border: '1px solid var(--border-color)', borderRadius: '8px', marginTop: '8px' }}>
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="py-2 px-3" style={{ fontSize: '12px', fontWeight: 600, width: '28px' }}>#</TableHead>
+                    <TableHead className="py-2 px-3" style={{ fontSize: '12px', fontWeight: 600 }}>First Name</TableHead>
+                    <TableHead className="py-2 px-3" style={{ fontSize: '12px', fontWeight: 600 }}>Last Name</TableHead>
+                    <TableHead className="py-2 px-3" style={{ fontSize: '12px', fontWeight: 600 }}>Email</TableHead>
+                    <TableHead className="py-2 px-3" style={{ fontSize: '12px', fontWeight: 600 }}>Phone</TableHead>
+                    <TableHead className="py-2 px-3" style={{ fontSize: '12px', fontWeight: 600 }}>City</TableHead>
+                    <TableHead className="py-2 px-3" style={{ fontSize: '12px', fontWeight: 600, width: '40px' }}>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {importRows.map((row, i) => (
+                    <TableRow
+                      key={i}
+                      style={{ backgroundColor: row._valid ? 'transparent' : 'rgba(212,24,61,0.04)' }}
+                    >
+                      <TableCell className="py-2 px-3" style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{i + 1}</TableCell>
+                      <TableCell className="py-2 px-3" style={{ fontSize: '13px', fontWeight: 500 }}>{row.first_name || <span style={{ color: '#d4183d', fontStyle: 'italic' }}>missing</span>}</TableCell>
+                      <TableCell className="py-2 px-3" style={{ fontSize: '13px', fontWeight: 500 }}>{row.last_name || <span style={{ color: '#d4183d', fontStyle: 'italic' }}>missing</span>}</TableCell>
+                      <TableCell className="py-2 px-3" style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{row.email || '—'}</TableCell>
+                      <TableCell className="py-2 px-3" style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{row.phone || '—'}</TableCell>
+                      <TableCell className="py-2 px-3" style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{row.city || '—'}</TableCell>
+                      <TableCell className="py-2 px-3">
+                        {row._valid ? (
+                          <CheckCircle className="w-4 h-4" style={{ color: 'var(--brand-green-text)' }} />
+                        ) : (
+                          <span title={row._error}>
+                            <AlertIcon className="w-4 h-4" style={{ color: '#d4183d' }} />
+                          </span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+
+          {/* Result summary */}
+          {importResult && (
+            <div style={{ padding: '24px', textAlign: 'center' }}>
+              <div style={{
+                width: '56px', height: '56px', borderRadius: '50%', margin: '0 auto 16px',
+                backgroundColor: importResult.failed === 0 ? 'rgba(116,198,157,0.15)' : 'rgba(244,162,97,0.15)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                {importResult.failed === 0 ? (
+                  <CheckCircle className="w-7 h-7" style={{ color: 'var(--brand-green-text)' }} />
+                ) : (
+                  <AlertIcon className="w-7 h-7" style={{ color: '#F4A261' }} />
+                )}
+              </div>
+              <p style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '4px' }}>
+                {importResult.success} client{importResult.success !== 1 ? 's' : ''} imported
+              </p>
+              {importResult.failed > 0 && (
+                <p style={{ fontSize: '14px', color: '#d4183d' }}>
+                  {importResult.failed} row{importResult.failed !== 1 ? 's' : ''} failed (missing required fields)
+                </p>
+              )}
+            </div>
+          )}
+
+          <DialogFooter style={{ marginTop: '12px' }}>
+            {importResult ? (
+              <Button onClick={() => { setImportDialogOpen(false); setImportRows([]); setImportResult(null); }}>
+                Done
+              </Button>
+            ) : (
+              <>
+                <Button
+                  variant="outline"
+                  onClick={() => { setImportDialogOpen(false); setImportRows([]); }}
+                  disabled={importing}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleImportConfirm}
+                  disabled={importing || importRows.filter(r => r._valid).length === 0}
+                  style={{ gap: '6px' }}
+                >
+                  {importing ? (
+                    <>
+                      <span className="animate-spin" style={{ width: '14px', height: '14px', border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', display: 'inline-block' }} />
+                      Importing...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-4 h-4" />
+                      Import {importRows.filter(r => r._valid).length} Client{importRows.filter(r => r._valid).length !== 1 ? 's' : ''}
+                    </>
+                  )}
+                </Button>
+              </>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

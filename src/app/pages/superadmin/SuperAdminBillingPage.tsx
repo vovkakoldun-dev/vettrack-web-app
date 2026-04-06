@@ -1099,8 +1099,8 @@ export default function SuperAdminBillingPage() {
                   )}
                   {inv.discountAmount > 0 && (
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 14px', borderTop: '1px solid var(--border-color)' }}>
-                      <span style={{ fontSize: 13, color: '#2D6A4F' }}>Discount</span>
-                      <span style={{ fontSize: 13, color: '#2D6A4F' }}>−${inv.discountAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                      <span style={{ fontSize: 13, color: 'var(--brand-green-text)' }}>Discount</span>
+                      <span style={{ fontSize: 13, color: 'var(--brand-green-text)' }}>−${inv.discountAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                     </div>
                   )}
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 14px', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--surface-elevated)' }}>
@@ -1109,8 +1109,8 @@ export default function SuperAdminBillingPage() {
                   </div>
                   {inv.amountPaid > 0 && (
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 14px', borderTop: '1px solid var(--border-color)' }}>
-                      <span style={{ fontSize: 13, color: '#2D6A4F', fontWeight: 600 }}>Amount Paid</span>
-                      <span style={{ fontSize: 13, color: '#2D6A4F', fontWeight: 600 }}>${inv.amountPaid.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                      <span style={{ fontSize: 13, color: 'var(--brand-green-text)', fontWeight: 600 }}>Amount Paid</span>
+                      <span style={{ fontSize: 13, color: 'var(--brand-green-text)', fontWeight: 600 }}>${inv.amountPaid.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                     </div>
                   )}
                   {balance > 0 && inv.status !== 'Paid' && (
@@ -1125,7 +1125,7 @@ export default function SuperAdminBillingPage() {
               {/* Paid at info */}
               {inv.paidAt && (
                 <div style={{ padding: '0 22px 16px' }}>
-                  <p style={{ fontSize: 12, color: '#2D6A4F', margin: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <p style={{ fontSize: 12, color: 'var(--brand-green-text)', margin: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
                     <CheckCircle2 style={{ width: 13, height: 13 }} />
                     Paid on {new Date(inv.paidAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}
                   </p>

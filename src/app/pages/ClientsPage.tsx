@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router';
 import { Search, Plus, Mail, Phone, ChevronDown, CheckCircle2, AlertCircle, AlertTriangle, Loader2, Users, Trash2, Filter, X, ArrowUpDown, Copy } from 'lucide-react';
 import { AddClientDialog } from '../components/AddClientDialog';
 import { useClients, deletePetCascade } from '../hooks/useClients';
-import { supabase } from '../../lib/supabase';
+import { useTenantDb } from '../context/TenantContext';
 import { getOrgContext } from '../hooks/useOrgContext';
 import type { AddClientValues } from '../hooks/useClients';
 import { Input } from '../components/ui/input';
@@ -53,6 +53,7 @@ const STATUS_OPTIONS: { value: Status; bg: string; text: string; icon: React.Ele
 
 // Mock data removed — replaced with live Supabase queries via useClients()
 export default function ClientsPage() {
+  const db = useTenantDb();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [addClientOpen, setAddClientOpen] = useState(false);
@@ -74,7 +75,7 @@ export default function ClientsPage() {
     (async () => {
       try {
         const { organizationId } = await getOrgContext();
-        const { data } = await supabase.from('staff').select('id, profiles:profiles!staff_profile_id_fkey(first_name, last_name)').eq('organization_id', organizationId).eq('role', 'veterinarian');
+        const { data } = await db.from('staff').select('id, profiles:profiles!staff_profile_org_fkey(first_name, last_name)').eq('organization_id', organizationId).eq('role', 'veterinarian');
         if (data) setVets(data.map((v: any) => ({ id: v.id, name: `Dr. ${v.profiles?.first_name || ''} ${v.profiles?.last_name || ''}`.trim() })));
       } catch {}
     })();
@@ -89,7 +90,7 @@ export default function ClientsPage() {
 
   const updateStatus = async (clientId: string, newStatus: Status) => {
     setStatusOverrides((prev) => ({ ...prev, [clientId]: newStatus }));
-    await supabase.from('clients').update({ health_status: newStatus }).eq('id', clientId);
+    await db.from('clients').update({ health_status: newStatus }).eq('id', clientId);
     window.dispatchEvent(new CustomEvent('clientDataChanged'));
   };
 
@@ -413,10 +414,10 @@ export default function ClientsPage() {
                   style={{
                     width: '18px', height: '18px', borderRadius: '4px', cursor: 'pointer',
                     border: selectMode && selectedIds.size === filtered.length && filtered.length > 0
-                      ? '2px solid #2D6A4F'
+                      ? '2px solid var(--brand-green-text)'
                       : '2px solid var(--text-secondary)',
                     backgroundColor: selectMode && selectedIds.size === filtered.length && filtered.length > 0
-                      ? '#2D6A4F' : 'transparent',
+                      ? 'var(--brand-green-text)' : 'transparent',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     opacity: selectMode ? 1 : 0.5,
                     transition: 'all 0.15s ease',
@@ -480,7 +481,7 @@ export default function ClientsPage() {
                 <TableRow
                   key={client.rowKey}
                   className="hover:bg-[var(--surface-elevated)] cursor-pointer transition-colors"
-                  style={isSelected ? { backgroundColor: 'rgba(45,106,79,0.08)' } : undefined}
+                  style={isSelected ? { backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)' } : undefined}
                   onClick={() => navigate(`/clients/${client.id}${client.petId ? `?petId=${client.petId}` : ''}`)}
                 >
                   {/* Checkbox */}
@@ -490,8 +491,8 @@ export default function ClientsPage() {
                         onClick={(e) => { e.stopPropagation(); toggleSelectClient(client.rowKey); }}
                         style={{
                           width: '18px', height: '18px', borderRadius: '4px', cursor: 'pointer',
-                          border: isSelected ? '2px solid #2D6A4F' : '2px solid var(--text-secondary)',
-                          backgroundColor: isSelected ? '#2D6A4F' : 'transparent',
+                          border: isSelected ? '2px solid var(--brand-green-text)' : '2px solid var(--text-secondary)',
+                          backgroundColor: isSelected ? 'var(--brand-green-text)' : 'transparent',
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
                           transition: 'all 0.15s ease',
                         }}
@@ -518,7 +519,7 @@ export default function ClientsPage() {
                           style={{
                             borderRadius: '9999px',
                             backgroundColor: 'var(--brand-green-bg, #74C69D20)',
-                            color: 'var(--brand-green-text, #2D6A4F)',
+                            color: 'var(--brand-green-text)',
                             fontSize: '14px',
                             fontWeight: 700,
                           }}
@@ -600,12 +601,12 @@ export default function ClientsPage() {
                                   if (client.petId) {
                                     const { organizationId: notifOrgId } = await getOrgContext();
                                     setVetOverrides((prev) => ({ ...prev, [client.petId!]: v }));
-                                    await supabase.from('pets').update({ assigned_vet_id: v.id }).eq('id', client.petId).eq('organization_id', notifOrgId);
+                                    await db.from('pets').update({ assigned_vet_id: v.id }).eq('id', client.petId).eq('organization_id', notifOrgId);
                                     window.dispatchEvent(new CustomEvent('petDataChanged'));
                                     // Store assignment event for doctor notification
                                     try {
-                                      await supabase.from('notification_events').delete().eq('type', 'vet_assign').ilike('id', `assign-${client.petId}-%`).eq('organization_id', notifOrgId);
-                                      await supabase.from('notification_events').upsert({
+                                      await db.from('notification_events').delete().eq('type', 'vet_assign').ilike('id', `assign-${client.petId}-%`).eq('organization_id', notifOrgId);
+                                      await db.from('notification_events').upsert({
                                         id: `assign-${client.petId}-${Date.now()}`,
                                         type: 'vet_assign',
                                         timestamp: new Date().toISOString(),
@@ -640,10 +641,10 @@ export default function ClientsPage() {
                                       const prevVetName = currentVet?.name || '';
                                       const { organizationId: notifOrgId } = await getOrgContext();
                                       setVetOverrides((prev) => ({ ...prev, [client.petId!]: null }));
-                                      await supabase.from('pets').update({ assigned_vet_id: null }).eq('id', client.petId).eq('organization_id', notifOrgId);
+                                      await db.from('pets').update({ assigned_vet_id: null }).eq('id', client.petId).eq('organization_id', notifOrgId);
                                       window.dispatchEvent(new CustomEvent('petDataChanged'));
                                       try {
-                                        await supabase.from('notification_events').upsert({
+                                        await db.from('notification_events').upsert({
                                           id: `unassign-${client.petId}-${Date.now()}`,
                                           type: 'vet_unassign',
                                           timestamp: new Date().toISOString(),
@@ -656,7 +657,7 @@ export default function ClientsPage() {
                                           },
                                           organization_id: notifOrgId,
                                         });
-                                        await supabase.from('notification_events').delete().eq('type', 'vet_assign').ilike('id', `assign-${client.petId}-%`).eq('organization_id', notifOrgId);
+                                        await db.from('notification_events').delete().eq('type', 'vet_assign').ilike('id', `assign-${client.petId}-%`).eq('organization_id', notifOrgId);
                                       } catch {}
                                       window.dispatchEvent(new CustomEvent('notifCountChanged'));
                                     }

@@ -7,6 +7,8 @@
  * 3. Strip organization_id / portal_id from URL params on every navigation.
  * 4. Provide a `tenantDb` (TenantClient) that auto-injects org_id on every query.
  * 5. Log any mismatch / override attempt as a security event.
+ * 6. Detect mid-session org changes and force logout.
+ * 7. Periodic integrity check — re-validates org every 60s.
  */
 import {
   createContext,
@@ -17,7 +19,7 @@ import {
   useRef,
   type ReactNode,
 } from 'react';
-import { useLocation } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 import { supabase } from '../../lib/supabase';
 import {
   createTenantClient,
@@ -47,15 +49,17 @@ const TenantContext = createContext<TenantContextValue>({
   error: null,
 });
 
-// ─── Provider ────────���────────────────────────────────────────
+// ─── Provider ─────────────────────────────────────────────────
 export function TenantProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const [identity, setIdentity] = useState<TenantIdentity | null>(null);
   const [tenantDb, setTenantDb] = useState<TenantClient | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const resolvedUserRef = useRef<string | null>(null);
+  const resolvedOrgRef = useRef<string | null>(null);
 
   // ── Resolve identity from the database (not from frontend state) ──
   const resolveIdentity = useCallback(async (userId: string) => {
@@ -85,23 +89,19 @@ export function TenantProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      // Validate organization exists (needs org_id from profile, so runs after)
-      const { count } = await supabase
-        .from('organizations')
-        .select('id', { count: 'exact', head: true })
-        .eq('id', profile.organization_id);
-
-      if (!count || count === 0) {
-        const ident: TenantIdentity = {
-          organizationId: profile.organization_id,
-          clinicId: staff?.clinic_id || '',
-          userId,
-          role: profile.role || '',
-        };
-        const msg = 'Invalid organization_id in profile';
-        setError(msg);
-        logSecurityEvent(ident, 'INVALID_ORG', `org_id ${ident.organizationId} does not exist`);
-        setLoading(false);
+      // ── Org mismatch detection: if user's org changed mid-session, force logout ──
+      if (resolvedOrgRef.current && resolvedOrgRef.current !== profile.organization_id) {
+        logSecurityEvent(
+          { organizationId: profile.organization_id, clinicId: '', userId, role: profile.role || '' },
+          'TENANT_VIOLATION',
+          `Org changed mid-session: ${resolvedOrgRef.current} → ${profile.organization_id}. Forcing logout.`,
+        );
+        resolvedOrgRef.current = null;
+        resolvedUserRef.current = null;
+        setIdentity(null);
+        setTenantDb(null);
+        await signOut();
+        navigate('/login', { replace: true });
         return;
       }
 
@@ -117,11 +117,12 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       setError(null);
       setLoading(false);
       resolvedUserRef.current = userId;
+      resolvedOrgRef.current = profile.organization_id;
     } catch (e: any) {
       setError('Tenant resolution error: ' + (e.message || 'unknown'));
       setLoading(false);
     }
-  }, []);
+  }, [signOut, navigate]);
 
   // ── Re-resolve when user changes ──────────────────────────────
   useEffect(() => {
@@ -131,6 +132,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       setError(null);
       resolvedUserRef.current = null;
+      resolvedOrgRef.current = null;
       return;
     }
     // Only re-resolve if the user changed
@@ -144,6 +146,31 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     guardUrlParams(identity);
   }, [location, identity]);
 
+  // ── Periodic org integrity check (every 60s) ─────────────────
+  // Re-fetches the user's org from profiles and forces logout if it changed.
+  // Catches server-side org reassignment while the session is active.
+  useEffect(() => {
+    if (!user || !identity) return;
+    const interval = setInterval(async () => {
+      try {
+        const { data } = await supabase
+          .from('profiles')
+          .select('organization_id')
+          .eq('id', user.id)
+          .single();
+        if (data && data.organization_id !== identity.organizationId) {
+          logSecurityEvent(identity, 'TENANT_VIOLATION',
+            `Periodic check: org changed ${identity.organizationId} → ${data.organization_id}. Forcing logout.`);
+          await signOut();
+          navigate('/login', { replace: true });
+        }
+      } catch {
+        // Network errors are non-fatal — skip this check cycle
+      }
+    }, 300_000); // Check every 5 min (was 60s — too aggressive)
+    return () => clearInterval(interval);
+  }, [user, identity, signOut, navigate]);
+
   return (
     <TenantContext.Provider value={{ identity, tenantDb, loading, error }}>
       {children}
@@ -151,7 +178,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   );
 }
 
-// ─── Hooks ────────────���───────────────────────────────────────
+// ─── Hooks ────────────────────────────────────────────────────
 
 /** Access the tenant context. */
 export function useTenant() {

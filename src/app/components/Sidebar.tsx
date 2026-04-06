@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
-import { supabase } from '../../lib/supabase';
+import { useTenantDb } from '../context/TenantContext';
 import { useAuth } from '../context/AuthContext';
 import { useProfile } from '../hooks/useProfile';
 import { getOrgContext } from '../hooks/useOrgContext';
@@ -58,6 +58,7 @@ const INITIAL_SECTIONS: NavSection[] = [
 ];
 
 export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTheme: () => void }) {
+  const db = useTenantDb();
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const { signOut, user } = useAuth();
@@ -89,28 +90,28 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
       const uid = user?.id;
       const [apptTodayRes, clientRes, vacRes, completedRes, cancelledRes] = await Promise.all([
         (() => {
-          let q = supabase.from('appointments').select('id, scheduled_at')
+          let q = db.from('appointments').select('id, scheduled_at')
             .eq('organization_id', organizationId)
             .gte('scheduled_at', `${today}T00:00:00`).lte('scheduled_at', `${today}T23:59:59`)
             .in('status', ['Scheduled', 'Confirmed']);
           if (uid) q = q.eq('vet_id', uid);
           return q;
         })(),
-        supabase.from('clients').select('id, created_at')
+        db.from('clients').select('id, created_at')
           .eq('organization_id', organizationId)
           .gte('created_at', `${weekAgoStr}T00:00:00`),
-        supabase.from('vaccinations').select('id, next_due_date')
-          .eq('organization_id', organizationId)
+        db.from('vaccinations').select('id, next_due_date, pets!inner(organization_id)')
+          .eq('pets.organization_id', organizationId)
           .lte('next_due_date', today),
         (() => {
-          let q = supabase.from('appointments').select('id')
+          let q = db.from('appointments').select('id')
             .eq('organization_id', organizationId)
             .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Completed');
           if (uid) q = q.eq('vet_id', uid);
           return q;
         })(),
         (() => {
-          let q = supabase.from('appointments').select('id')
+          let q = db.from('appointments').select('id')
             .eq('organization_id', organizationId)
             .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Cancelled');
           if (uid) q = q.eq('vet_id', uid);
@@ -129,19 +130,21 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
 
       // Count notification events from Supabase (filter by vet for doctor portal)
       const sevenDaysAgoISO = new Date(Date.now() - 7 * 86400000).toISOString();
-      const { data: notifEvts } = await supabase
+      const { data: notifEvts } = await db
         .from('notification_events')
         .select('id, data')
         .eq('organization_id', organizationId)
         .gte('timestamp', sevenDaysAgoISO);
       for (const evt of (notifEvts || [])) {
         const d = (evt as any).data;
+        // Skip admin-only events (pto_coverage_needed, etc.)
+        if (d?.adminOnly) continue;
         // Skip events targeting a different vet
         if (uid && d?.vetId && d.vetId !== uid) continue;
         allIds.push(evt.id);
       }
 
-      const { data: stateRows } = await supabase
+      const { data: stateRows } = await db
         .from('notification_state')
         .select('notification_id, status')
         .eq('organization_id', organizationId);
@@ -202,7 +205,7 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
       if (!mounted) return;
       const { organizationId: chatOrgId } = await getOrgContext();
       // Get all conversations where user is a participant
-      const { data: parts } = await supabase
+      const { data: parts } = await db
         .from('conversation_participants')
         .select('conversation_id, last_read_at')
         .eq('organization_id', chatOrgId)
@@ -212,7 +215,7 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
       let totalUnread = 0;
       for (const part of parts) {
         const readAt = part.last_read_at || '1970-01-01T00:00:00Z';
-        const { count } = await supabase
+        const { count } = await db
           .from('messages')
           .select('id', { count: 'exact', head: true })
           .eq('organization_id', chatOrgId)
@@ -228,9 +231,9 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
         // Fetch latest unread message across all conversations
         for (const part of parts) {
           const readAt = part.last_read_at || '1970-01-01T00:00:00Z';
-          const { data: latest } = await supabase
+          const { data: latest } = await db
             .from('messages')
-            .select('sender_id, content, profiles:profiles!messages_sender_id_fkey(first_name, last_name)')
+            .select('sender_id, content, profiles:profiles!messages_sender_org_fkey(first_name, last_name)')
             .eq('organization_id', chatOrgId)
             .eq('conversation_id', part.conversation_id)
             .neq('sender_id', user!.id)
@@ -414,7 +417,7 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
                 transition: 'opacity 0.15s',
                 borderRadius: '8px',
                 // drop indicator bar above the target
-                boxShadow: isDropTarget ? 'inset 0 2px 0 0 #2D6A4F' : undefined,
+                boxShadow: isDropTarget ? 'inset 0 2px 0 0 var(--brand-green-text)' : undefined,
                 paddingTop: isDropTarget ? '3px' : undefined,
               }}
             >
@@ -621,7 +624,7 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
                   ) : (
                     <div
                       className="w-10 h-10 flex-shrink-0 flex items-center justify-center"
-                      style={{ borderRadius: '50%', backgroundColor: '#2D6A4F20', color: '#2D6A4F', fontSize: '14px', fontWeight: 700 }}
+                      style={{ borderRadius: '50%', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)', color: 'var(--brand-green-text)', fontSize: '14px', fontWeight: 700 }}
                     >
                       {doctorProfile.initials}
                     </div>
@@ -682,7 +685,7 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
             ) : (
               <div
                 className="w-9 h-9 flex-shrink-0 flex items-center justify-center"
-                style={{ borderRadius: '50%', backgroundColor: '#2D6A4F20', color: '#2D6A4F', fontSize: '13px', fontWeight: 700 }}
+                style={{ borderRadius: '50%', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)', color: 'var(--brand-green-text)', fontSize: '13px', fontWeight: 700 }}
               >
                 {doctorProfile.initials}
               </div>

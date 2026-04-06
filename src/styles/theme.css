@@ -94,8 +94,8 @@
   --destructive: #d4183d;
   --destructive-foreground: #ffffff;
   --border: #E5E7EB;
-  --input: transparent;
-  --input-background: #FFFFFF;
+  --input: #E5E7EB;
+  --input-background: #F8F7F4;
   --switch-background: #cbced4;
   --font-weight-medium: 600;
   --font-weight-normal: 400;
@@ -149,7 +149,7 @@
 
   --primary-green: #2D6A4F;
   --brand-green-text: #21C55E;
-  --on-brand-green: #0A2618;
+  --on-brand-green: #FFFFFF;
   --primary-light: #4ADE80;
   --bg-offwhite: #0F172A;
   --surface-white: #1E293B;
@@ -396,7 +396,7 @@
 
   --primary-green: #00FF88;
   --brand-green-text: #00FF88;
-  --on-brand-green: #0A2618;
+  --on-brand-green: #000000;
   --primary-light: #66FFB3;
   --bg-offwhite: #000000;
   --surface-white: #0A0A0A;
@@ -643,7 +643,7 @@
 
   --primary-green: #3B82F6;
   --brand-green-text: #60A5FA;
-  --on-brand-green: #0A1929;
+  --on-brand-green: #FFFFFF;
   --primary-light: #93C5FD;
   --bg-offwhite: #0D1B2A;
   --surface-white: #1B2838;
@@ -874,4 +874,11 @@
   0%   { opacity: 0.25; }
   50%  { opacity: 0.55; }
   100% { opacity: 0.25; }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }

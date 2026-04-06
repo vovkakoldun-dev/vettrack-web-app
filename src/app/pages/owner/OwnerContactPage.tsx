@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { useOwnerClient } from '../../hooks/useOwnerClient';
 
-const BRAND = '#2D6A4F';
+const BRAND = 'var(--brand-green-text)';
 const BRAND_TEXT = 'var(--brand-green-text)';
 
 const CLINIC = {
@@ -30,7 +30,7 @@ const HOURS = [
 ];
 
 const TEAM = [
-  { name: 'Dr. Sarah Chen',  role: 'Lead Veterinarian', initials: 'DC', color: '#2D6A4F' },
+  { name: 'Dr. Sarah Chen',  role: 'Lead Veterinarian', initials: 'DC', color: 'var(--brand-green-text)' },
   { name: 'Dr. Raj Patel',   role: 'Veterinarian',      initials: 'RP', color: '#3B82F6' },
   { name: 'Emma Wilson',     role: 'Receptionist',      initials: 'EW', color: '#8B5CF6' },
 ];
@@ -51,7 +51,7 @@ function Card({ children, style }: { children: React.ReactNode; style?: React.CS
 function SectionTitle({ icon: Icon, title }: { icon: React.ElementType; title: string }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '18px 20px 14px', borderBottom: '1px solid var(--border-color)' }}>
-      <div style={{ width: '32px', height: '32px', borderRadius: '8px', backgroundColor: `${BRAND}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      <div style={{ width: '32px', height: '32px', borderRadius: '8px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
         <Icon style={{ width: '16px', height: '16px', color: BRAND_TEXT }} />
       </div>
       <span style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>{title}</span>
@@ -138,7 +138,7 @@ export default function OwnerContactPage() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {/* Phone */}
               <Card style={{ padding: '18px' }}>
-                <div style={{ width: '36px', height: '36px', borderRadius: '9px', backgroundColor: `${BRAND}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px' }}>
+                <div style={{ width: '36px', height: '36px', borderRadius: '9px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px' }}>
                   <Phone style={{ width: '18px', height: '18px', color: BRAND_TEXT }} />
                 </div>
                 <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '4px' }}>Phone</p>
@@ -188,7 +188,7 @@ export default function OwnerContactPage() {
                     display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                     padding: '40px 20px', gap: '12px',
                   }}>
-                    <div style={{ width: '52px', height: '52px', borderRadius: '50%', backgroundColor: `${BRAND}18`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <div style={{ width: '52px', height: '52px', borderRadius: '50%', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 9%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       <CheckCircle style={{ width: '26px', height: '26px', color: BRAND_TEXT }} />
                     </div>
                     <p style={{ fontSize: '17px', fontWeight: 700, color: 'var(--text-primary)' }}>Message Sent!</p>
@@ -197,7 +197,7 @@ export default function OwnerContactPage() {
                     </p>
                     <button
                       onClick={() => { setSent(false); setForm(f => ({ ...f, subject: '', message: '' })); }}
-                      style={{ marginTop: '8px', padding: '9px 20px', borderRadius: '9px', backgroundColor: `${BRAND}15`, color: BRAND_TEXT, border: 'none', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}
+                      style={{ marginTop: '8px', padding: '9px 20px', borderRadius: '9px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)', color: BRAND_TEXT, border: 'none', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}
                     >
                       Send Another
                     </button>
@@ -283,7 +283,7 @@ export default function OwnerContactPage() {
                       style={{
                         alignSelf: 'flex-start',
                         padding: '10px 24px', borderRadius: '9px',
-                        backgroundColor: sending ? `${BRAND}80` : BRAND,
+                        backgroundColor: sending ? 'color-mix(in srgb, var(--brand-green-text) 50%, transparent)' : BRAND,
                         color: '#fff', border: 'none',
                         fontSize: '14px', fontWeight: 700,
                         cursor: sending ? 'default' : 'pointer',
@@ -313,7 +313,7 @@ export default function OwnerContactPage() {
                     style={{
                       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                       padding: '8px 10px', borderRadius: '8px', marginBottom: '2px',
-                      backgroundColor: h.today ? `${BRAND}10` : 'transparent',
+                      backgroundColor: h.today ? 'color-mix(in srgb, var(--brand-green-text) 6%, transparent)' : 'transparent',
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>

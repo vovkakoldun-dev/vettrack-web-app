@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { supabase } from '../../lib/supabase';
+import { useTenantDb } from '../context/TenantContext';
 import { useAuth } from '../context/AuthContext';
 import { useProfile } from '../hooks/useProfile';
 import { getOrgContext } from '../hooks/useOrgContext';
@@ -56,10 +57,87 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
   const navigate = useNavigate();
   const { signOut, user } = useAuth();
 
+  const db = useTenantDb();
   const [collapsed, setCollapsed]     = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const { profile: adminProfile } = useProfile('admin');
   const [sections, setSections]       = useState<NavSection[]>(NAV_SECTIONS);
+
+  // ── Notification unread badge ──────────────────────────────────
+  const [notifUnread, setNotifUnread] = useState(0);
+  const prevNotifCountRef = useRef(-1);
+
+  useEffect(() => {
+    if (!user) return;
+    let mounted = true;
+
+    async function computeNotifCount() {
+      try {
+        const { organizationId } = await getOrgContext();
+        const sevenDaysAgoISO = new Date(Date.now() - 7 * 86400000).toISOString();
+        const now = new Date();
+        const today = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}`;
+        const weekAgoStr = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+
+        // Parallel: appointments, clients, vaccines, notification_events, notification_state
+        const [apptTodayRes, completedRes, cancelledRes, clientRes, vacRes, notifEvtRes, stateRes] = await Promise.all([
+          db.from('appointments').select('id').eq('organization_id', organizationId)
+            .gte('scheduled_at', `${today}T00:00:00`).lte('scheduled_at', `${today}T23:59:59`)
+            .in('status', ['Scheduled', 'Confirmed']),
+          db.from('appointments').select('id').eq('organization_id', organizationId)
+            .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Completed'),
+          db.from('appointments').select('id').eq('organization_id', organizationId)
+            .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Cancelled'),
+          db.from('clients').select('id').eq('organization_id', organizationId)
+            .gte('created_at', `${weekAgoStr}T00:00:00`),
+          db.from('vaccinations').select('id, pets!inner(organization_id)')
+            .eq('pets.organization_id', organizationId).lte('next_due_date', today),
+          db.from('notification_events').select('id, data').eq('organization_id', organizationId)
+            .gte('timestamp', sevenDaysAgoISO),
+          db.from('notification_state').select('notification_id, status').eq('organization_id', organizationId),
+        ]);
+
+        const allIds: string[] = [];
+        (apptTodayRes.data || []).forEach((a: any) => allIds.push(`appt-today-${a.id}`));
+        (completedRes.data || []).forEach((a: any) => allIds.push(`appt-done-${a.id}`));
+        (cancelledRes.data || []).forEach((a: any) => allIds.push(`appt-cancel-${a.id}`));
+        (clientRes.data || []).forEach((c: any) => allIds.push(`client-${c.id}`));
+        (vacRes.data || []).forEach((v: any) => allIds.push(`vax-${v.id}`));
+        // Include all notification_events (admins see everything)
+        for (const evt of (notifEvtRes.data || []) as any[]) {
+          allIds.push(evt.id);
+        }
+
+        const readSet = new Set<string>();
+        const dismissedSet = new Set<string>();
+        for (const row of ((stateRes.data || []) as any[])) {
+          if (row.status === 'read') readSet.add(row.notification_id);
+          if (row.status === 'dismissed') dismissedSet.add(row.notification_id);
+        }
+        const unread = allIds.filter(id => !dismissedSet.has(id) && !readSet.has(id)).length;
+
+        if (mounted && unread > 0 && prevNotifCountRef.current === 0 && pathname !== '/admin/notifications') {
+          showToast({
+            type: 'notification',
+            title: 'New notification',
+            message: `You have ${unread} unread notification${unread > 1 ? 's' : ''}`,
+            link: '/admin/notifications',
+          });
+        }
+        if (mounted) { prevNotifCountRef.current = unread; setNotifUnread(unread); }
+      } catch {}
+    }
+
+    computeNotifCount();
+    // Also listen for explicit broadcasts from NotificationsPage
+    const handler = (e: Event) => {
+      const count = (e as CustomEvent).detail?.count;
+      if (typeof count === 'number') setNotifUnread(count);
+      else computeNotifCount();
+    };
+    window.addEventListener('notifCountChanged', handler);
+    return () => { mounted = false; window.removeEventListener('notifCountChanged', handler); };
+  }, [pathname, user]);
 
   // ── Chat unread badge from Supabase (all conversations) ──────────
   const [chatUnread, setChatUnread] = useState(0);
@@ -99,7 +177,7 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
           const readAt = part.last_read_at || '1970-01-01T00:00:00Z';
           const { data: latest } = await supabase
             .from('messages')
-            .select('sender_id, content, profiles:profiles!messages_sender_id_fkey(first_name, last_name)')
+            .select('sender_id, content, profiles:profiles!messages_sender_org_fkey(first_name, last_name)')
             .eq('organization_id', chatOrgId)
             .eq('conversation_id', part.conversation_id)
             .neq('sender_id', user!.id)
@@ -213,21 +291,24 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
     return () => window.removeEventListener('adminEmailRead', handler);
   }, []);
 
-  // Update sections when chatUnread or emailUnread changes
+  // Update sections when chatUnread, emailUnread, or notifUnread changes
   useEffect(() => {
     setSections(NAV_SECTIONS.map(s => s.id === 'overview' ? {
       ...s,
       items: s.items.map(item => {
         if (item.path === '/admin/chat') return { ...item, badge: chatUnread || undefined };
         if (item.path === '/admin/communications') {
-          // Hide badge when user is on the communications page
           const showBadge = pathname !== '/admin/communications' ? emailUnread : undefined;
+          return { ...item, badge: showBadge || undefined };
+        }
+        if (item.path === '/admin/notifications') {
+          const showBadge = pathname !== '/admin/notifications' ? notifUnread : undefined;
           return { ...item, badge: showBadge || undefined };
         }
         return item;
       }),
     } : s));
-  }, [chatUnread, emailUnread, pathname]);
+  }, [chatUnread, emailUnread, notifUnread, pathname]);
 
   const profileRef = useRef<HTMLDivElement>(null);
   useEffect(() => {

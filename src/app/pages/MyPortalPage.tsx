@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { supabase } from '../../lib/supabase';
+import { useTenantDb } from '../context/TenantContext';
 import { useAuth } from '../context/AuthContext';
 import { uploadAvatar, removeAvatar } from '../hooks/useProfile';
 import { getOrgContext } from '../hooks/useOrgContext';
@@ -11,7 +11,7 @@ import {
   ChevronRight, ChevronLeft, Plus, Play,
   Syringe, Stethoscope, Pill, Scissors,
   UtensilsCrossed, Palmtree, ThermometerSun, Briefcase, UsersRound,
-  AlertCircle, CheckCircle2, Send, ArrowUpRight, Camera, Pencil, Trash2,
+  AlertCircle, CheckCircle2, Send, ArrowUpRight, Camera, Pencil, Trash2, X,
 } from 'lucide-react';
 import { Avatar, AvatarImage, AvatarFallback } from '../components/ui/avatar';
 import { AddClientDialog } from '../components/AddClientDialog';
@@ -148,7 +148,7 @@ const blockStyles: Record<BlockType, { bg: string; border: string; text: string;
   'Sick Day': { bg: '#d4183d15', border: '#d4183d', text: '#d4183d', icon: ThermometerSun },
   Meeting: { bg: '#8B5CF615', border: '#8B5CF6', text: '#6D28D9', icon: UsersRound },
   Personal: { bg: '#6B728015', border: 'var(--text-secondary)', text: 'var(--text-primary)', icon: Briefcase },
-  'Work Hours': { bg: '#2D6A4F15', border: 'var(--brand-green-text)', text: 'var(--brand-green-text)', icon: Briefcase },
+  'Work Hours': { bg: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)', border: 'var(--brand-green-text)', text: 'var(--brand-green-text)', icon: Briefcase },
 };
 
 const requestStatusStyles: Record<string, { bg: string; text: string; icon: typeof CheckCircle2 }> = {
@@ -548,6 +548,7 @@ function GlowStatCard({
 // ─── Component ───────────────────────────────────────────────
 
 export default function MyPortalPage() {
+  const db = useTenantDb();
   const { user } = useAuth();
   const navigate = useNavigate();
   const { startVisit } = useActiveVisit();
@@ -589,7 +590,7 @@ export default function MyPortalPage() {
   const getStaffId = async () => {
     if (vetId) return vetId;
     if (!user) return null;
-    const { data } = await supabase.from('profiles').select('id')
+    const { data } = await db.from('profiles').select('id')
       .eq('id', user.id)
       .single();
     if (data) { setVetId(data.id); return data.id; }
@@ -638,7 +639,7 @@ export default function MyPortalPage() {
   const refetchPatients = async (staffId?: string) => {
     const sid = staffId || vetId;
     if (!sid) return;
-    const { data: petData } = await supabase
+    const { data: petData } = await db
       .from('pets')
       .select('id, name, species, breed, photo_url, assigned_vet_id, client_id, clients(id, first_name, last_name, health_status)')
       .eq('assigned_vet_id', sid);
@@ -676,13 +677,13 @@ export default function MyPortalPage() {
     if (!user) return;
     (async () => {
       // Fetch vet profile from profiles table (single source of truth for identity)
-      const { data: profileData } = await supabase
+      const { data: profileData } = await db
         .from('profiles')
         .select('id, first_name, last_name, email, phone, avatar_url, role')
         .eq('id', user.id)
         .single();
       // Fetch operational data from staff table
-      const { data: staffData } = await supabase
+      const { data: staffData } = await db
         .from('staff')
         .select('id, created_at, pto_allowance, sick_allowance')
         .eq('id', user.id)
@@ -705,7 +706,7 @@ export default function MyPortalPage() {
         setSickAllowance(staffData.sick_allowance ?? 10);
 
         // Fetch appointments for this vet
-        const { data: apptData } = await supabase
+        const { data: apptData } = await db
           .from('appointments')
           .select('id, scheduled_at, duration_minutes, status, reason, notes, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name, phone)')
           .eq('vet_id', staffData.id)
@@ -747,7 +748,7 @@ export default function MyPortalPage() {
 
         // Recent appointments (last 7 days, any status)
         const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
-        const { data: recentAppts } = await supabase
+        const { data: recentAppts } = await db
           .from('appointments')
           .select('scheduled_at, status, reason, pets(name)')
           .eq('vet_id', staffData.id)
@@ -779,7 +780,7 @@ export default function MyPortalPage() {
         }
 
         // Recent vaccinations
-        const { data: recentVax } = await supabase
+        const { data: recentVax } = await db
           .from('vaccinations')
           .select('administered_date, vaccine_name, pets(name)')
           .gte('administered_date', new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10))
@@ -817,7 +818,7 @@ export default function MyPortalPage() {
         await refetchPatients(staffData.id);
 
         // Fetch time blocks for this vet from DB
-        const { data: blockData } = await supabase
+        const { data: blockData } = await db
           .from('staff_time_blocks')
           .select('id, type, date, time_start, time_end, notes, status')
           .eq('staff_id', staffData.id)
@@ -995,7 +996,7 @@ export default function MyPortalPage() {
   // Day data
   const activeAppts = realAppointments;
   const dayAppts = activeAppts.filter((a) => isSameDay(a.date, selectedDate));
-  const dayBlocks = timeBlocks.filter((b) => isSameDay(b.date, selectedDate));
+  const dayBlocks = timeBlocks.filter((b) => isSameDay(b.date, selectedDate) && b.status !== 'Denied');
   // Helper: convert 12h time to minutes since midnight
   const slotToMin = (slot12: string) => {
     const t24 = to24Hour(slot12);
@@ -1049,6 +1050,39 @@ export default function MyPortalPage() {
   const ptoRequests = timeBlocks.filter((b) => b.type === 'PTO' || b.type === 'Sick Day');
   const ptoPending = ptoRequests.filter((b) => b.status === 'Pending').length;
   const ptoApproved = ptoRequests.filter((b) => b.status === 'Approved').length;
+
+  // Group consecutive same-type, same-status PTO blocks into date ranges (deduplicate first)
+  const ptoGroups = (() => {
+    // Deduplicate: keep one block per unique date+type+status
+    const seen = new Set<string>();
+    const deduped = ptoRequests.filter((b) => {
+      const key = `${b.date}-${b.type}-${b.status}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    const sorted = [...deduped].sort((a, b) => {
+      if (a.type !== b.type) return a.type.localeCompare(b.type);
+      if (a.status !== b.status) return a.status.localeCompare(b.status);
+      return a.date.localeCompare(b.date);
+    });
+    const groups: { type: BlockType; status: BlockStatus; startDate: string; endDate: string; blocks: TimeBlock[] }[] = [];
+    for (const block of sorted) {
+      const last = groups[groups.length - 1];
+      if (last && last.type === block.type && last.status === block.status) {
+        const prev = new Date(last.endDate + 'T12:00:00');
+        prev.setDate(prev.getDate() + 1);
+        const prevStr = prev.toISOString().slice(0, 10);
+        if (block.date === prevStr) {
+          last.endDate = block.date;
+          last.blocks.push(block);
+          continue;
+        }
+      }
+      groups.push({ type: block.type, status: block.status, startDate: block.date, endDate: block.date, blocks: [block] });
+    }
+    return groups;
+  })();
   const ptoUsed = timeBlocks.filter((b) => b.type === 'PTO' && (b.status === 'Approved' || b.status === 'Confirmed')).length;
   const sickUsed = timeBlocks.filter((b) => b.type === 'Sick Day' && (b.status === 'Approved' || b.status === 'Confirmed')).length;
   const ptoLeft = PTO_ALLOWANCE - ptoUsed;
@@ -1111,7 +1145,7 @@ export default function MyPortalPage() {
     setTimeBlocks((prev) => prev.map((b) => b.id === editingBlock.id ? updated : b));
     // Update in Supabase
     if (editingBlock.dbId) {
-      supabase.from('staff_time_blocks').update({
+      db.from('staff_time_blocks').update({
         type: editBlockType,
         date: editBlockDate,
         time_start: editBlockTimeStart || null,
@@ -1132,12 +1166,40 @@ export default function MyPortalPage() {
     setTimeBlocks((prev) => prev.filter((b) => b.id !== editingBlock.id));
     // Delete from Supabase
     if (editingBlock.dbId) {
-      supabase.from('staff_time_blocks').delete().eq('id', editingBlock.dbId).then(({ error }) => {
+      db.from('staff_time_blocks').delete().eq('id', editingBlock.dbId).then(({ error }) => {
         if (error) console.warn('Block delete error:', error.message);
       });
     }
     setEditBlockDialogOpen(false);
     setEditingBlock(null);
+  };
+
+  const handleCancelPtoGroup = async (blocks: TimeBlock[]) => {
+    if (!blocks.length) return;
+    const blockIds = new Set(blocks.map((b) => b.id));
+    // Optimistic: remove all blocks in the group from local state
+    setTimeBlocks((prev) => prev.filter((b) => !blockIds.has(b.id)));
+    // Delete all from staff_time_blocks
+    const dbIds = blocks.map((b) => b.dbId).filter(Boolean) as string[];
+    if (dbIds.length) {
+      db.from('staff_time_blocks').delete().in('id', dbIds).then(({ error }) => {
+        if (error) console.warn('PTO group delete error:', error.message);
+      });
+    }
+    // Delete matching pending_request(s)
+    if (user?.id) {
+      const ptoType = blocks[0].type === 'PTO' ? 'pto' : 'shift_swap';
+      // Build a date string from the first block to match the pending_request detail
+      const firstDateStr = new Date(blocks[0].date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      db.from('pending_requests').delete()
+        .eq('requester_id', user.id)
+        .eq('type', ptoType)
+        .eq('status', 'pending')
+        .ilike('detail', `%${firstDateStr}%`)
+        .then(({ error }) => {
+          if (error) console.warn('Pending request delete error:', error.message);
+        });
+    }
   };
 
   const handleSaveBlock = async () => {
@@ -1179,7 +1241,7 @@ export default function MyPortalPage() {
       cursor.setDate(cursor.getDate() + 1);
     }
     // Save to Supabase and get IDs back
-    const { data: inserted, error } = await supabase.from('staff_time_blocks').insert(dbRows).select('id');
+    const { data: inserted, error } = await db.from('staff_time_blocks').insert(dbRows).select('id');
     if (error) {
       console.warn('Block save error:', error.message);
     } else if (inserted) {
@@ -1195,7 +1257,7 @@ export default function MyPortalPage() {
         ? new Date(blockDateFrom + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
         : `${new Date(blockDateFrom + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}–${new Date(blockDateTo + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
       const dayCount = Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
-      await supabase.from('pending_requests').insert({
+      await db.from('pending_requests').insert({
         organization_id: orgCtx.organizationId,
         type: blockType === 'PTO' ? 'pto' : 'shift_swap',
         avatar: initials,
@@ -1217,7 +1279,7 @@ export default function MyPortalPage() {
       {/* ─── Section 1: Profile Header ─────────────────── */}
       <div
         className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6 mb-8 overflow-hidden"
-        style={{ borderRadius: '12px', borderTop: '4px solid #2D6A4F' }}
+        style={{ borderRadius: '12px', borderTop: '4px solid var(--brand-green-text)' }}
       >
         <div className="flex items-center gap-6">
           <div style={{ position: 'relative', flexShrink: 0 }}>
@@ -1231,7 +1293,7 @@ export default function MyPortalPage() {
             ) : (
               <div
                 className="w-16 h-16 flex items-center justify-center"
-                style={{ borderRadius: '50%', backgroundColor: '#2D6A4F20', color: '#2D6A4F', fontSize: '20px', fontWeight: 700 }}
+                style={{ borderRadius: '50%', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)', color: 'var(--brand-green-text)', fontSize: '20px', fontWeight: 700 }}
               >
                 {vetProfile.name.split(' ').filter(w => w[0] && w[0] === w[0].toUpperCase()).map(w => w[0]).join('').slice(0, 2)}
               </div>
@@ -1264,7 +1326,7 @@ export default function MyPortalPage() {
                 style={{
                   position: 'absolute', bottom: 0, right: 0,
                   width: 22, height: 22, borderRadius: '50%',
-                  backgroundColor: '#2D6A4F', border: '2px solid var(--surface-white)',
+                  backgroundColor: 'var(--brand-green-text)', border: '2px solid var(--surface-white)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   cursor: 'pointer', padding: 0,
                 }}
@@ -1312,7 +1374,7 @@ export default function MyPortalPage() {
                 <ChevronRight className="w-5 h-5 text-[var(--text-secondary)]" />
               </button>
               {!isToday(selectedDate) && (
-                <button onClick={goToToday} className="ml-2 px-3 py-1 text-[var(--brand-green-text)] border border-[#2D6A4F] hover:bg-[#2D6A4F10] transition-colors" style={{ borderRadius: '6px', fontSize: '13px', fontWeight: 500 }}>
+                <button onClick={goToToday} className="ml-2 px-3 py-1 text-[var(--brand-green-text)] border border-[var(--brand-green-text)] hover:bg-[color-mix(in_srgb,var(--brand-green-text)_6%,transparent)] transition-colors" style={{ borderRadius: '6px', fontSize: '13px', fontWeight: 500 }}>
                   Today
                 </button>
               )}
@@ -1357,7 +1419,7 @@ export default function MyPortalPage() {
                   className={`flex items-stretch ${!isLast ? 'border-b border-[var(--border-color)]' : ''}`}
                   style={{
                     position: 'relative',
-                    backgroundColor: isCurrent ? '#2D6A4F08' : undefined,
+                    backgroundColor: isCurrent ? 'color-mix(in srgb, var(--brand-green-text) 3%, transparent)' : undefined,
                   }}
                 >
                   {/* Current time indicator line */}
@@ -1399,10 +1461,10 @@ export default function MyPortalPage() {
                       <div
                         className="flex-1 m-1 px-3 py-3 flex flex-col gap-2.5"
                         style={{
-                          backgroundColor: '#2D6A4F14',
-                          borderLeft: '4px solid #2D6A4F',
+                          backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)',
+                          borderLeft: '4px solid var(--brand-green-text)',
                           borderRadius: '8px',
-                          boxShadow: '0 0 0 1px #2D6A4F30',
+                          boxShadow: '0 0 0 1px color-mix(in srgb, var(--brand-green-text) 19%, transparent)',
                         }}
                       >
                         {/* Pet info row */}
@@ -1411,7 +1473,7 @@ export default function MyPortalPage() {
                             {appt.petImage ? (
                               <img src={appt.petImage} alt={appt.petName} className="w-9 h-9 object-cover" style={{ borderRadius: '9999px' }} />
                             ) : (
-                              <div className="w-9 h-9 flex items-center justify-center text-white font-semibold" style={{ borderRadius: '9999px', backgroundColor: '#2D6A4F', fontSize: '12px' }}>{appt.petName.slice(0, 2).toUpperCase()}</div>
+                              <div className="w-9 h-9 flex items-center justify-center text-white font-semibold" style={{ borderRadius: '9999px', backgroundColor: 'var(--brand-green-text)', fontSize: '12px' }}>{appt.petName.slice(0, 2).toUpperCase()}</div>
                             )}
                             <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-white" style={{ borderRadius: '9999px' }} />
                           </div>
@@ -1453,7 +1515,7 @@ export default function MyPortalPage() {
                           }}
                           className="w-full flex items-center justify-center gap-2 py-2 transition-all hover:opacity-90 active:scale-[0.98]"
                           style={{
-                            backgroundColor: '#2D6A4F',
+                            backgroundColor: 'var(--brand-green-text)',
                             color: '#ffffff',
                             borderRadius: '8px',
                             fontSize: '13px',
@@ -1470,12 +1532,12 @@ export default function MyPortalPage() {
                       /* ── Regular appointment block ── */
                       <div
                         className="flex-1 m-1 px-3 py-2.5 flex items-center gap-3"
-                        style={{ backgroundColor: '#2D6A4F10', borderLeft: '4px solid #2D6A4F', borderRadius: '8px' }}
+                        style={{ backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 6%, transparent)', borderLeft: '4px solid var(--brand-green-text)', borderRadius: '8px' }}
                       >
                         {appt.petImage ? (
                           <img src={appt.petImage} alt={appt.petName} className="w-8 h-8 object-cover flex-shrink-0" style={{ borderRadius: '9999px' }} />
                         ) : (
-                          <div className="w-8 h-8 flex-shrink-0 flex items-center justify-center text-white font-semibold" style={{ borderRadius: '9999px', backgroundColor: '#2D6A4F', fontSize: '12px' }}>{appt.petName.slice(0, 2).toUpperCase()}</div>
+                          <div className="w-8 h-8 flex-shrink-0 flex items-center justify-center text-white font-semibold" style={{ borderRadius: '9999px', backgroundColor: 'var(--brand-green-text)', fontSize: '12px' }}>{appt.petName.slice(0, 2).toUpperCase()}</div>
                         )}
                         <div className="flex-1 min-w-0">
                           <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{appt.petName}</p>
@@ -1487,12 +1549,12 @@ export default function MyPortalPage() {
                   ) : busyAppt ? (
                     <div
                       className="flex-1 m-1 px-3 py-2.5 flex items-center gap-3"
-                      style={{ backgroundColor: '#2D6A4F08', borderLeft: '4px solid #2D6A4F60', borderRadius: '8px', opacity: 0.7 }}
+                      style={{ backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 3%, transparent)', borderLeft: '4px solid color-mix(in srgb, var(--brand-green-text) 38%, transparent)', borderRadius: '8px', opacity: 0.7 }}
                     >
                       {busyAppt.petImage ? (
                         <img src={busyAppt.petImage} alt={busyAppt.petName} className="w-7 h-7 object-cover flex-shrink-0" style={{ borderRadius: '9999px' }} />
                       ) : (
-                        <div className="w-7 h-7 flex-shrink-0 flex items-center justify-center text-white font-semibold" style={{ borderRadius: '9999px', backgroundColor: '#2D6A4F', fontSize: '11px' }}>{busyAppt.petName.slice(0, 2).toUpperCase()}</div>
+                        <div className="w-7 h-7 flex-shrink-0 flex items-center justify-center text-white font-semibold" style={{ borderRadius: '9999px', backgroundColor: 'var(--brand-green-text)', fontSize: '11px' }}>{busyAppt.petName.slice(0, 2).toUpperCase()}</div>
                       )}
                       <div className="flex-1 min-w-0">
                         <p style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-secondary)' }}>{busyAppt.petName} · {busyAppt.service} (cont.)</p>
@@ -1663,13 +1725,13 @@ export default function MyPortalPage() {
             {(calendarMonth.getMonth() !== new Date().getMonth() || calendarMonth.getFullYear() !== new Date().getFullYear()) && (
               <button
                 onClick={() => { const t = new Date(); setSelectedDate(t); setCalendarMonth(t); }}
-                className="w-full mt-2 py-1.5 text-center transition-colors hover:bg-[#2D6A4F10]"
+                className="w-full mt-2 py-1.5 text-center transition-colors hover:bg-[color-mix(in_srgb,var(--brand-green-text)_6%,transparent)]"
                 style={{
                   borderRadius: '6px',
                   fontSize: '13px',
                   fontWeight: 600,
                   color: 'var(--brand-green-text)',
-                  border: '1px solid #2D6A4F',
+                  border: '1px solid var(--brand-green-text)',
                 }}
               >
                 <ChevronLeft className="w-3.5 h-3.5 inline -ml-0.5 mr-0.5" />
@@ -1720,7 +1782,7 @@ export default function MyPortalPage() {
                 <div className="w-full h-2 bg-[var(--border-color)] overflow-hidden" style={{ borderRadius: '9999px' }}>
                   <div className="h-full bg-[#3B82F6] transition-all" style={{ width: `${(ptoUsed / PTO_ALLOWANCE) * 100}%`, borderRadius: '9999px' }} />
                 </div>
-                <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: '11px' }}>{ptoUsed} used · {ptoPending > 0 ? `${ptoRequests.filter(r => r.type === 'PTO' && r.status === 'Pending').length} pending` : 'none pending'}</p>
+                <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: '11px' }}>{ptoUsed} used · {ptoGroups.filter(g => g.type === 'PTO' && g.status === 'Pending').length > 0 ? `${ptoGroups.filter(g => g.type === 'PTO' && g.status === 'Pending').length} pending` : 'none pending'}</p>
               </div>
 
               {/* Sick Days */}
@@ -1735,30 +1797,46 @@ export default function MyPortalPage() {
                 <div className="w-full h-2 bg-[var(--border-color)] overflow-hidden" style={{ borderRadius: '9999px' }}>
                   <div className="h-full bg-[#d4183d] transition-all" style={{ width: `${(sickUsed / SICK_ALLOWANCE) * 100}%`, borderRadius: '9999px' }} />
                 </div>
-                <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: '11px' }}>{sickUsed} used · {ptoRequests.filter(r => r.type === 'Sick Day' && r.status === 'Pending').length > 0 ? `${ptoRequests.filter(r => r.type === 'Sick Day' && r.status === 'Pending').length} pending` : 'none pending'}</p>
+                <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: '11px' }}>{sickUsed} used · {ptoGroups.filter(g => g.type === 'Sick Day' && g.status === 'Pending').length > 0 ? `${ptoGroups.filter(g => g.type === 'Sick Day' && g.status === 'Pending').length} pending` : 'none pending'}</p>
               </div>
             </div>
 
             {/* Request List */}
             <h4 className="text-[var(--text-secondary)] mb-2" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Requests</h4>
             <div className="space-y-2">
-              {ptoRequests.map((req) => {
-                const rs = requestStatusStyles[req.status];
+              {ptoGroups.map((group, gi) => {
+                const rs = requestStatusStyles[group.status];
                 const StatusIcon = rs.icon;
-                const d = new Date(req.date + 'T12:00:00');
+                const startD = new Date(group.startDate + 'T12:00:00');
+                const endD = new Date(group.endDate + 'T12:00:00');
+                const isSameDay = group.startDate === group.endDate;
+                const dayCount = group.blocks.length;
+                const dateLabel = isSameDay
+                  ? startD.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                  : `${startD.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${endD.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
                 return (
-                  <div key={req.id} className="flex items-center gap-2 p-2 border border-[var(--border-color)]" style={{ borderRadius: '8px' }}>
-                    <div className="w-7 h-7 flex-shrink-0 flex items-center justify-center" style={{ backgroundColor: blockStyles[req.type].bg, borderRadius: '9999px' }}>
-                      {(() => { const I = blockStyles[req.type].icon; return <I className="w-3.5 h-3.5" style={{ color: blockStyles[req.type].text }} />; })()}
+                  <div key={`${group.type}-${group.startDate}-${gi}`} className="flex items-center gap-2 p-2 border border-[var(--border-color)]" style={{ borderRadius: '8px' }}>
+                    <div className="w-7 h-7 flex-shrink-0 flex items-center justify-center" style={{ backgroundColor: blockStyles[group.type].bg, borderRadius: '9999px' }}>
+                      {(() => { const I = blockStyles[group.type].icon; return <I className="w-3.5 h-3.5" style={{ color: blockStyles[group.type].text }} />; })()}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-[var(--text-primary)] truncate" style={{ fontSize: '13px', fontWeight: 600 }}>{req.type}</p>
-                      <p className="text-[var(--text-secondary)]" style={{ fontSize: '11px' }}>{d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
+                      <p className="text-[var(--text-primary)] truncate" style={{ fontSize: '13px', fontWeight: 600 }}>{group.type}{!isSameDay ? ` (${dayCount} days)` : ''}</p>
+                      <p className="text-[var(--text-secondary)]" style={{ fontSize: '11px' }}>{dateLabel}</p>
                     </div>
                     <span className="inline-flex items-center gap-1 px-2 py-0.5" style={{ backgroundColor: rs.bg, color: rs.text, borderRadius: '9999px', fontSize: '11px', fontWeight: 600 }}>
                       <StatusIcon className="w-3 h-3" />
-                      {req.status}
+                      {group.status}
                     </span>
+                    {group.status === 'Pending' && (
+                      <button
+                        onClick={() => handleCancelPtoGroup(group.blocks)}
+                        className="flex-shrink-0 w-6 h-6 flex items-center justify-center hover:bg-[var(--bg-offwhite)] transition-colors"
+                        style={{ borderRadius: '6px', border: 'none', background: 'transparent', cursor: 'pointer' }}
+                        title="Cancel request"
+                      >
+                        <X className="w-3.5 h-3.5 text-[var(--text-secondary)] hover:text-[#d4183d]" />
+                      </button>
+                    )}
                   </div>
                 );
               })}
@@ -1767,7 +1845,7 @@ export default function MyPortalPage() {
             <Button
               onClick={() => openBlockDialog('PTO')}
               className="w-full mt-4 hover:opacity-90"
-              style={{ backgroundColor: '#2D6A4F', color: '#fff', border: 'none', gap: '6px' }}
+              style={{ backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)', border: 'none', gap: '6px' }}
             >
               <Plus className="w-4 h-4" />
               Request Time Off

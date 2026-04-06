@@ -33,7 +33,7 @@ interface OwnerMedicalRecord {
 // ─── Color Maps ──────────────────────────────────────────────
 
 const recordTypeColors: Record<RecordType, { bg: string; text: string }> = {
-  Visit:        { bg: '#2D6A4F20', text: 'var(--brand-green-text)' },
+  Visit:        { bg: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)', text: 'var(--brand-green-text)' },
   Vaccination:  { bg: '#3B82F620', text: '#3B82F6' },
   'Lab Result': { bg: '#8B5CF620', text: '#8B5CF6' },
   Surgery:      { bg: '#EC489920', text: '#EC4899' },

@@ -7,13 +7,13 @@ import {
   CheckCircle2, AlertCircle, XCircle, Filter,
   ChevronLeft, ChevronRight, LayoutList, LayoutGrid, CalendarDays,
   Pencil, Trash2, Bell, LogIn, Stethoscope,
-  ClipboardList,
+  ClipboardList, DoorOpen,
 } from 'lucide-react';
 import { useAppointments } from '../hooks/useAppointments';
 import type { AppointmentRow } from '../hooks/useAppointments';
 import { useClients } from '../hooks/useClients';
 import { usePets } from '../hooks/usePets';
-import { supabase } from '../../lib/supabase';
+import { useTenantDb } from '../context/TenantContext';
 import { getOrgContext } from '../hooks/useOrgContext';
 
 // ─── Adapter: Supabase row → legacy display shape ─────────────
@@ -57,7 +57,7 @@ function adaptAppt(a: AppointmentRow): DisplayAppt {
     petHealth: 'Healthy',
     duration: `${a.duration_minutes ?? 30} min`,
     priority: 'Normal',
-    room: '',
+    room: a.room ?? '',
     confirmMethod: 'Email',
     reminderMethod: 'Email',
     reminderTiming: '1 day',
@@ -180,6 +180,7 @@ type FilterTab = typeof FILTER_TABS[number];
 // ─── Component ───────────────────────────────────────────────
 
 export default function AppointmentsPage() {
+  const db = useTenantDb();
   const navigate = useNavigate();
   const location = useLocation();
   const { startVisit } = useActiveVisit();
@@ -210,6 +211,8 @@ export default function AppointmentsPage() {
   const [editService, setEditService] = useState('');
   const [editVet, setEditVet] = useState('');
   const [editNotes, setEditNotes] = useState('');
+  const [roomInfoOpen, setRoomInfoOpen] = useState(false);
+  const [roomInfoAppt, setRoomInfoAppt] = useState<DisplayAppt | null>(null);
 
   // ── New Appointment form state ──────────────────────────────
   const [newApptClientId, setNewApptClientId] = useState('');
@@ -249,7 +252,7 @@ export default function AppointmentsPage() {
     (async () => {
       try {
         const { organizationId } = await getOrgContext();
-        const { data } = await supabase.from('staff').select('id, role, profiles:profiles!staff_profile_id_fkey(first_name, last_name)').eq('organization_id', organizationId).in('role', ['veterinarian', 'senior_veterinarian', 'specialist']).eq('status', 'Active').order('first_name');
+        const { data } = await db.from('staff').select('id, role, profiles:profiles!staff_profile_org_fkey(first_name, last_name)').eq('organization_id', organizationId).in('role', ['veterinarian', 'senior_veterinarian', 'specialist']).eq('status', 'Active').order('first_name');
         if (data) setStaffList(data.map((s: any) => {
           const fn = s.profiles?.first_name || '';
           const ln = s.profiles?.last_name || '';
@@ -450,18 +453,31 @@ export default function AppointmentsPage() {
 
   const handleCheckIn = () => {
     if (!selectedAppt) return;
-    updateApptStatus(selectedAppt.id, 'In Progress');
-    setApptStatus(selectedAppt.id, 'In Progress');
+    // If the patient has a room assigned (admin checked them in), show room info first
+    if (selectedAppt.room) {
+      setRoomInfoAppt(selectedAppt);
+      setDetailOpen(false);
+      setRoomInfoOpen(true);
+      return;
+    }
+    // No room assigned — go directly to visit
+    proceedToVisit(selectedAppt);
+  };
+
+  const proceedToVisit = (appt: DisplayAppt) => {
+    updateApptStatus(appt.id, 'In Progress');
+    setApptStatus(appt.id, 'In Progress');
     startVisit({
-      apptId: selectedAppt.id,
-      petName: selectedAppt.petName,
-      petImage: selectedAppt.petImage,
-      ownerName: selectedAppt.ownerName,
-      service: selectedAppt.service,
-      durationMinutes: parseInt(selectedAppt.duration) || 30,
+      apptId: appt.id,
+      petName: appt.petName,
+      petImage: appt.petImage,
+      ownerName: appt.ownerName,
+      service: appt.service,
+      durationMinutes: parseInt(appt.duration) || 30,
     });
-    setDetailOpen(false);
-    navigate(`/appointments/${selectedAppt.id}/visit`);
+    setRoomInfoOpen(false);
+    setRoomInfoAppt(null);
+    navigate(`/appointments/${appt.id}/visit`);
   };
 
   const handleSaveChanges = () => {
@@ -487,7 +503,7 @@ export default function AppointmentsPage() {
   // Fetch vet time blocks when vet is selected
   const fetchVetTimeBlocks = async (vetId: string) => {
     if (!vetId) { setVetTimeBlocks([]); return; }
-    const { data } = await supabase
+    const { data } = await db
       .from('staff_time_blocks')
       .select('date, time_start, time_end, type')
       .eq('staff_id', vetId);
@@ -592,7 +608,7 @@ export default function AppointmentsPage() {
                     {!isCurrentMonthView && (
                       <button
                         onClick={goToCurrentMonth}
-                        className="ml-2 px-3 py-1 text-[var(--brand-green-text)] border border-[#2D6A4F] hover:bg-[#2D6A4F10] transition-colors"
+                        className="ml-2 px-3 py-1 text-[var(--brand-green-text)] border border-[var(--brand-green-text)] hover:bg-[color-mix(in_srgb,var(--brand-green-text)_6%,transparent)] transition-colors"
                         style={{ borderRadius: '6px', fontSize: '13px', fontWeight: 500 }}
                       >
                         Today
@@ -623,7 +639,7 @@ export default function AppointmentsPage() {
                     {!isToday(selectedDate) && !showAllDates && (
                       <button
                         onClick={goToToday}
-                        className="ml-2 px-3 py-1 text-[var(--brand-green-text)] border border-[#2D6A4F] hover:bg-[#2D6A4F10] transition-colors"
+                        className="ml-2 px-3 py-1 text-[var(--brand-green-text)] border border-[var(--brand-green-text)] hover:bg-[color-mix(in_srgb,var(--brand-green-text)_6%,transparent)] transition-colors"
                         style={{ borderRadius: '6px', fontSize: '13px', fontWeight: 500 }}
                       >
                         Today
@@ -642,8 +658,8 @@ export default function AppointmentsPage() {
                         fontSize: '13px',
                         fontWeight: 600,
                         backgroundColor: showAllDates ? 'var(--brand-green-text)' : 'transparent',
-                        color: showAllDates ? '#000' : 'var(--brand-green-text)',
-                        border: showAllDates ? '1px solid var(--brand-green-text)' : '1px solid #2D6A4F',
+                        color: showAllDates ? 'var(--on-brand-green)' : 'var(--brand-green-text)',
+                        border: showAllDates ? '1px solid var(--brand-green-text)' : '1px solid var(--brand-green-text)',
                       }}
                     >
                       {showAllDates ? <><ChevronLeft className="w-3.5 h-3.5 inline -ml-0.5 mr-0.5" />Back to Day</> : 'View All'}
@@ -775,7 +791,7 @@ export default function AppointmentsPage() {
                             </div>
                           )}
                           <div
-                            className="bg-[var(--surface-white)] border border-[var(--border-color)] p-4 hover:border-[#2D6A4F] transition-colors cursor-pointer"
+                            className="bg-[var(--surface-white)] border border-[var(--border-color)] p-4 hover:border-[var(--brand-green-text)] transition-colors cursor-pointer"
                             style={{ borderRadius: '12px' }}
                             onClick={() => openApptDetail(appt)}
                           >
@@ -848,13 +864,13 @@ export default function AppointmentsPage() {
                         <div className="pt-2">
                           <button
                             onClick={() => setVisibleCount((c) => c + 5)}
-                            className="w-full py-2 transition-colors hover:bg-[#2D6A4F10]"
+                            className="w-full py-2 transition-colors hover:bg-[color-mix(in_srgb,var(--brand-green-text)_6%,transparent)]"
                             style={{
                               borderRadius: '8px',
                               fontSize: '13px',
                               fontWeight: 600,
                               color: 'var(--brand-green-text)',
-                              border: '1px solid #2D6A4F',
+                              border: '1px solid var(--brand-green-text)',
                             }}
                           >
                             Load More ({filteredAppointments.length - visibleCount} remaining)
@@ -929,7 +945,7 @@ export default function AppointmentsPage() {
                             borderRadius: '9999px',
                             fontSize: '14px',
                             fontWeight: isTodayDay || isSelectedDay ? 700 : 400,
-                            backgroundColor: isTodayDay ? 'var(--brand-green-text)' : isSelectedDay ? '#2D6A4F20' : 'transparent',
+                            backgroundColor: isTodayDay ? 'var(--brand-green-text)' : isSelectedDay ? 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)' : 'transparent',
                             color: isTodayDay ? '#fff' : isSelectedDay ? 'var(--brand-green-text)' : 'var(--text-primary)',
                           }}
                         >
@@ -1032,8 +1048,8 @@ export default function AppointmentsPage() {
                               key={appt.id}
                               className="mx-1.5 px-4 py-3 flex items-center gap-4 cursor-pointer hover:brightness-95 transition-all"
                               style={{
-                                backgroundColor: '#2D6A4F10',
-                                borderLeft: '4px solid #2D6A4F',
+                                backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 6%, transparent)',
+                                borderLeft: '4px solid var(--brand-green-text)',
                                 borderRadius: '8px',
                               }}
                               onClick={() => openApptDetail(appt)}
@@ -1122,13 +1138,13 @@ export default function AppointmentsPage() {
             {(calendarMonth.getMonth() !== new Date().getMonth() || calendarMonth.getFullYear() !== new Date().getFullYear()) && (
               <button
                 onClick={() => { const t = new Date(); setSelectedDate(t); setCalendarMonth(t); }}
-                className="w-full mt-2 py-1.5 text-center transition-colors hover:bg-[#2D6A4F10]"
+                className="w-full mt-2 py-1.5 text-center transition-colors hover:bg-[color-mix(in_srgb,var(--brand-green-text)_6%,transparent)]"
                 style={{
                   borderRadius: '6px',
                   fontSize: '13px',
                   fontWeight: 600,
                   color: 'var(--brand-green-text)',
-                  border: '1px solid #2D6A4F',
+                  border: '1px solid var(--brand-green-text)',
                 }}
               >
                 <ChevronLeft className="w-3.5 h-3.5 inline -ml-0.5 mr-0.5" />
@@ -1145,7 +1161,7 @@ export default function AppointmentsPage() {
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-[#2D6A4F]" />
+                  <div className="w-2 h-2 rounded-full bg-[var(--brand-green-text)]" />
                   <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>Total</span>
                 </div>
                 <span className="text-[var(--text-primary)]" style={{ fontSize: '20px', fontWeight: 700 }}>{totalToday}</span>
@@ -1183,7 +1199,7 @@ export default function AppointmentsPage() {
               </div>
               <div className="w-full h-2 bg-[var(--border-color)] overflow-hidden" style={{ borderRadius: '9999px' }}>
                 <div
-                  className="h-full bg-[#2D6A4F] transition-all"
+                  className="h-full bg-[var(--brand-green-text)] transition-all"
                   style={{
                     width: totalToday > 0 ? `${(completedToday / totalToday) * 100}%` : '0%',
                     borderRadius: '9999px',
@@ -1206,7 +1222,7 @@ export default function AppointmentsPage() {
                 return (
                   <div key={vet.id} className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 bg-[#2D6A4F15] flex items-center justify-center" style={{ borderRadius: '9999px', fontSize: '11px', fontWeight: 600, color: 'var(--brand-green-text)' }}>
+                      <div className="w-7 h-7 bg-[color-mix(in_srgb,var(--brand-green-text)_8%,transparent)] flex items-center justify-center" style={{ borderRadius: '9999px', fontSize: '11px', fontWeight: 600, color: 'var(--brand-green-text)' }}>
                         {vet.initials}
                       </div>
                       <span className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 500 }}>{vet.name}</span>
@@ -1230,7 +1246,7 @@ export default function AppointmentsPage() {
           style={{ maxWidth: '780px', width: '95vw', maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}
         >
           {/* ── Header ── */}
-          <div style={{ background: '#2D6A4F', padding: '18px 24px', flexShrink: 0 }}>
+          <div style={{ background: 'var(--brand-green-text)', padding: '18px 24px', flexShrink: 0 }}>
             <div className="flex items-center gap-3">
               <div style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: 'rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 <CalendarIcon style={{ width: '18px', height: '18px', color: '#fff' }} />
@@ -1330,7 +1346,7 @@ export default function AppointmentsPage() {
                               }}
                               className="hover:bg-[var(--surface-elevated)] transition-colors"
                             >
-                              <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#2D6A4F20', color: '#2D6A4F', fontSize: '10px', fontWeight: 700 }}>
+                              <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)', color: 'var(--brand-green-text)', fontSize: '10px', fontWeight: 700 }}>
                                 {(c.first_name?.[0] || '').toUpperCase()}{(c.last_name?.[0] || '').toUpperCase()}
                               </div>
                               <div>
@@ -1440,7 +1456,7 @@ export default function AppointmentsPage() {
                 <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Service Type</p>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
                   {[
-                    { label: 'Annual Checkup',  color: '#2D6A4F', emoji: '🩺' },
+                    { label: 'Annual Checkup',  color: 'var(--brand-green-text)', emoji: '🩺' },
                     { label: 'Vaccination',      color: '#3B82F6', emoji: '💉' },
                     { label: 'Dental Cleaning',  color: '#8B5CF6', emoji: '🦷' },
                     { label: 'Surgery',          color: '#EC4899', emoji: '🔬' },
@@ -1484,7 +1500,7 @@ export default function AppointmentsPage() {
                 <div className="flex gap-2 flex-wrap">
                   {staffList.length === 0 && <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>No vets found</span>}
                   {staffList.map((v, i) => {
-                    const colors = ['#2D6A4F', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261'];
+                    const colors = ['var(--brand-green-text)', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261'];
                     const color = colors[i % colors.length];
                     const active = newApptVetId === v.id;
                     return (
@@ -1527,8 +1543,8 @@ export default function AppointmentsPage() {
                         onClick={() => setNewApptTime(slot.time24)}
                         style={{
                           padding: '8px 4px', borderRadius: '8px', fontSize: '12px', fontWeight: isActive ? 700 : 500,
-                          border: `1.5px solid ${isActive ? '#2D6A4F' : isUnavailable ? 'var(--border-color)' : 'var(--border-color)'}`,
-                          backgroundColor: isActive ? '#2D6A4F' : isUnavailable ? 'var(--surface-elevated)' : 'transparent',
+                          border: `1.5px solid ${isActive ? 'var(--brand-green-text)' : isUnavailable ? 'var(--border-color)' : 'var(--border-color)'}`,
+                          backgroundColor: isActive ? 'var(--brand-green-text)' : isUnavailable ? 'var(--surface-elevated)' : 'transparent',
                           color: isActive ? '#fff' : isUnavailable ? 'var(--text-secondary)' : 'var(--text-primary)',
                           cursor: isUnavailable ? 'not-allowed' : 'pointer',
                           opacity: isUnavailable ? 0.5 : 1,
@@ -1555,8 +1571,8 @@ export default function AppointmentsPage() {
                       <button key={d} onClick={() => setNewApptDuration(d)} style={{
                         padding: '6px 13px', borderRadius: '7px', fontSize: '13px',
                         fontWeight: active ? 700 : 500,
-                        border: `1.5px solid ${active ? '#2D6A4F' : 'var(--border-color)'}`,
-                        backgroundColor: active ? '#2D6A4F18' : 'transparent',
+                        border: `1.5px solid ${active ? 'var(--brand-green-text)' : 'var(--border-color)'}`,
+                        backgroundColor: active ? 'color-mix(in srgb, var(--brand-green-text) 9%, transparent)' : 'transparent',
                         color: active ? 'var(--brand-green-text)' : 'var(--text-secondary)',
                         cursor: 'pointer', transition: 'all 0.15s',
                       }}>{d}</button>
@@ -1637,8 +1653,8 @@ export default function AppointmentsPage() {
                       <button key={m} onClick={() => setConfirmMethod(m)} style={{
                         flex: 1, padding: '4px 2px', borderRadius: '6px', fontSize: '11px',
                         fontWeight: active ? 700 : 400,
-                        border: `1.5px solid ${active ? '#2D6A4F' : 'var(--border-color)'}`,
-                        backgroundColor: active ? '#2D6A4F15' : 'transparent',
+                        border: `1.5px solid ${active ? 'var(--brand-green-text)' : 'var(--border-color)'}`,
+                        backgroundColor: active ? 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)' : 'transparent',
                         color: active ? 'var(--brand-green-text)' : 'var(--text-secondary)',
                         cursor: 'pointer',
                       }}>{m}</button>
@@ -1661,8 +1677,8 @@ export default function AppointmentsPage() {
                       <button key={m} onClick={() => setReminderMethod(m)} style={{
                         flex: 1, padding: '4px 2px', borderRadius: '6px', fontSize: '11px',
                         fontWeight: active ? 700 : 400,
-                        border: `1.5px solid ${active ? '#2D6A4F' : 'var(--border-color)'}`,
-                        backgroundColor: active ? '#2D6A4F15' : 'transparent',
+                        border: `1.5px solid ${active ? 'var(--brand-green-text)' : 'var(--border-color)'}`,
+                        backgroundColor: active ? 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)' : 'transparent',
                         color: active ? 'var(--brand-green-text)' : 'var(--text-secondary)',
                         cursor: 'pointer',
                       }}>{m}</button>
@@ -1679,8 +1695,8 @@ export default function AppointmentsPage() {
                           <button key={t} onClick={() => setReminderTiming(t)} style={{
                             padding: '4px 9px', borderRadius: '5px', fontSize: '11px',
                             fontWeight: active ? 700 : 400,
-                            border: `1.5px solid ${active ? '#2D6A4F' : 'var(--border-color)'}`,
-                            backgroundColor: active ? '#2D6A4F15' : 'transparent',
+                            border: `1.5px solid ${active ? 'var(--brand-green-text)' : 'var(--border-color)'}`,
+                            backgroundColor: active ? 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)' : 'transparent',
                             color: active ? 'var(--brand-green-text)' : 'var(--text-secondary)',
                             cursor: 'pointer',
                           }}>{t}</button>
@@ -1714,7 +1730,7 @@ export default function AppointmentsPage() {
                   if (visitType === 'new') {
                     if (!npOwnerName.trim() || !npPetName.trim() || !npSpecies) { alert('Please fill in owner name, pet name, and species.'); setSavingAppt(false); return; }
                     const nameParts = npOwnerName.trim().split(' ');
-                    const { data: newClient, error: cErr } = await supabase
+                    const { data: newClient, error: cErr } = await db
                       .from('clients')
                       .insert([{
                         organization_id: orgCtx.organizationId,
@@ -1730,7 +1746,7 @@ export default function AppointmentsPage() {
                     finalClientId = newClient.id;
 
                     const weightKg = npWeight ? parseFloat(npWeight) : undefined;
-                    const { data: newPet, error: pErr } = await supabase
+                    const { data: newPet, error: pErr } = await db
                       .from('pets')
                       .insert([{
                         client_id: finalClientId,
@@ -1753,7 +1769,7 @@ export default function AppointmentsPage() {
 
                   // Update pet's assigned vet when booking for returning patient
                   if (visitType === 'returning' && newApptVetId && finalPetId) {
-                    await supabase.from('pets').update({ assigned_vet_id: newApptVetId }).eq('id', finalPetId).eq('organization_id', orgCtx.organizationId);
+                    await db.from('pets').update({ assigned_vet_id: newApptVetId }).eq('id', finalPetId).eq('organization_id', orgCtx.organizationId);
                     window.dispatchEvent(new CustomEvent('petDataChanged'));
                   }
 
@@ -1773,7 +1789,7 @@ export default function AppointmentsPage() {
                     try {
                       const petDisplayName = visitType === 'new' ? npPetName : newApptPet;
                       const ownerDisplayName = visitType === 'new' ? npOwnerName : ownerSearch;
-                      await supabase.from('notification_events').upsert({
+                      await db.from('notification_events').upsert({
                         id: `appt-assign-${finalPetId}-${Date.now()}`,
                         type: 'appt_assign',
                         timestamp: new Date().toISOString(),
@@ -1799,7 +1815,7 @@ export default function AppointmentsPage() {
                   setSavingAppt(false);
                 }
               }}
-              style={{ backgroundColor: '#2D6A4F', color: '#fff' }}
+              style={{ backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)' }}
             >
               <CalendarIcon className="w-4 h-4 mr-1.5" />
               {savingAppt ? 'Saving…' : 'Schedule Appointment'}
@@ -1828,7 +1844,7 @@ export default function AppointmentsPage() {
             >
               <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid var(--border-color)' }}>
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#2D6A4F15' }}>
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)' }}>
                     <CalendarIcon className="w-5 h-5" style={{ color: 'var(--brand-green-text)' }} />
                   </div>
                   <div>
@@ -1885,7 +1901,7 @@ export default function AppointmentsPage() {
               </div>
               <div style={{ borderTop: '1px solid var(--border-color)', padding: '12px 16px', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
                 <Button variant="outline" size="sm" onClick={() => setDayPopupOpen(false)}>Close</Button>
-                <Button size="sm" onClick={() => { setDayPopupOpen(false); setViewMode('schedule'); }} style={{ backgroundColor: '#2D6A4F', color: '#fff' }}>
+                <Button size="sm" onClick={() => { setDayPopupOpen(false); setViewMode('schedule'); }} style={{ backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)' }}>
                   <LayoutGrid className="w-3.5 h-3.5 mr-1.5" />
                   View Schedule
                 </Button>
@@ -1905,7 +1921,7 @@ export default function AppointmentsPage() {
             maxHeight: '92vh',
             display: 'flex',
             flexDirection: 'column',
-            boxShadow: '0 0 0 1px rgba(45,106,79,0.15), 0 8px 32px rgba(0,0,0,0.22), 0 0 60px rgba(45,106,79,0.18)',
+            boxShadow: '0 0 0 1px color-mix(in srgb, var(--brand-green-text) 15%, transparent), 0 8px 32px rgba(0,0,0,0.22), 0 0 60px color-mix(in srgb, var(--brand-green-text) 18%, transparent)',
           }}
         >
           {selectedAppt && (() => {
@@ -1920,7 +1936,7 @@ export default function AppointmentsPage() {
             return (
               <>
                 {/* ── Coloured header strip (always shown) ── */}
-                <div className="pl-6 pr-16 py-4 flex items-center gap-4 flex-shrink-0" style={{ background: '#2D6A4F' }}>
+                <div className="pl-6 pr-16 py-4 flex items-center gap-4 flex-shrink-0" style={{ background: 'var(--brand-green-text)' }}>
                   <Avatar className="w-12 h-12 border-2 border-white/20 flex-shrink-0">
                     <AvatarImage src={selectedAppt.petImage} alt={selectedAppt.petName} className="object-cover" />
                     <AvatarFallback className="text-base font-bold">{selectedAppt.petName.slice(0, 2)}</AvatarFallback>
@@ -1941,7 +1957,7 @@ export default function AppointmentsPage() {
                     <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
                       <div className="grid grid-cols-2 gap-3">
                         <div className="flex items-start gap-3 p-3 bg-[var(--surface-elevated)]" style={{ borderRadius: '10px' }}>
-                          <div style={{ width: 32, height: 32, borderRadius: 8, background: '#2D6A4F18', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><CalendarIcon style={{ width: 15, height: 15, color: 'var(--brand-green-text)' }} /></div>
+                          <div style={{ width: 32, height: 32, borderRadius: 8, background: 'color-mix(in srgb, var(--brand-green-text) 9%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><CalendarIcon style={{ width: 15, height: 15, color: 'var(--brand-green-text)' }} /></div>
                           <div><p className="text-[var(--text-secondary)]" style={{ fontSize: '11px', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Date</p><p className="text-[var(--text-primary)]" style={{ fontSize: '13px', fontWeight: 600 }}>{new Date(selectedAppt.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</p></div>
                         </div>
                         <div className="flex items-start gap-3 p-3 bg-[var(--surface-elevated)]" style={{ borderRadius: '10px' }}>
@@ -1978,7 +1994,7 @@ export default function AppointmentsPage() {
                       <div className="flex gap-2 ml-auto">
                         <Button variant="outline" size="sm" onClick={() => setDetailMode('edit')}><Pencil className="w-3.5 h-3.5 mr-1.5" />Edit</Button>
                         {canCheckIn && (
-                          <Button size="sm" onClick={handleCheckIn} style={{ background: '#2D6A4F', color: 'white', border: 'none' }} className="hover:opacity-90">
+                          <Button size="sm" onClick={handleCheckIn} style={{ background: 'var(--brand-green-text)', color: 'var(--on-brand-green)', border: 'none' }} className="hover:opacity-90">
                             <LogIn className="w-3.5 h-3.5 mr-1.5" />Check In
                           </Button>
                         )}
@@ -1994,7 +2010,7 @@ export default function AppointmentsPage() {
                             });
                             setDetailOpen(false);
                             navigate(`/appointments/${selectedAppt.id}/visit`);
-                          }} style={{ background: '#2D6A4F', color: 'white', border: 'none' }} className="hover:opacity-90">
+                          }} style={{ background: 'var(--brand-green-text)', color: 'var(--on-brand-green)', border: 'none' }} className="hover:opacity-90">
                             <ClipboardList className="w-3.5 h-3.5 mr-1.5" />Open Visit Form
                           </Button>
                         )}
@@ -2058,6 +2074,52 @@ export default function AppointmentsPage() {
               </>
             );
           })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Room Info Dialog (doctor sees room before starting visit) ─── */}
+      <Dialog open={roomInfoOpen} onOpenChange={(v) => { if (!v) { setRoomInfoOpen(false); setRoomInfoAppt(null); } }}>
+        <DialogContent style={{ maxWidth: 380 }}>
+          {roomInfoAppt && (
+            <div className="flex flex-col items-center gap-4 py-2">
+              <div
+                className="flex items-center justify-center"
+                style={{
+                  width: 64, height: 64, borderRadius: '50%',
+                  backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)',
+                }}
+              >
+                <DoorOpen style={{ width: 32, height: 32, color: 'var(--brand-green-text)' }} />
+              </div>
+              <div className="text-center">
+                <p className="text-[var(--text-primary)]" style={{ fontSize: 18, fontWeight: 700 }}>
+                  {roomInfoAppt.room}
+                </p>
+                <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: 13 }}>
+                  {roomInfoAppt.petName} ({roomInfoAppt.ownerName}) is waiting
+                </p>
+                <p className="text-[var(--text-secondary)]" style={{ fontSize: 12, marginTop: 4 }}>
+                  {roomInfoAppt.service} · {roomInfoAppt.timeStart}
+                </p>
+              </div>
+              <Button
+                className="w-full hover:opacity-90"
+                onClick={() => proceedToVisit(roomInfoAppt)}
+                style={{
+                  backgroundColor: 'var(--brand-green-text)',
+                  color: 'var(--on-brand-green)',
+                  border: 'none',
+                  height: 42,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  boxShadow: '0 0 16px color-mix(in srgb, var(--brand-green-text) 50%, transparent)',
+                }}
+              >
+                <Stethoscope className="w-4 h-4 mr-2" />
+                Start Visit
+              </Button>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

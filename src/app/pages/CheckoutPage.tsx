@@ -15,7 +15,7 @@ import { MOCK_APPOINTMENTS, MEDICATION_PRICE_LIST } from '../data/mockAppointmen
 import type { Appointment as MockAppt } from '../data/mockAppointments';
 import { useActiveVisit } from '../context/ActiveVisitContext';
 import { useAppointmentStatus } from '../context/AppointmentStatusContext';
-import { supabase } from '../../lib/supabase';
+import { useTenantDb } from '../context/TenantContext';
 import { getOrgContext } from '../hooks/useOrgContext';
 
 // ─── Types ───────────────────────────────────────────────────
@@ -120,6 +120,7 @@ function getDurationMin(start: string, end: string): number {
 // ─── Component ───────────────────────────────────────────────
 
 export default function CheckoutPage() {
+  const db = useTenantDb();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { clearVisit } = useActiveVisit();
@@ -134,9 +135,9 @@ export default function CheckoutPage() {
     if (mockAppt || !id) return;
     (async () => {
       setLoadingAppt(true);
-      const { data } = await supabase
+      const { data } = await db
         .from('appointments')
-        .select('id, scheduled_at, duration_minutes, status, reason, notes, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name), staff!appointments_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
+        .select('id, scheduled_at, duration_minutes, status, reason, notes, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name), staff!appointments_vet_org_fkey(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name))')
         .eq('id', id)
         .single();
       if (data) {
@@ -203,7 +204,7 @@ export default function CheckoutPage() {
     const fetchServices = async () => {
       try {
         const { organizationId } = await getOrgContext();
-        const { data } = await supabase
+        const { data } = await db
           .from('services')
           .select('name, price')
           .eq('organization_id', organizationId)
@@ -357,12 +358,12 @@ export default function CheckoutPage() {
             <ChevronRight className="w-4 h-4 text-[var(--text-secondary)]" />
             <div
               className="flex items-center gap-2 px-3 py-1.5"
-              style={{ borderRadius: '8px', backgroundColor: '#2D6A4F18' }}
+              style={{ borderRadius: '8px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 9%, transparent)' }}
             >
               <div
                 style={{
                   width: 20, height: 20, borderRadius: '50%',
-                  backgroundColor: '#2D6A4F',
+                  backgroundColor: 'var(--brand-green-text)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontSize: '11px', fontWeight: 700, color: '#fff',
                   flexShrink: 0,
@@ -425,8 +426,8 @@ export default function CheckoutPage() {
               className="flex flex-col items-end justify-center p-4"
               style={{
                 borderRadius: '10px',
-                backgroundColor: '#2D6A4F08',
-                border: '1.5px solid #2D6A4F25',
+                backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 3%, transparent)',
+                border: '1.5px solid color-mix(in srgb, var(--brand-green-text) 14%, transparent)',
               }}
             >
               <p className="text-[var(--text-secondary)] mb-1" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
@@ -461,8 +462,8 @@ export default function CheckoutPage() {
               className="flex items-center gap-1.5 px-3 py-1.5 transition-colors hover:opacity-80"
               style={{
                 borderRadius: '8px',
-                border: '1.5px solid #2D6A4F',
-                backgroundColor: '#2D6A4F10',
+                border: '1.5px solid var(--brand-green-text)',
+                backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 6%, transparent)',
                 color: 'var(--brand-green-text)',
                 fontSize: '13px',
                 fontWeight: 600,
@@ -716,11 +717,11 @@ export default function CheckoutPage() {
             <div
               style={{
                 width: 34, height: 34, borderRadius: '9px',
-                backgroundColor: petHealthStatus === 'Healthy' ? '#2D6A4F15' : petHealthStatus === 'Critical' ? '#d4183d15' : '#F4A26115',
+                backgroundColor: petHealthStatus === 'Healthy' ? 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)' : petHealthStatus === 'Critical' ? '#d4183d15' : '#F4A26115',
                 display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
               }}
             >
-              {petHealthStatus === 'Healthy' && <CheckCircle2 style={{ width: 17, height: 17, color: '#2D6A4F' }} />}
+              {petHealthStatus === 'Healthy' && <CheckCircle2 style={{ width: 17, height: 17, color: 'var(--brand-green-text)' }} />}
               {petHealthStatus === 'Follow-up' && <CalendarClock style={{ width: 17, height: 17, color: '#F4A261' }} />}
               {petHealthStatus === 'Critical' && <AlertTriangle style={{ width: 17, height: 17, color: '#d4183d' }} />}
             </div>
@@ -733,7 +734,7 @@ export default function CheckoutPage() {
           <div className="p-6">
             <div className="grid grid-cols-3 gap-3">
               {([
-                { value: 'Healthy' as const,   color: '#2D6A4F', bg: '#2D6A4F', label: 'Healthy',   desc: 'No concerns, all clear', emoji: '✅' },
+                { value: 'Healthy' as const,   color: 'var(--brand-green-text)', bg: 'var(--brand-green-text)', label: 'Healthy',   desc: 'No concerns, all clear', emoji: '✅' },
                 { value: 'Follow-up' as const, color: '#F4A261', bg: '#F4A261', label: 'Follow-up',  desc: 'Needs another visit',    emoji: '🔔' },
                 { value: 'Critical' as const,  color: '#d4183d', bg: '#d4183d', label: 'Critical',   desc: 'Urgent attention needed', emoji: '🚨' },
               ]).map((opt) => {
@@ -818,12 +819,12 @@ export default function CheckoutPage() {
               const { organizationId } = await getOrgContext();
               // Update Supabase status for real appointments
               if (id && id.includes('-')) {
-                await supabase.from('appointments').update({ status: 'Completed' }).eq('id', id).eq('organization_id', organizationId);
+                await db.from('appointments').update({ status: 'Completed' }).eq('id', id).eq('organization_id', organizationId);
               }
 
               // Persist pet health status to client profile
               if (apptIds.clientId) {
-                await supabase.from('clients').update({ health_status: petHealthStatus }).eq('id', apptIds.clientId).eq('organization_id', organizationId);
+                await db.from('clients').update({ health_status: petHealthStatus }).eq('id', apptIds.clientId).eq('organization_id', organizationId);
               }
 
               // Create a "Ready for Billing" front-desk task
@@ -833,7 +834,7 @@ export default function CheckoutPage() {
                   const totalServices = items.reduce((s, i) => s + i.qty * i.unitPrice, 0);
                   const totalMeds = meds.reduce((s, m) => s + m.qty * m.unitPrice, 0);
                   const grandTotal = totalServices + totalMeds;
-                  await supabase.from('tasks').insert({
+                  await db.from('tasks').insert({
                     type: 'Owner Notification',
                     priority: 'High',
                     status: 'Pending',
@@ -853,7 +854,7 @@ export default function CheckoutPage() {
 
               setCompleted(true);
             }}
-            style={{ backgroundColor: '#2D6A4F', color: '#fff', border: 'none', gap: '8px' }}
+            style={{ backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)', border: 'none', gap: '8px' }}
             className="hover:opacity-90"
           >
             <Send className="w-4 h-4" />
@@ -877,11 +878,11 @@ export default function CheckoutPage() {
               <div
                 style={{
                   width: 72, height: 72, borderRadius: '50%',
-                  backgroundColor: '#2D6A4F15',
+                  backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}
               >
-                <ClipboardCheck style={{ width: 36, height: 36, color: '#2D6A4F' }} />
+                <ClipboardCheck style={{ width: 36, height: 36, color: 'var(--brand-green-text)' }} />
               </div>
             </div>
 
@@ -920,8 +921,8 @@ export default function CheckoutPage() {
 
             {/* Info rows */}
             <div className="space-y-3 mb-6">
-              <div className="flex items-center gap-3 p-3" style={{ borderRadius: '8px', backgroundColor: '#2D6A4F08', border: '1px solid #2D6A4F20' }}>
-                <Send style={{ width: 16, height: 16, color: '#2D6A4F', flexShrink: 0 }} />
+              <div className="flex items-center gap-3 p-3" style={{ borderRadius: '8px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 3%, transparent)', border: '1px solid color-mix(in srgb, var(--brand-green-text) 12%, transparent)' }}>
+                <Send style={{ width: 16, height: 16, color: 'var(--brand-green-text)', flexShrink: 0 }} />
                 <div>
                   <p style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>Sent to Reception</p>
                   <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Front desk has the invoice — client will pay there</p>
@@ -935,7 +936,7 @@ export default function CheckoutPage() {
                     Visit notes, diagnoses & medications saved · Status set to{' '}
                     <span style={{
                       fontWeight: 700,
-                      color: petHealthStatus === 'Healthy' ? '#2D6A4F' : petHealthStatus === 'Critical' ? '#d4183d' : '#F4A261',
+                      color: petHealthStatus === 'Healthy' ? 'var(--brand-green-text)' : petHealthStatus === 'Critical' ? '#d4183d' : '#F4A261',
                     }}>
                       {petHealthStatus}
                     </span>
@@ -962,7 +963,7 @@ export default function CheckoutPage() {
               </Button>
               <Button
                 className="flex-1"
-                style={{ backgroundColor: '#2D6A4F', color: '#fff', border: 'none' }}
+                style={{ backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)', border: 'none' }}
                 onClick={() => navigate('/appointments')}
               >
                 Back to Appointments

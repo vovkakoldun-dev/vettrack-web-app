@@ -310,7 +310,7 @@ export function SuperAdminSidebar({
                         justifyContent: effectiveCollapsed ? 'center' : 'flex-start',
                         gap:            effectiveCollapsed ? 0 : '10px',
                         overflow: 'hidden',
-                        backgroundColor: isActive ? `${BRAND}18` : 'transparent',
+                        backgroundColor: isActive ? 'color-mix(in srgb, var(--brand-green-text) 9%, transparent)' : 'transparent',
                         color: isActive ? BRAND_TEXT : 'var(--text-secondary)',
                       }}
                       onMouseEnter={e => {

@@ -15,7 +15,7 @@ import { Button } from '../../components/ui/button';
 import { Textarea } from '../../components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../../components/ui/dialog';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../../components/ui/select';
-import { supabase } from '../../../lib/supabase';
+import { useTenantDb } from '../../context/TenantContext';
 import { useAuth } from '../../context/AuthContext';
 import { getOrgContext } from '../../hooks/useOrgContext';
 import { useDashboardStats } from '../../hooks/useDashboardStats';
@@ -198,6 +198,7 @@ type BlockStatus = 'Confirmed' | 'Pending' | 'Approved' | 'Denied';
 
 interface TimeBlock {
   id: number;
+  dbId?: string; // Supabase UUID
   type: BlockType;
   date: string; // 'YYYY-MM-DD'
   timeStart: string; // '8:00 AM'
@@ -207,7 +208,7 @@ interface TimeBlock {
 }
 
 const blockStyles: Record<BlockType, { bg: string; border: string; text: string; icon: React.ElementType }> = {
-  'Work Hours':   { bg: '#2D6A4F15', border: 'var(--brand-green-text)', text: 'var(--brand-green-text)', icon: Briefcase },
+  'Work Hours':   { bg: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)', border: 'var(--brand-green-text)', text: 'var(--brand-green-text)', icon: Briefcase },
   'Lunch Break':  { bg: '#F4A26115', border: '#F4A261',                  text: '#B45309',                 icon: UtensilsCrossed },
   'Meeting':      { bg: '#8B5CF615', border: '#8B5CF6',                  text: '#6D28D9',                 icon: UsersRound },
   'Personal':     { bg: '#6B728015', border: 'var(--text-secondary)',    text: 'var(--text-primary)',      icon: Briefcase },
@@ -340,6 +341,7 @@ const QUICK_ACTIONS = [
 // ─── Page ─────────────────────────────────────────────────────
 
 export default function AdminMyPortalPage() {
+  const db = useTenantDb();
   const { user } = useAuth();
   const navigate = useNavigate();
   const [tasks, setTasks]   = useState<PortalTask[]>([]);
@@ -370,21 +372,21 @@ export default function AdminMyPortalPage() {
 
       const [profileRes, tasksRes, checkinsRes, paymentsRes, apptsRes, newClientsRes, timeBlocksRes, staffRes] = await Promise.all([
         // Profile
-        supabase.from('profiles').select('id, first_name, last_name, email, phone, avatar_url, role').eq('id', user.id).single(),
+        db.from('profiles').select('id, first_name, last_name, email, phone, avatar_url, role').eq('id', user.id).single(),
         // Tasks
-        supabase.from('tasks').select('id, type, priority, status, due_date, doctor_notes, pet:pets!tasks_pet_id_fkey(name), client:clients!tasks_client_id_fkey(first_name, last_name)').eq('organization_id', organizationId).order('due_date', { ascending: true }).limit(10),
+        db.from('tasks').select('id, type, priority, status, due_date, doctor_notes, pet:pets!tasks_pet_org_fkey(name), client:clients!tasks_client_org_fkey(first_name, last_name)').eq('organization_id', organizationId).order('due_date', { ascending: true }).limit(10),
         // Today's check-ins
-        supabase.from('appointments').select('id, scheduled_at, status, reason, pets!inner(name, clients!inner(first_name, last_name)), services(name)').eq('organization_id', organizationId).gte('scheduled_at', `${today}T00:00:00`).lte('scheduled_at', `${today}T23:59:59`).order('scheduled_at', { ascending: true }).limit(8),
+        db.from('appointments').select('id, scheduled_at, status, reason, pets!inner(name, clients!inner(first_name, last_name)), services(name)').eq('organization_id', organizationId).gte('scheduled_at', `${today}T00:00:00`).lte('scheduled_at', `${today}T23:59:59`).order('scheduled_at', { ascending: true }).limit(8),
         // Recent payments
-        supabase.from('payments').select('id, amount, method, paid_at, invoices!inner(id, client_id, clients!inner(first_name, last_name, pets(name)))').gte('paid_at', weekAgoStr).order('paid_at', { ascending: false }).limit(3),
+        db.from('payments').select('id, amount, method, paid_at, invoices!inner(id, client_id, clients!inner(first_name, last_name, pets(name)))').gte('paid_at', weekAgoStr).order('paid_at', { ascending: false }).limit(3),
         // Recent appointments
-        supabase.from('appointments').select('id, status, scheduled_at, pets!inner(name, clients!inner(first_name, last_name))').eq('organization_id', organizationId).gte('scheduled_at', weekAgoStr).in('status', ['Confirmed', 'Completed', 'Cancelled']).order('scheduled_at', { ascending: false }).limit(3),
+        db.from('appointments').select('id, status, scheduled_at, pets!inner(name, clients!inner(first_name, last_name))').eq('organization_id', organizationId).gte('scheduled_at', weekAgoStr).in('status', ['Confirmed', 'Completed', 'Cancelled']).order('scheduled_at', { ascending: false }).limit(3),
         // New clients
-        supabase.from('clients').select('id, first_name, last_name, created_at, pets(id)').eq('organization_id', organizationId).gte('created_at', weekAgoStr).order('created_at', { ascending: false }).limit(2),
+        db.from('clients').select('id, first_name, last_name, created_at, pets(id)').eq('organization_id', organizationId).gte('created_at', weekAgoStr).order('created_at', { ascending: false }).limit(2),
         // Time blocks
-        supabase.from('staff_time_blocks').select('*').eq('organization_id', organizationId).eq('staff_id', user.id).order('date'),
+        db.from('staff_time_blocks').select('*').eq('organization_id', organizationId).eq('staff_id', user.id).order('date'),
         // Staff record (PTO/sick allowance)
-        supabase.from('staff').select('pto_allowance, sick_allowance').eq('id', user.id).single(),
+        db.from('staff').select('pto_allowance, sick_allowance').eq('id', user.id).single(),
       ]);
 
       // Profile
@@ -528,9 +530,9 @@ export default function AdminMyPortalPage() {
   const loadTasks = useCallback(async () => {
     try {
       const { organizationId } = await getOrgContext();
-      const { data } = await supabase
+      const { data } = await db
         .from('tasks')
-        .select('id, type, priority, status, due_date, doctor_notes, pet:pets!tasks_pet_id_fkey(name), client:clients!tasks_client_id_fkey(first_name, last_name)')
+        .select('id, type, priority, status, due_date, doctor_notes, pet:pets!tasks_pet_org_fkey(name), client:clients!tasks_client_org_fkey(first_name, last_name)')
         .eq('organization_id', organizationId)
         .order('due_date', { ascending: true })
         .limit(10);
@@ -657,6 +659,7 @@ export default function AdminMyPortalPage() {
 
   // Schedule + PTO state
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
   const [blockDialogOpen, setBlockDialogOpen] = useState(false);
   const [blockType, setBlockType] = useState<BlockType>('Lunch Break');
@@ -676,7 +679,7 @@ export default function AdminMyPortalPage() {
     setTasks(prev => prev.map(t => t.id === id ? { ...t, done: newDone } : t));
     try {
       const { organizationId } = await getOrgContext();
-      await supabase.from('tasks').update({
+      await db.from('tasks').update({
         status: newDone ? 'Completed' : 'Pending',
         completed_at: newDone ? new Date().toLocaleString() : null,
       }).eq('id', id).eq('organization_id', organizationId);
@@ -689,7 +692,7 @@ export default function AdminMyPortalPage() {
     if (!newTask.trim()) return;
     try {
       const { organizationId } = await getOrgContext();
-      const { data, error } = await supabase.from('tasks').insert({
+      const { data, error } = await db.from('tasks').insert({
         organization_id: organizationId,
         type: 'General',
         priority: 'Normal',
@@ -711,7 +714,7 @@ export default function AdminMyPortalPage() {
     setTasks(prev => prev.filter(t => t.id !== id));
     try {
       const { organizationId } = await getOrgContext();
-      await supabase.from('tasks').delete().eq('id', id).eq('organization_id', organizationId);
+      await db.from('tasks').delete().eq('id', id).eq('organization_id', organizationId);
     } catch (err) {
       console.error('Failed to remove task:', err);
       if (removed) setTasks(prev => [...prev, removed]);
@@ -722,9 +725,9 @@ export default function AdminMyPortalPage() {
   const done    = tasks.filter(t => t.done);
 
   // Schedule computed values
-  const dayBlocks = timeBlocks.filter((b) => isSameDay(b.date, selectedDate));
+  const dayBlocks = timeBlocks.filter((b) => isSameDay(b.date, selectedDate) && b.status !== 'Denied');
   const blockByTime = new Map(dayBlocks.map((b) => [b.timeStart, b]));
-  const eventDates = new Set<string>(timeBlocks.map(b => b.date));
+  const eventDates = new Set<string>(timeBlocks.filter(b => b.status !== 'Denied').map(b => b.date));
   const datesWithEvents = Array.from(eventDates).map((d) => new Date(d + 'T12:00:00'));
 
   // Derive today's shift from work schedule
@@ -747,6 +750,30 @@ export default function AdminMyPortalPage() {
     setBlockDateFrom(ds); setBlockDateTo(ds);
     setBlockTimeStart(startH); setBlockTimeEnd(endH);
     setBlockNotes(''); setBlockDialogOpen(true);
+  };
+
+  const handleCancelPtoGroup = async (blocks: TimeBlock[]) => {
+    if (!blocks.length) return;
+    const blockIds = new Set(blocks.map((b) => b.id));
+    setTimeBlocks((prev) => prev.filter((b) => !blockIds.has(b.id)));
+    const dbIds = blocks.map((b) => b.dbId).filter(Boolean) as string[];
+    if (dbIds.length) {
+      db.from('staff_time_blocks').delete().in('id', dbIds).then(({ error }) => {
+        if (error) console.warn('PTO group delete error:', error.message);
+      });
+    }
+    if (user?.id) {
+      const ptoType = blocks[0].type === 'PTO' ? 'pto' : 'shift_swap';
+      const firstDateStr = new Date(blocks[0].date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      db.from('pending_requests').delete()
+        .eq('requester_id', user.id)
+        .eq('type', ptoType)
+        .eq('status', 'pending')
+        .ilike('detail', `%${firstDateStr}%`)
+        .then(({ error }) => {
+          if (error) console.warn('Pending request delete error:', error.message);
+        });
+    }
   };
 
   const handleSaveBlock = async () => {
@@ -783,7 +810,7 @@ export default function AdminMyPortalPage() {
       cursor.setDate(cursor.getDate() + 1);
     }
     // Save to Supabase
-    const { data: inserted, error } = await supabase.from('staff_time_blocks').insert(dbRows).select('id');
+    const { data: inserted, error } = await db.from('staff_time_blocks').insert(dbRows).select('id');
     if (error) {
       console.warn('Block save error:', error.message);
     } else if (inserted) {
@@ -798,7 +825,7 @@ export default function AdminMyPortalPage() {
         ? new Date(blockDateFrom + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
         : `${new Date(blockDateFrom + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}–${new Date(blockDateTo + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
       const dayCount = Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
-      await supabase.from('pending_requests').insert({
+      await db.from('pending_requests').insert({
         organization_id: orgCtx.organizationId,
         type: blockType === 'PTO' ? 'pto' : 'shift_swap',
         avatar: initials,
@@ -824,6 +851,39 @@ export default function AdminMyPortalPage() {
   const ptoLeft = PTO_ALLOWANCE - ptoUsed;
   const sickLeft = SICK_ALLOWANCE - sickUsed;
 
+  // Group consecutive PTO/Sick Day blocks into single request ranges (deduplicate first)
+  const groupedRequests = (() => {
+    // Deduplicate: keep one block per unique date+type+status
+    const seen = new Set<string>();
+    const deduped = ptoRequests.filter((b) => {
+      const key = `${b.date}-${b.type}-${b.status}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    const sorted = [...deduped].sort((a, b) => {
+      if (a.type !== b.type) return a.type.localeCompare(b.type);
+      if (a.status !== b.status) return a.status.localeCompare(b.status);
+      return a.date.localeCompare(b.date);
+    });
+    const groups: { type: BlockType; status: string; dateFrom: string; dateTo: string; days: number; blocks: typeof sorted }[] = [];
+    for (const block of sorted) {
+      const last = groups[groups.length - 1];
+      if (last && last.type === block.type && last.status === block.status) {
+        const prev = new Date(last.dateTo + 'T12:00:00');
+        prev.setDate(prev.getDate() + 1);
+        if (dateToStr(prev) === block.date) {
+          last.dateTo = block.date;
+          last.days += 1;
+          last.blocks.push(block);
+          continue;
+        }
+      }
+      groups.push({ type: block.type, status: block.status, dateFrom: block.date, dateTo: block.date, days: 1, blocks: [block] });
+    }
+    return groups;
+  })();
+
   if (profileLoading) {
     return (
       <div className="max-w-[1440px] mx-auto p-8 flex items-center justify-center" style={{ minHeight: '60vh' }}>
@@ -841,7 +901,7 @@ export default function AdminMyPortalPage() {
       {/* ── Profile Header (same style as Dr portal) ── */}
       <div
         className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6 mb-8 overflow-hidden"
-        style={{ borderRadius: '12px', borderTop: '4px solid #2D6A4F' }}
+        style={{ borderRadius: '12px', borderTop: '4px solid var(--brand-green-text)' }}
       >
         <div className="flex items-center gap-6">
           {/* Avatar with camera overlay */}
@@ -868,7 +928,7 @@ export default function AdminMyPortalPage() {
           <div className="flex-1">
             <div className="flex items-center gap-2 mb-1">
               <h1 className="text-[var(--text-primary)]" style={{ fontSize: '26px', fontWeight: 700 }}>{ADMIN_PROFILE.name}</h1>
-              <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', backgroundColor: '#2D6A4F18', color: 'var(--brand-green-text)', padding: '3px 10px', borderRadius: 999 }}>Admin</span>
+              <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 9%, transparent)', color: 'var(--brand-green-text)', padding: '3px 10px', borderRadius: 999 }}>Admin</span>
             </div>
             <p className="text-[var(--brand-green-text)]" style={{ fontSize: '15px', fontWeight: 600, marginBottom: 4 }}>
               {ADMIN_PROFILE.role} · Since {ADMIN_PROFILE.since}
@@ -937,7 +997,7 @@ export default function AdminMyPortalPage() {
                 <ChevronRightIcon style={{ width: 20, height: 20, color: 'var(--text-secondary)' }} />
               </button>
               {!isToday(selectedDate) && (
-                <button onClick={goToToday} className="ml-2 px-3 py-1 text-[var(--brand-green-text)] border border-[var(--brand-green-text)] hover:bg-[#2D6A4F10] transition-colors" style={{ borderRadius: '6px', fontSize: '13px', fontWeight: 500 }}>
+                <button onClick={goToToday} className="ml-2 px-3 py-1 text-[var(--brand-green-text)] border border-[var(--brand-green-text)] hover:bg-[color-mix(in_srgb,var(--brand-green-text)_6%,transparent)] transition-colors" style={{ borderRadius: '6px', fontSize: '13px', fontWeight: 500 }}>
                   Today
                 </button>
               )}
@@ -957,18 +1017,23 @@ export default function AdminMyPortalPage() {
           <div className="bg-[var(--surface-white)] border border-[var(--border-color)] overflow-hidden" style={{ borderRadius: '12px' }}>
             <div style={{ maxHeight: '796px', overflowY: 'auto' }}>
             {(() => {
-              // Parse shift hours to determine which slots are within the shift
-              const shiftParts = ADMIN_PROFILE.shift.split('–').map(s => s.trim());
-              const shiftStart24 = shiftParts.length === 2 ? to24Hour(shiftParts[0]) : '08:00';
-              const shiftEnd24 = shiftParts.length === 2 ? to24Hour(shiftParts[1]) : '17:00';
+              // Determine working hours for the selected date
+              const selDayKey = (['Sun','Mon','Tue','Wed','Thu','Fri','Sat'] as const)[selectedDate.getDay()] as WorkDay;
+              const selDaySchedule = workSchedule[selDayKey];
+              const isDayOff = !selDaySchedule.enabled;
+              const shiftStart24 = selDaySchedule.start || '08:00';
+              const shiftEnd24 = selDaySchedule.end || '17:00';
               return SCHEDULE_SLOTS.map((slot, idx) => {
               const block = blockByTime.get(slot);
               const isLast = idx === SCHEDULE_SLOTS.length - 1;
               const slot24 = to24Hour(slot);
-              const inShift = slot24 >= shiftStart24 && slot24 < shiftEnd24;
+              const inShift = !isDayOff && slot24 >= shiftStart24 && slot24 < shiftEnd24;
+              // Green border only on slots with actual blocks; available slots stay clean
+              const slotBorder = (inShift && block) ? '3px solid var(--brand-green-text)' : '3px solid transparent';
+              const slotOpacity = inShift ? 1 : 0.5;
               return (
                 <div key={slot} className={`flex items-stretch ${!isLast ? 'border-b border-[var(--border-color)]' : ''}`}
-                  style={inShift ? { borderLeft: '3px solid var(--brand-green-text)' } : { borderLeft: '3px solid transparent', opacity: 0.5 }}>
+                  style={{ borderLeft: slotBorder, opacity: slotOpacity }}>
                   <div className="w-24 flex-shrink-0 px-3 py-3 flex items-center justify-end">
                     <span style={{ fontSize: '13px', color: inShift ? 'var(--text-primary)' : 'var(--text-secondary)', fontWeight: inShift ? 600 : 500 }}>{slot}</span>
                   </div>
@@ -1005,14 +1070,36 @@ export default function AdminMyPortalPage() {
         {/* Right: Mini Calendar + Time Off */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', alignSelf: 'stretch' }}>
           {/* Mini Calendar */}
-          <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-4 flex justify-center" style={{ borderRadius: '12px' }}>
-            <Calendar
-              mode="single"
-              selected={selectedDate}
-              onSelect={(date) => date && setSelectedDate(date)}
-              modifiers={{ hasEvent: datesWithEvents }}
-              modifiersStyles={{ hasEvent: { fontWeight: 700, textDecoration: 'underline', textDecorationColor: 'var(--brand-green-text)', textUnderlineOffset: '4px' } }}
-            />
+          <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-4" style={{ borderRadius: '12px' }}>
+            <div className="flex justify-center">
+              <Calendar
+                mode="single"
+                selected={selectedDate}
+                month={calendarMonth}
+                onMonthChange={setCalendarMonth}
+                onSelect={(date) => { if (date) { setSelectedDate(date); setCalendarMonth(date); } }}
+                modifiers={{ hasEvent: datesWithEvents }}
+                modifiersStyles={{
+                  hasEvent: { fontWeight: 700, textDecoration: 'underline', textDecorationColor: 'var(--brand-green-text)', textUnderlineOffset: '4px' },
+                }}
+              />
+            </div>
+            {(calendarMonth.getMonth() !== new Date().getMonth() || calendarMonth.getFullYear() !== new Date().getFullYear()) && (
+              <button
+                onClick={() => { const t = new Date(); setSelectedDate(t); setCalendarMonth(t); }}
+                className="w-full mt-2 py-1.5 text-center transition-colors hover:bg-[color-mix(in_srgb,var(--brand-green-text)_6%,transparent)]"
+                style={{
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  color: 'var(--brand-green-text)',
+                  border: '1px solid var(--brand-green-text)',
+                }}
+              >
+                <ChevronLeft className="w-3.5 h-3.5 inline -ml-0.5 mr-0.5" />
+                Back to Today
+              </button>
+            )}
           </div>
 
           {/* Time Off Summary */}
@@ -1035,7 +1122,7 @@ export default function AdminMyPortalPage() {
                   <div className="h-full bg-[#3B82F6] transition-all" style={{ width: `${(ptoUsed / PTO_ALLOWANCE) * 100}%`, borderRadius: '9999px' }} />
                 </div>
                 <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: '11px' }}>
-                  {ptoUsed} used · {ptoRequests.filter(r => r.type === 'PTO' && r.status === 'Pending').length > 0 ? `${ptoRequests.filter(r => r.type === 'PTO' && r.status === 'Pending').length} pending` : 'none pending'}
+                  {ptoUsed} used · {groupedRequests.filter(r => r.type === 'PTO' && r.status === 'Pending').length > 0 ? `${groupedRequests.filter(r => r.type === 'PTO' && r.status === 'Pending').length} pending` : 'none pending'}
                 </p>
               </div>
 
@@ -1054,7 +1141,7 @@ export default function AdminMyPortalPage() {
                   <div className="h-full bg-[#d4183d] transition-all" style={{ width: `${(sickUsed / SICK_ALLOWANCE) * 100}%`, borderRadius: '9999px' }} />
                 </div>
                 <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: '11px' }}>
-                  {sickUsed} used · {ptoRequests.filter(r => r.type === 'Sick Day' && r.status === 'Pending').length > 0 ? `${ptoRequests.filter(r => r.type === 'Sick Day' && r.status === 'Pending').length} pending` : 'none pending'}
+                  {sickUsed} used · {groupedRequests.filter(r => r.type === 'Sick Day' && r.status === 'Pending').length > 0 ? `${groupedRequests.filter(r => r.type === 'Sick Day' && r.status === 'Pending').length} pending` : 'none pending'}
                 </p>
               </div>
             </div>
@@ -1062,23 +1149,39 @@ export default function AdminMyPortalPage() {
             {/* Requests list */}
             <h4 className="text-[var(--text-secondary)] mb-2" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Requests</h4>
             <div className="space-y-2">
-              {ptoRequests.map((req) => {
-                const rs = requestStatusStyles[req.status];
+              {groupedRequests.map((grp) => {
+                const rs = requestStatusStyles[grp.status];
                 const StatusIcon = rs.icon;
-                const d = new Date(req.date + 'T12:00:00');
+                const fromDate = new Date(grp.dateFrom + 'T12:00:00');
+                const toDate = new Date(grp.dateTo + 'T12:00:00');
+                const dateLabel = grp.dateFrom === grp.dateTo
+                  ? fromDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                  : `${fromDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${toDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
                 return (
-                  <div key={req.id} className="flex items-center gap-2 p-2 border border-[var(--border-color)]" style={{ borderRadius: '8px' }}>
-                    <div className="w-7 h-7 flex-shrink-0 flex items-center justify-center" style={{ backgroundColor: blockStyles[req.type].bg, borderRadius: '9999px' }}>
-                      {(() => { const I = blockStyles[req.type].icon; return <I style={{ width: 14, height: 14, color: blockStyles[req.type].text }} />; })()}
+                  <div key={`${grp.type}-${grp.dateFrom}-${grp.id}`} className="flex items-center gap-2 p-2 border border-[var(--border-color)]" style={{ borderRadius: '8px' }}>
+                    <div className="w-7 h-7 flex-shrink-0 flex items-center justify-center" style={{ backgroundColor: blockStyles[grp.type].bg, borderRadius: '9999px' }}>
+                      {(() => { const I = blockStyles[grp.type].icon; return <I style={{ width: 14, height: 14, color: blockStyles[grp.type].text }} />; })()}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-[var(--text-primary)] truncate" style={{ fontSize: '13px', fontWeight: 600 }}>{req.type}</p>
-                      <p className="text-[var(--text-secondary)]" style={{ fontSize: '11px' }}>{d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
+                      <p className="text-[var(--text-primary)] truncate" style={{ fontSize: '13px', fontWeight: 600 }}>
+                        {grp.type}{grp.days > 1 ? ` (${grp.days} days)` : ''}
+                      </p>
+                      <p className="text-[var(--text-secondary)]" style={{ fontSize: '11px' }}>{dateLabel}</p>
                     </div>
                     <span className="inline-flex items-center gap-1 px-2 py-0.5" style={{ backgroundColor: rs.bg, color: rs.text, borderRadius: '9999px', fontSize: '11px', fontWeight: 600 }}>
                       <StatusIcon style={{ width: 12, height: 12 }} />
-                      {req.status}
+                      {grp.status}
                     </span>
+                    {grp.status === 'Pending' && (
+                      <button
+                        onClick={() => handleCancelPtoGroup(grp.blocks)}
+                        className="flex-shrink-0 w-6 h-6 flex items-center justify-center hover:bg-[var(--bg-offwhite)] transition-colors"
+                        style={{ borderRadius: '6px', border: 'none', background: 'transparent', cursor: 'pointer' }}
+                        title="Cancel request"
+                      >
+                        <X className="w-3.5 h-3.5 text-[var(--text-secondary)] hover:text-[#d4183d]" />
+                      </button>
+                    )}
                   </div>
                 );
               })}
@@ -1225,7 +1328,7 @@ export default function AdminMyPortalPage() {
                     onClick={() => setWorkSchedule(prev => ({ ...prev, [day]: { ...prev[day], enabled: !prev[day].enabled } }))}
                     style={{
                       width: 36, height: 20, borderRadius: 9999, flexShrink: 0, position: 'relative', cursor: 'pointer', border: 'none',
-                      backgroundColor: d.enabled ? '#2D6A4F' : 'var(--border-color)', transition: 'background-color 0.2s',
+                      backgroundColor: d.enabled ? 'var(--brand-green-text)' : 'var(--border-color)', transition: 'background-color 0.2s',
                     }}
                   >
                     <div style={{ position: 'absolute', top: 3, left: d.enabled ? 19 : 3, width: 14, height: 14, borderRadius: 9999, backgroundColor: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />

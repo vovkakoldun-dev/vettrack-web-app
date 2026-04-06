@@ -11,7 +11,7 @@ import { Textarea } from '../../components/ui/textarea';
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '../../components/ui/select';
-import { supabase } from '../../../lib/supabase';
+import { useTenantDb } from '../../context/TenantContext';
 import { getOrgContext } from '../../hooks/useOrgContext';
 
 // ─── Theme ────────────────────────────────────────────────────
@@ -45,7 +45,7 @@ interface Service {
 
 // ─── Category config ──────────────────────────────────────────
 const CAT_CONFIG: Record<Category, { color: string; bg: string; icon: React.ElementType }> = {
-  Wellness:       { color: 'var(--brand-green-text)', bg: '#2D6A4F18', icon: Stethoscope   },
+  Wellness:       { color: 'var(--brand-green-text)', bg: 'color-mix(in srgb, var(--brand-green-text) 9%, transparent)', icon: Stethoscope   },
   Vaccinations:   { color: '#3B82F6',                 bg: '#3B82F618', icon: Syringe       },
   Surgery:        { color: '#EC4899',                 bg: '#EC489918', icon: Scissors      },
   Dental:         { color: '#06B6D4',                 bg: '#06B6D418', icon: Sparkles      },
@@ -296,6 +296,7 @@ function ServiceDrawer({
 // ─── Main Page ────────────────────────────────────────────────
 
 export default function SuperAdminServicesPage() {
+  const db = useTenantDb();
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading]   = useState(true);
   const [activeTab, setActiveTab] = useState<Category | 'All'>('All');
@@ -308,7 +309,7 @@ export default function SuperAdminServicesPage() {
     setLoading(true);
     try {
       const { organizationId } = await getOrgContext();
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('services')
         .select('*')
         .eq('organization_id', organizationId)
@@ -332,7 +333,7 @@ export default function SuperAdminServicesPage() {
     setServices(prev => prev.map(s => s.id === id ? { ...s, price } : s));
     try {
       const { organizationId } = await getOrgContext();
-      await supabase.from('services').update({ price }).eq('id', id).eq('organization_id', organizationId);
+      await db.from('services').update({ price }).eq('id', id).eq('organization_id', organizationId);
       dispatchChange();
     } catch (e) {
       console.error('Failed to update price:', e);
@@ -346,7 +347,7 @@ export default function SuperAdminServicesPage() {
     setServices(prev => prev.map(s => s.id === id ? { ...s, active: !s.active } : s));
     try {
       const { organizationId } = await getOrgContext();
-      await supabase.from('services').update({ is_active: !svc.active }).eq('id', id).eq('organization_id', organizationId);
+      await db.from('services').update({ is_active: !svc.active }).eq('id', id).eq('organization_id', organizationId);
       dispatchChange();
     } catch (e) {
       console.error('Failed to toggle active:', e);
@@ -368,7 +369,7 @@ export default function SuperAdminServicesPage() {
 
       if (isExisting) {
         // Update existing service
-        await supabase.from('services').update({
+        await db.from('services').update({
           name: svc.name,
           category: svc.category,
           price: svc.price,
@@ -381,7 +382,7 @@ export default function SuperAdminServicesPage() {
         }).eq('id', svc.id).eq('organization_id', organizationId);
       } else {
         // Insert new service
-        const { data } = await supabase.from('services').insert({
+        const { data } = await db.from('services').insert({
           organization_id: organizationId,
           name: svc.name,
           category: svc.category,
@@ -411,7 +412,7 @@ export default function SuperAdminServicesPage() {
     setServices(prev => prev.filter(s => s.id !== id));
     try {
       const { organizationId } = await getOrgContext();
-      await supabase.from('services').delete().eq('id', id).eq('organization_id', organizationId);
+      await db.from('services').delete().eq('id', id).eq('organization_id', organizationId);
       dispatchChange();
     } catch (e) {
       console.error('Failed to delete service:', e);
@@ -423,7 +424,7 @@ export default function SuperAdminServicesPage() {
     const newName = `${svc.name} (Copy)`;
     try {
       const { organizationId } = await getOrgContext();
-      const { data } = await supabase.from('services').insert({
+      const { data } = await db.from('services').insert({
         organization_id: organizationId,
         name: newName,
         category: svc.category,

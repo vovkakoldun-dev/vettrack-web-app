@@ -17,6 +17,7 @@ import {
 import { MOCK_APPOINTMENTS, LAB_TESTS } from '../data/mockAppointments';
 import type { Appointment as MockAppt } from '../data/mockAppointments';
 import { supabase } from '../../lib/supabase';
+import { useTenantDb } from '../context/TenantContext';
 import { getOrgContext } from '../hooks/useOrgContext';
 import { useAuth } from '../context/AuthContext';
 
@@ -63,7 +64,7 @@ const TASK_TYPE_ICON: Record<FrontDeskTaskType, React.ElementType> = {
 const PRIORITY_CONFIG = {
   Urgent: { color: '#d4183d', bg: '#d4183d15' },
   High:   { color: '#F59E0B', bg: '#F59E0B15' },
-  Normal: { color: '#2D6A4F', bg: '#2D6A4F12' },
+  Normal: { color: '#22C55E', bg: '#22C55E15' },
   Low:    { color: '#6B7280', bg: '#6B728012' },
 } as const;
 
@@ -127,9 +128,10 @@ function SectionCard({ icon, title, children }: { icon: React.ReactNode; title: 
 // ─── Component ───────────────────────────────────────────────
 
 export default function VisitPage() {
+  const db = useTenantDb();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { advanceToCheckout, clearVisit } = useActiveVisit();
+  const { activeVisit, advanceToCheckout, clearVisit } = useActiveVisit();
   const { user } = useAuth();
 
   const mockAppt = MOCK_APPOINTMENTS.find((a) => String(a.id) === id);
@@ -143,9 +145,9 @@ export default function VisitPage() {
     if (mockAppt || !id) return;
     (async () => {
       setLoadingAppt(true);
-      const { data } = await supabase
+      const { data } = await db
         .from('appointments')
-        .select('id, scheduled_at, duration_minutes, status, reason, notes, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name), staff!appointments_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
+        .select('id, scheduled_at, duration_minutes, status, reason, notes, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name), staff!appointments_vet_org_fkey(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name))')
         .eq('id', id)
         .single();
       if (data) {
@@ -311,7 +313,7 @@ export default function VisitPage() {
       const { organizationId } = await getOrgContext();
       // Update appointment status + add cancellation note
       if (id && id.includes('-')) {
-        await supabase.from('appointments')
+        await db.from('appointments')
           .update({ status: 'Cancelled', notes: `Cancelled: ${cancelReason}` })
           .eq('id', id)
           .eq('organization_id', organizationId);
@@ -331,7 +333,7 @@ export default function VisitPage() {
   const dxTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const searchDiagnoses = useCallback(async (query: string) => {
     if (query.length < 2) { setDxSuggestions([]); return; }
-    const { data } = await supabase
+    const { data } = await db
       .from('vet_conditions_reference')
       .select('name')
       .eq('type', 'diagnosis')
@@ -347,12 +349,23 @@ export default function VisitPage() {
     dxTimerRef.current = setTimeout(() => searchDiagnoses(val), 250);
   };
 
-  // ── Elapsed timer — starts counting from 0 when page mounts ──
-  const [elapsedSec, setElapsedSec] = useState(0);
+  // ── Elapsed timer — resumes from activeVisit.startedAt so it survives navigation ──
+  const [elapsedSec, setElapsedSec] = useState(() => {
+    if (activeVisit?.startedAt) {
+      return Math.max(0, Math.floor((Date.now() - activeVisit.startedAt.getTime()) / 1000));
+    }
+    return 0;
+  });
   useEffect(() => {
-    const interval = setInterval(() => setElapsedSec((s) => s + 1), 1000);
+    const interval = setInterval(() => {
+      if (activeVisit?.startedAt) {
+        setElapsedSec(Math.max(0, Math.floor((Date.now() - activeVisit.startedAt.getTime()) / 1000)));
+      } else {
+        setElapsedSec((s) => s + 1);
+      }
+    }, 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [activeVisit]);
 
   if (loadingAppt) {
     return (
@@ -466,12 +479,12 @@ export default function VisitPage() {
           <div className="flex items-center gap-2 flex-shrink-0">
             <div
               className="flex items-center gap-2 px-3 py-1.5"
-              style={{ borderRadius: '8px', backgroundColor: '#2D6A4F18' }}
+              style={{ borderRadius: '8px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 9%, transparent)' }}
             >
               <div
                 style={{
                   width: 20, height: 20, borderRadius: '50%',
-                  backgroundColor: '#2D6A4F',
+                  backgroundColor: 'var(--brand-green-text)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontSize: '11px', fontWeight: 700, color: '#fff',
                   flexShrink: 0,
@@ -500,8 +513,8 @@ export default function VisitPage() {
             <div
               className="flex items-center gap-1.5 px-3 py-1.5"
               style={{
-                backgroundColor: elapsedSec >= durationMin * 60 ? '#f43f5e18' : '#2D6A4F14',
-                border: `1px solid ${elapsedSec >= durationMin * 60 ? '#f43f5e50' : '#2D6A4F40'}`,
+                backgroundColor: elapsedSec >= durationMin * 60 ? '#f43f5e18' : 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)',
+                border: `1px solid ${elapsedSec >= durationMin * 60 ? '#f43f5e50' : 'color-mix(in srgb, var(--brand-green-text) 25%, transparent)'}`,
                 borderRadius: '8px',
               }}
             >
@@ -542,7 +555,7 @@ export default function VisitPage() {
         {/* ── Patient Info Card ── */}
         <div
           className="bg-[var(--surface-white)] border border-[var(--border-color)]"
-          style={{ borderRadius: '12px', borderLeft: '4px solid #2D6A4F', overflow: 'hidden' }}
+          style={{ borderRadius: '12px', borderLeft: '4px solid var(--brand-green-text)', overflow: 'hidden' }}
         >
           <div className="p-5 flex items-center gap-5">
             <Avatar className="w-16 h-16 flex-shrink-0">
@@ -560,7 +573,7 @@ export default function VisitPage() {
                       fontSize: '12px',
                       fontWeight: 500,
                       color: 'var(--brand-green-text)',
-                      backgroundColor: '#2D6A4F15',
+                      backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)',
                       borderRadius: '6px',
                       padding: '3px 8px',
                       textDecoration: 'none',
@@ -760,7 +773,7 @@ export default function VisitPage() {
                 </div>
                 <div>
                   <label className="text-[var(--text-secondary)] mb-1.5 block" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                    <Calendar className="w-3.5 h-3.5 inline mr-1" style={{ color: '#2D6A4F' }} />
+                    <Calendar className="w-3.5 h-3.5 inline mr-1" style={{ color: 'var(--brand-green-text)' }} />
                     Next Due Date
                   </label>
                   <Input
@@ -811,15 +824,15 @@ export default function VisitPage() {
                   className="flex items-center gap-2 px-3 py-2 text-left transition-colors"
                   style={{
                     borderRadius: '8px',
-                    border: `1.5px solid ${wnl ? '#2D6A4F40' : '#d4183d40'}`,
-                    backgroundColor: wnl ? '#2D6A4F08' : '#d4183d08',
+                    border: `1.5px solid ${wnl ? 'color-mix(in srgb, var(--brand-green-text) 25%, transparent)' : '#d4183d40'}`,
+                    backgroundColor: wnl ? 'color-mix(in srgb, var(--brand-green-text) 3%, transparent)' : '#d4183d08',
                   }}
                 >
                   <div
                     style={{
                       width: 16, height: 16, borderRadius: '4px',
-                      border: `2px solid ${wnl ? '#2D6A4F' : '#d4183d'}`,
-                      backgroundColor: wnl ? '#2D6A4F' : 'transparent',
+                      border: `2px solid ${wnl ? 'var(--brand-green-text)' : '#d4183d'}`,
+                      backgroundColor: wnl ? 'var(--brand-green-text)' : 'transparent',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       flexShrink: 0,
                     }}
@@ -955,8 +968,8 @@ export default function VisitPage() {
                           borderRadius: '9999px',
                           fontSize: '13px',
                           fontWeight: active ? 600 : 400,
-                          border: `1.5px solid ${active ? '#2D6A4F' : 'var(--border-color)'}`,
-                          backgroundColor: active ? '#2D6A4F' : 'transparent',
+                          border: `1.5px solid ${active ? 'var(--brand-green-text)' : 'var(--border-color)'}`,
+                          backgroundColor: active ? 'var(--brand-green-text)' : 'transparent',
                           color: active ? '#fff' : 'var(--text-secondary)',
                           cursor: 'pointer',
                         }}
@@ -1001,8 +1014,8 @@ export default function VisitPage() {
               className="flex items-center gap-1.5 px-3 py-1.5 transition-colors hover:opacity-80"
               style={{
                 borderRadius: '8px',
-                border: '1.5px solid #2D6A4F',
-                backgroundColor: '#2D6A4F10',
+                border: '1.5px solid var(--brand-green-text)',
+                backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 6%, transparent)',
                 color: 'var(--brand-green-text)',
                 fontSize: '13px',
                 fontWeight: 600,
@@ -1159,8 +1172,8 @@ export default function VisitPage() {
               className="flex items-center gap-1.5 px-3 py-1.5 transition-colors hover:opacity-80 flex-shrink-0 ml-4"
               style={{
                 borderRadius: '8px',
-                border: '1.5px solid #2D6A4F',
-                backgroundColor: '#2D6A4F10',
+                border: '1.5px solid var(--brand-green-text)',
+                backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 7%, transparent)',
                 color: 'var(--brand-green-text)',
                 fontSize: '13px',
                 fontWeight: 600,
@@ -1363,7 +1376,7 @@ export default function VisitPage() {
                     organization_id: organizationId,
                   }));
                   if (taskRows.length > 0) {
-                    await supabase.from('tasks').insert(taskRows);
+                    await db.from('tasks').insert(taskRows);
                   }
                   window.dispatchEvent(new Event('notifCountChanged'));
                 } catch {}
@@ -1381,32 +1394,49 @@ export default function VisitPage() {
                   ].filter(Boolean).join('\n\n');
 
                   // Look up clinic_id for this organization
-                  const { data: clinicRow } = await supabase
+                  const { data: clinicRow } = await db
                     .from('clinics')
                     .select('id')
                     .eq('organization_id', organizationId)
                     .limit(1)
                     .single();
 
-                  const { data: mrRow } = await supabase.from('medical_records').insert({
-                    organization_id: organizationId,
+                  // Build vitals JSON for inline storage
+                  const vitalsObj: Record<string, number | null> = {};
+                  if (weight) vitalsObj.weight_kg = parseFloat(weight);
+                  if (temp) vitalsObj.temperature_c = parseFloat(((parseFloat(temp) - 32) * 5 / 9).toFixed(1));
+                  if (heartRate) vitalsObj.heart_rate_bpm = parseFloat(heartRate);
+                  if (respRate) vitalsObj.respiratory_rate_bpm = parseFloat(respRate);
+                  if (painScore) vitalsObj.pain_score = parseFloat(painScore);
+                  if (bcs) vitalsObj.body_condition_score = parseFloat(bcs);
+
+                  // Build medications JSON
+                  const medsJson = meds.filter(m => m.name).map(m => ({
+                    name: m.name, dosage: m.dosage || '—', frequency: m.freq || '—',
+                    route: m.route || 'Oral', duration: m.duration || '',
+                  }));
+
+                  const visitTime = (() => {
+                    if (!appt?.timeStart) return null;
+                    const [tp, ap] = appt.timeStart.split(' ');
+                    let [h, m] = tp.split(':').map(Number);
+                    if (ap === 'PM' && h !== 12) h += 12;
+                    if (ap === 'AM' && h === 12) h = 0;
+                    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+                  })();
+
+                  const { data: mrRow, error: mrErr } = await db.from('medical_records').insert({
                     record_number: recNum,
+                    organization_id: organizationId,
                     appointment_id: id || null,
                     pet_id: apptIds.petId,
-                    client_id: apptIds.clientId || null,
-                    clinic_id: clinicRow?.id || null,
+                    client_id: apptIds.clientId!,
+                    clinic_id: clinicRow?.id!,
                     vet_id: apptIds.staffId || null,
                     record_type: isVaccinationOnly ? 'Vaccination' : 'Visit',
                     status: 'Final',
                     visit_date: today,
-                    visit_time: (() => {
-                      if (!appt?.timeStart) return null;
-                      const [tp, ap] = appt.timeStart.split(' ');
-                      let [h, m] = tp.split(':').map(Number);
-                      if (ap === 'PM' && h !== 12) h += 12;
-                      if (ap === 'AM' && h === 12) h = 0;
-                      return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
-                    })(),
+                    visit_time: visitTime,
                     reason: summary,
                     clinical_notes: clinicalNoteFull || null,
                     duration_minutes: appt ? getDurationMin(appt.timeStart, appt.timeEnd) : null,
@@ -1414,7 +1444,16 @@ export default function VisitPage() {
                     follow_up_reason: followUpReason || null,
                     follow_up_notes: followUpNotes || null,
                     created_by: apptIds.staffId || null,
+                    chief_complaint: chiefComplaint || null,
+                    exam_notes: examNotes || null,
+                    primary_diagnosis: primaryDx || null,
+                    secondary_diagnosis: secondaryDx || null,
+                    vitals_json: Object.keys(vitalsObj).length > 0 ? vitalsObj : {},
+                    medications_json: medsJson.length > 0 ? medsJson : [],
+                    procedures_text: procedures || null,
+                    owner_instructions: ownerInstructions || null,
                   }).select('id').single();
+                  if (mrErr) console.error('Medical record insert error:', mrErr);
 
                   const recordId = mrRow?.id;
 
@@ -1422,7 +1461,7 @@ export default function VisitPage() {
                     // ── record_vitals (1:1) ──
                     const hasVitals = weight || temp || heartRate || respRate || painScore || bcs;
                     if (hasVitals) {
-                      await supabase.from('record_vitals').insert({
+                      await db.from('record_vitals').insert({
                         record_id: recordId,
                         weight_kg: weight ? parseFloat(weight) : null,
                         temperature_c: temp ? parseFloat(((parseFloat(temp) - 32) * 5 / 9).toFixed(1)) : null,
@@ -1438,12 +1477,12 @@ export default function VisitPage() {
                     if (primaryDx) dxRows.push({ record_id: recordId, type: 'primary', description: primaryDx });
                     if (secondaryDx) dxRows.push({ record_id: recordId, type: 'secondary', description: secondaryDx });
                     if (dxRows.length > 0) {
-                      await supabase.from('record_diagnoses').insert(dxRows);
+                      await db.from('record_diagnoses').insert(dxRows);
                     }
 
                     // ── record_treatments (1:N) ──
                     if (procedures || ownerInstructions) {
-                      await supabase.from('record_treatments').insert({
+                      await db.from('record_treatments').insert({
                         record_id: recordId,
                         procedure_name: procedures || 'General Visit',
                         post_visit_instructions: ownerInstructions || null,
@@ -1464,7 +1503,7 @@ export default function VisitPage() {
                         is_active: true,
                       }));
                       if (medRows.length > 0) {
-                        await supabase.from('medications').insert(medRows);
+                        await db.from('medications').insert(medRows);
                       }
                     }
                   }
@@ -1480,7 +1519,7 @@ export default function VisitPage() {
                     procedures && `Procedures: ${procedures}`,
                   ].filter(Boolean).join('\n\n');
                   if (noteContent) {
-                    await supabase.from('pet_notes').insert({
+                    await db.from('pet_notes').insert({
                       pet_id: apptIds.petId,
                       organization_id: organizationId,
                       author_id: user.id,
@@ -1494,7 +1533,7 @@ export default function VisitPage() {
               // Save owner instructions as a client-visible note
               if (apptIds.petId && user && ownerInstructions) {
                 try {
-                  await supabase.from('pet_notes').insert({
+                  await db.from('pet_notes').insert({
                     pet_id: apptIds.petId,
                     organization_id: organizationId,
                     author_id: user.id,
@@ -1508,7 +1547,7 @@ export default function VisitPage() {
               if (apptIds.petId && selectedTests.size > 0) {
                 try {
                   // Look up clinic_id
-                  const { data: clinicForLab } = await supabase
+                  const { data: clinicForLab } = await db
                     .from('clinics')
                     .select('id')
                     .eq('organization_id', organizationId)
@@ -1516,7 +1555,7 @@ export default function VisitPage() {
                     .single();
 
                   // Get the medical_record id we just created (latest for this pet)
-                  const { data: latestRec } = await supabase
+                  const { data: latestRec } = await db
                     .from('medical_records')
                     .select('id')
                     .eq('pet_id', apptIds.petId)
@@ -1555,8 +1594,34 @@ export default function VisitPage() {
                   });
 
                   if (labRows.length > 0) {
-                    const { error: labErr } = await supabase.from('lab_results').insert(labRows);
+                    const { error: labErr } = await db.from('lab_results').insert(labRows);
                     if (labErr) console.error('Lab insert error:', labErr);
+                  }
+
+                  // Auto-create "Lab Follow-up" task for front desk
+                  const sampleNames = Array.from(selectedTests).map((tid) => {
+                    const td = LAB_TESTS.find((t) => t.id === tid);
+                    return td?.label || tid;
+                  }).join(', ');
+
+                  // Check if doctor already manually added a Lab Follow-up task
+                  const alreadyHasLabTask = frontDeskTasks.some(t => t.type === 'Lab Follow-up');
+                  if (!alreadyHasLabTask) {
+                    await db.from('tasks').insert({
+                      type: 'Lab Follow-up',
+                      priority: 'Normal',
+                      status: 'Pending',
+                      due_date: today,
+                      due_time: null,
+                      pet_id: apptIds.petId || null,
+                      client_id: apptIds.clientId || null,
+                      assigned_by_id: apptIds.staffId || null,
+                      visit_date: today,
+                      doctor_notes: `Lab samples collected: ${sampleNames}. Follow up on results.`,
+                      tags: ['auto-created'],
+                      organization_id: organizationId,
+                    });
+                    window.dispatchEvent(new Event('notifCountChanged'));
                   }
                 } catch (e) { console.error('Lab insert exception:', e); }
               }
@@ -1564,9 +1629,9 @@ export default function VisitPage() {
               // Insert vaccination record if this is a vaccination visit
               if (hasVaccination && apptIds.petId && vaccineName) {
                 try {
-                  const { data: clinicForVax } = await supabase
+                  const { data: clinicForVax } = await db
                     .from('clinics').select('id').eq('organization_id', organizationId).limit(1).single();
-                  await supabase.from('vaccinations').insert({
+                  await db.from('vaccinations').insert({
                     pet_id: apptIds.petId,
                     clinic_id: clinicForVax?.id || null,
                     administered_by: apptIds.staffId || null,
@@ -1587,7 +1652,7 @@ export default function VisitPage() {
               try { sessionStorage.removeItem(draftKey); } catch {}
               advanceToCheckout(id!); navigate(`/appointments/${id}/checkout`);
             }}
-            style={{ backgroundColor: '#2D6A4F', color: '#fff', border: 'none' }}
+            style={{ backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)', border: 'none' }}
             className="hover:opacity-90"
           >
             Next: Checkout

@@ -126,7 +126,7 @@ export default function SuperAdminAppointmentsPage() {
       const { organizationId } = await getOrgContext();
       const { data } = await supabase
         .from('staff')
-        .select('id, role, profiles:profiles!staff_profile_id_fkey(first_name, last_name)')
+        .select('id, role, profiles:profiles!staff_profile_org_fkey(first_name, last_name)')
         .eq('organization_id', organizationId)
         .in('role', ['veterinarian', 'senior_veterinarian', 'specialist'])
         .eq('status', 'Active');

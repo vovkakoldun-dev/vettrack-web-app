@@ -110,7 +110,7 @@ type EmailCategory = 'primary' | 'social' | 'promotions';
 type EmailLabel = 'work' | 'personal' | 'important' | 'finance' | 'clients' | 'lab-results';
 
 const CATEGORIES: { id: EmailCategory; label: string; icon: typeof Inbox; color: string }[] = [
-  { id: 'primary', label: 'Primary', icon: Inbox, color: '#2D6A4F' },
+  { id: 'primary', label: 'Primary', icon: Inbox, color: 'var(--brand-green-text)' },
   { id: 'social', label: 'Social', icon: Users, color: '#4A90D9' },
   { id: 'promotions', label: 'Promotions', icon: Megaphone, color: '#E67E22' },
 ];
@@ -717,7 +717,7 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
                 {count > 0 && (
                   <span style={{
                     fontSize: 11, fontWeight: 600, color: 'var(--brand-green-text)',
-                    background: 'rgba(45,106,79,0.1)', padding: '1px 7px', borderRadius: 9999,
+                    background: 'color-mix(in srgb, var(--brand-green-text) 10%, transparent)', padding: '1px 7px', borderRadius: 9999,
                   }}>
                     {count}
                   </span>
@@ -968,11 +968,11 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
                 borderBottom: '1px solid var(--border-color)',
                 background: selectedEmail?.id === email.id
                   ? 'var(--surface-elevated)'
-                  : !email.read ? 'rgba(45, 106, 79, 0.03)' : 'transparent',
+                  : !email.read ? 'color-mix(in srgb, var(--brand-green-text) 3%, transparent)' : 'transparent',
                 transition: 'background 0.1s',
               }}
               onMouseEnter={(e) => { if (selectedEmail?.id !== email.id) e.currentTarget.style.background = 'var(--surface-elevated)'; }}
-              onMouseLeave={(e) => { if (selectedEmail?.id !== email.id) e.currentTarget.style.background = !email.read ? 'rgba(45, 106, 79, 0.03)' : 'transparent'; }}
+              onMouseLeave={(e) => { if (selectedEmail?.id !== email.id) e.currentTarget.style.background = !email.read ? 'color-mix(in srgb, var(--brand-green-text) 3%, transparent)' : 'transparent'; }}
             >
               {/* Checkbox */}
               <div style={{ padding: '14px 0 14px 12px', display: 'flex', alignItems: 'flex-start', gap: 6, flexShrink: 0 }}>
@@ -1836,12 +1836,12 @@ export default function AdminCommunicationsPage() {
           style={{
             display: 'flex', alignItems: 'center', gap: 12, padding: '14px 18px',
             borderRadius: 10, marginBottom: 16,
-            background: 'rgba(45, 106, 79, 0.08)',
-            border: '1px solid rgba(45, 106, 79, 0.2)',
+            background: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)',
+            border: '1px solid color-mix(in srgb, var(--brand-green-text) 20%, transparent)',
           }}
         >
-          <Check style={{ width: 18, height: 18, color: '#2D6A4F', flexShrink: 0 }} />
-          <p style={{ flex: 1, fontSize: 14, color: '#2D6A4F', fontWeight: 500 }}>
+          <Check style={{ width: 18, height: 18, color: 'var(--brand-green-text)', flexShrink: 0 }} />
+          <p style={{ flex: 1, fontSize: 14, color: 'var(--brand-green-text)', fontWeight: 500 }}>
             Successfully connected {oauthSuccess.provider === 'gmail' ? 'Gmail' : 'Outlook'} ({oauthSuccess.email})
           </p>
           <button
@@ -1974,8 +1974,8 @@ export default function AdminCommunicationsPage() {
                   style={{
                     padding: '16px 20px',
                     borderRadius: 12,
-                    border: `1px solid ${integration.connected ? 'rgba(45, 106, 79, 0.3)' : 'var(--border-color)'}`,
-                    background: integration.connected ? 'rgba(45, 106, 79, 0.04)' : 'var(--surface-elevated)',
+                    border: `1px solid ${integration.connected ? 'color-mix(in srgb, var(--brand-green-text) 30%, transparent)' : 'var(--border-color)'}`,
+                    background: integration.connected ? 'color-mix(in srgb, var(--brand-green-text) 4%, transparent)' : 'var(--surface-elevated)',
                     transition: 'all 0.15s',
                   }}
                 >
@@ -1995,7 +1995,7 @@ export default function AdminCommunicationsPage() {
                         style={{
                           fontSize: 12, fontWeight: 600,
                           color: 'var(--brand-green-text)',
-                          background: 'rgba(45, 106, 79, 0.1)',
+                          background: 'color-mix(in srgb, var(--brand-green-text) 10%, transparent)',
                           padding: '4px 10px', borderRadius: 9999,
                         }}
                       >
@@ -2106,7 +2106,7 @@ export default function AdminCommunicationsPage() {
                   <div style={{ padding: '32px 24px', textAlign: 'center' }}>
                     <div style={{
                       width: 56, height: 56, borderRadius: '50%',
-                      background: 'rgba(45, 106, 79, 0.1)',
+                      background: 'color-mix(in srgb, var(--brand-green-text) 10%, transparent)',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       margin: '0 auto 16px',
                     }}>

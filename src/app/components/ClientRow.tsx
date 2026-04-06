@@ -37,7 +37,7 @@ export function ClientRow({ petImage, petName, ownerName, breed, lastVisit, stat
           ) : (
             <div
               className="w-10 h-10 flex items-center justify-center flex-shrink-0"
-              style={{ borderRadius: '9999px', backgroundColor: '#2D6A4F20', color: '#2D6A4F', fontSize: '14px', fontWeight: 700 }}
+              style={{ borderRadius: '9999px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)', color: 'var(--brand-green-text)', fontSize: '14px', fontWeight: 700 }}
             >
               {petName.slice(0, 2).toUpperCase()}
             </div>

@@ -788,7 +788,7 @@ export default function AdminDashboardPage() {
           const lastRead = part.last_read_at || '1970-01-01T00:00:00Z';
           const { data: msgs } = await supabase
             .from('messages')
-            .select('id, content, created_at, sender_id, profiles:profiles!messages_sender_id_fkey(first_name, last_name)')
+            .select('id, content, created_at, sender_id, profiles:profiles!messages_sender_org_fkey(first_name, last_name)')
             .eq('organization_id', orgId)
             .eq('conversation_id', part.conversation_id)
             .gt('created_at', lastRead)
@@ -904,8 +904,8 @@ export default function AdminDashboardPage() {
             paddingLeft: '44px',
             paddingRight: searchQuery ? '44px' : '16px',
             fontSize: '15px',
-            boxShadow: isSearching ? '0 0 0 2px #2D6A4F40' : undefined,
-            borderColor: isSearching ? '#2D6A4F60' : undefined,
+            boxShadow: isSearching ? '0 0 0 2px color-mix(in srgb, var(--brand-green-text) 25%, transparent)' : undefined,
+            borderColor: isSearching ? 'color-mix(in srgb, var(--brand-green-text) 38%, transparent)' : undefined,
           }}
         />
         {searchQuery && (
@@ -979,7 +979,7 @@ export default function AdminDashboardPage() {
                         className="flex items-center justify-center text-white font-bold flex-shrink-0"
                         style={{
                           width: '40px', height: '40px', borderRadius: '9999px',
-                          background: 'linear-gradient(135deg, #2D6A4F, #74C69D)',
+                          background: 'linear-gradient(135deg, var(--brand-green-text), #74C69D)',
                           fontSize: '13px',
                         }}
                       >
@@ -1231,7 +1231,7 @@ export default function AdminDashboardPage() {
                           onClick={() => handleCheckIn(appt.id)}
                           style={{
                             padding: '6px 12px', borderRadius: '7px',
-                            backgroundColor: '#2D6A4F', color: 'var(--on-brand-green)',
+                            backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)',
                             border: 'none', cursor: 'pointer',
                             fontSize: '13px', fontWeight: 600,
                             display: 'flex', alignItems: 'center', gap: '5px',
@@ -1333,7 +1333,7 @@ export default function AdminDashboardPage() {
                       className="flex items-center justify-center text-white font-bold flex-shrink-0"
                       style={{
                         width: '38px', height: '38px', borderRadius: '9999px',
-                        background: 'linear-gradient(135deg, #2D6A4F, #74C69D)',
+                        background: 'linear-gradient(135deg, var(--brand-green-text), #74C69D)',
                         fontSize: '12px',
                       }}
                     >
@@ -1789,15 +1789,15 @@ export default function AdminDashboardPage() {
             position: 'fixed', bottom: 24, right: 24, zIndex: 200,
             maxWidth: 360, borderRadius: 14,
             backgroundColor: 'var(--surface-white)',
-            border: '1.5px solid #2D6A4F40',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.16), 0 0 0 1px rgba(45,106,79,0.08)',
+            border: '1.5px solid color-mix(in srgb, var(--brand-green-text) 25%, transparent)',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.16), 0 0 0 1px color-mix(in srgb, var(--brand-green-text) 8%, transparent)',
             overflow: 'hidden',
             animation: 'slideUp 0.25s cubic-bezier(0.4,0,0.2,1)',
           }}
         >
-          <div style={{ height: 3, background: 'linear-gradient(90deg, #2D6A4F, #74C69D)' }} />
+          <div style={{ height: 3, background: 'linear-gradient(90deg, var(--brand-green-text), #74C69D)' }} />
           <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-            <div style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: '#2D6A4F15', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 }}>
+            <div style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 }}>
               <UserCheck style={{ width: 16, height: 16, color: 'var(--brand-green-text)' }} />
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>

@@ -260,7 +260,7 @@ export default function SupabaseTestPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
             <div style={{
               width: 36, height: 36, borderRadius: 10,
-              background: 'linear-gradient(135deg, #2D6A4F, #74C69D)',
+              background: 'linear-gradient(135deg, var(--brand-green-text), #74C69D)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
               <Database style={{ width: 18, height: 18, color: '#fff' }} />
@@ -279,7 +279,7 @@ export default function SupabaseTestPage() {
           style={{
             display: 'flex', alignItems: 'center', gap: 8,
             padding: '10px 18px', borderRadius: 10, border: 'none', cursor: 'pointer',
-            backgroundColor: '#2D6A4F', color: '#fff', fontSize: 14, fontWeight: 700,
+            backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)', fontSize: 14, fontWeight: 700,
             opacity: overallStatus === 'running' ? 0.6 : 1,
             flexShrink: 0,
           }}

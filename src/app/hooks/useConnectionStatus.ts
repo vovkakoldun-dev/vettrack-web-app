@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { supabase } from '../../lib/supabase';
-
+import { useTenantDb } from '../context/TenantContext';
 export type ConnectionState = 'connected' | 'disconnected' | 'reconnecting';
 
 export interface ConnectionStatus {
@@ -22,6 +21,7 @@ export interface ConnectionStatus {
  *  4. Exposes a human-readable `label` that auto-updates every 15s.
  */
 export function useConnectionStatus(): ConnectionStatus {
+  const db = useTenantDb();
   const [state, setState] = useState<ConnectionState>(
     navigator.onLine ? 'connected' : 'disconnected',
   );
@@ -36,7 +36,7 @@ export function useConnectionStatus(): ConnectionStatus {
     if (!navigator.onLine) return false;
     try {
       // Tiny RPC-free query — just checks connectivity
-      const { error } = await supabase.from('organizations').select('id', { count: 'exact', head: true });
+      const { error } = await db.from('organizations').select('id', { count: 'exact', head: true });
       return !error;
     } catch {
       return false;

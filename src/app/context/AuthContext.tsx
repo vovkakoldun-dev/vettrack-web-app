@@ -113,8 +113,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // ── Sign out ──────────────────────────────────────────────────
   async function signOut() {
+    // Clear all cached identity / org state
     clearProfileCache();
     clearOrgContextCache();
+    // Clear any sessionStorage keys that may hold org/portal state
+    try {
+      sessionStorage.clear();
+    } catch { /* SSR / restricted environments */ }
     await supabase.auth.signOut();
   }
 

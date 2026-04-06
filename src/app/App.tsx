@@ -7,7 +7,7 @@ import { useTheme } from './hooks/useTheme';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { TenantProvider, TenantGate } from './context/TenantContext';
 import { PortalGuard } from './components/PortalGuard';
-import LoginPage from './pages/LoginPage';
+const LoginPage = lazy(() => import('./pages/LoginPage'));
 import ToastNotification from './components/ToastNotification';
 import { OwnerSidebar } from './components/OwnerSidebar';
 import { SuperAdminSidebar } from './components/SuperAdminSidebar';
@@ -71,15 +71,29 @@ import { AppointmentStatusProvider } from './context/AppointmentStatusContext';
 import { Avatar, AvatarImage, AvatarFallback } from './components/ui/avatar';
 import { ClipboardList, Receipt, ArrowRight, X, Clock, Menu, PawPrint, Crown } from 'lucide-react';
 
-// ─── Lazy loading fallback ────────────────────────────────────
+// ─── Lazy loading fallback (skeleton) ─────────────────────────
 function PageLoader() {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', width: '100%' }}>
-      <div style={{
-        width: 28, height: 28, border: '3px solid var(--border-color)',
-        borderTopColor: 'var(--brand-green-text)', borderRadius: '50%',
-        animation: 'spin 0.7s linear infinite',
-      }} />
+    <div style={{ padding: '32px', width: '100%', maxWidth: '1200px', margin: '0 auto' }}>
+      {/* Title skeleton */}
+      <div style={{ height: 24, width: 180, backgroundColor: 'var(--border-color)', borderRadius: 8, marginBottom: 8, opacity: 0.5, animation: 'pulse 1.5s ease-in-out infinite' }} />
+      <div style={{ height: 14, width: 260, backgroundColor: 'var(--border-color)', borderRadius: 6, marginBottom: 28, opacity: 0.35, animation: 'pulse 1.5s ease-in-out 0.1s infinite' }} />
+      {/* Stat cards skeleton */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16, marginBottom: 28 }}>
+        {[0,1,2,3].map(i => (
+          <div key={i} style={{ height: 88, backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)', borderRadius: 12, opacity: 0.6, animation: `pulse 1.5s ease-in-out ${i * 0.1}s infinite` }} />
+        ))}
+      </div>
+      {/* Table skeleton */}
+      <div style={{ backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)', borderRadius: 12, overflow: 'hidden' }}>
+        {[0,1,2,3,4,5].map(i => (
+          <div key={i} style={{ height: 52, borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: 16, padding: '0 20px' }}>
+            <div style={{ width: 36, height: 36, borderRadius: '50%', backgroundColor: 'var(--border-color)', opacity: 0.4, animation: `pulse 1.5s ease-in-out ${i * 0.08}s infinite` }} />
+            <div style={{ height: 12, flex: 1, maxWidth: 140, backgroundColor: 'var(--border-color)', borderRadius: 6, opacity: 0.35, animation: `pulse 1.5s ease-in-out ${i * 0.08 + 0.05}s infinite` }} />
+            <div style={{ height: 12, width: 80, backgroundColor: 'var(--border-color)', borderRadius: 6, opacity: 0.25, animation: `pulse 1.5s ease-in-out ${i * 0.08 + 0.1}s infinite` }} />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -126,8 +140,8 @@ function ActiveVisitWidget() {
         width: 320,
         borderRadius: 16,
         backgroundColor: 'var(--surface-white)',
-        border: '1.5px solid #2D6A4F40',
-        boxShadow: '0 8px 32px rgba(0,0,0,0.18), 0 0 0 1px rgba(45,106,79,0.08)',
+        border: '1.5px solid color-mix(in srgb, var(--brand-green-text) 25%, transparent)',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.18), 0 0 0 1px color-mix(in srgb, var(--brand-green-text) 3%, transparent)',
         overflow: 'hidden',
         animation: 'slideUp 0.25s cubic-bezier(0.4,0,0.2,1)',
       }}
@@ -138,7 +152,7 @@ function ActiveVisitWidget() {
           height: 4,
           background: activeVisit.step === 'checkout'
             ? 'linear-gradient(90deg, #3B82F6, #8B5CF6)'
-            : 'linear-gradient(90deg, #2D6A4F, #74C69D)',
+            : 'linear-gradient(90deg, var(--brand-green-text), #74C69D)',
         }}
       />
 
@@ -204,7 +218,7 @@ function ActiveVisitWidget() {
               height: '100%',
               width: `${progressPct}%`,
               borderRadius: 999,
-              backgroundColor: isOvertime ? '#DC2626' : progressPct >= 80 ? '#D97706' : '#2D6A4F',
+              backgroundColor: isOvertime ? '#DC2626' : progressPct >= 80 ? '#D97706' : 'var(--brand-green-text)',
               transition: 'width 0.5s ease, background-color 0.3s',
             }}
           />
@@ -221,7 +235,7 @@ function ActiveVisitWidget() {
               key={step}
               style={{
                 flex: 1, height: 4, borderRadius: 999,
-                backgroundColor: done ? '#74C69D' : active ? '#2D6A4F' : 'var(--border-color)',
+                backgroundColor: done ? '#74C69D' : active ? 'var(--brand-green-text)' : 'var(--border-color)',
                 transition: 'background-color 0.2s',
               }}
             />
@@ -235,7 +249,7 @@ function ActiveVisitWidget() {
           onClick={() => navigate(resumePath)}
           style={{
             width: '100%', padding: '9px 14px', borderRadius: 10,
-            backgroundColor: '#2D6A4F', color: '#fff', border: 'none',
+            backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)', border: 'none',
             fontSize: 13, fontWeight: 700, cursor: 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
             transition: 'opacity 0.15s',
@@ -342,11 +356,11 @@ function OwnerApp() {
             <Menu className="w-5 h-5 text-[var(--text-primary)]" />
           </button>
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 bg-[#2D6A4F] rounded-lg flex items-center justify-center">
+            <div className="w-7 h-7 bg-[var(--brand-green-text)] rounded-lg flex items-center justify-center">
               <PawPrint className="w-4 h-4 text-white" />
             </div>
             <span className="font-bold text-[var(--text-primary)]" style={{ fontSize: '16px' }}>Hugory</span>
-            <span style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#2D6A4F' }}>Client</span>
+            <span style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--brand-green-text)' }}>Client</span>
           </div>
         </div>
         <main className="flex-1 overflow-auto">
@@ -461,10 +475,6 @@ function AuthLoading() {
           0%, 100% { filter: drop-shadow(0 0 8px rgba(99,102,241,0.0)); }
           50% { filter: drop-shadow(0 0 18px rgba(99,102,241,0.35)); }
         }
-        @keyframes shimmer {
-          0% { background-position: -200% center; }
-          100% { background-position: 200% center; }
-        }
         @keyframes dot-wave {
           0%, 60%, 100% { transform: translateY(0); opacity: 0.3; }
           30% { transform: translateY(-6px); opacity: 1; }
@@ -479,22 +489,11 @@ function AuthLoading() {
             animation: 'logo-float 2s ease-in-out infinite, logo-glow 2s ease-in-out infinite',
           }}
         />
-        <p style={{
-          fontSize: 14, fontWeight: 500, letterSpacing: '0.08em',
-          margin: '0 0 16px',
-          background: `linear-gradient(90deg, ${textSecondary} 0%, ${textPrimary} 50%, ${textSecondary} 100%)`,
-          backgroundSize: '200% auto',
-          WebkitBackgroundClip: 'text',
-          WebkitTextFillColor: 'transparent',
-          animation: 'shimmer 2.5s linear infinite',
-        }}>
-          Loading
-        </p>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
           {[0, 1, 2].map(i => (
             <div key={i} style={{
               width: 5, height: 5, borderRadius: '50%',
-              backgroundColor: textSecondary,
+              backgroundColor: textPrimary,
               animation: `dot-wave 1.4s ease-in-out ${i * 0.15}s infinite`,
             }} />
           ))}
@@ -527,14 +526,9 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!user) return;
-    // Redirect based on user's role in profiles table
-    (async () => {
-      const { data } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .single();
-      const role = data?.role || '';
+    // Try sessionStorage cache first for instant redirect (no DB hit)
+    const cachedRole = sessionStorage.getItem('vettrack_user_role');
+    const resolve = (role: string) => {
       if (['front_desk_manager', 'receptionist', 'clinic_manager'].includes(role)) {
         setRedirectPath('/admin');
       } else if (role === 'superadmin') {
@@ -544,6 +538,21 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
       } else {
         setRedirectPath('/');
       }
+    };
+    if (cachedRole) {
+      resolve(cachedRole);
+      return;
+    }
+    // Fallback: fetch from profiles (only on first login)
+    (async () => {
+      const { data } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+      const role = data?.role || '';
+      try { sessionStorage.setItem('vettrack_user_role', role); } catch {}
+      resolve(role);
     })();
   }, [user]);
 
@@ -562,7 +571,7 @@ function AppRoutes() {
     <AppointmentStatusProvider>
     <ActiveVisitProvider>
       <Routes>
-        <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
+        <Route path="/login" element={<PublicRoute><Suspense fallback={<AuthLoading />}><LoginPage /></Suspense></PublicRoute>} />
         <Route path="/sysadmin" element={<ProtectedRoute><PortalGuard portal="sysadmin"><SystemAdminPage /></PortalGuard></ProtectedRoute>} />
         <Route path="/superadmin/*" element={<ProtectedRoute><PortalGuard portal="superadmin"><SuperAdminApp /></PortalGuard></ProtectedRoute>} />
         <Route path="/admin/*" element={<ProtectedRoute><PortalGuard portal="admin"><AdminApp /></PortalGuard></ProtectedRoute>} />

@@ -4,7 +4,7 @@ import {
   Code2, Building2, Plus, Trash2, RefreshCw, CheckCircle2,
   ArrowLeft, Sun, Moon, Globe, Phone, Mail, Calendar,
 } from 'lucide-react';
-import { supabase } from '../../../lib/supabase';
+import { useTenantDb } from '../../context/TenantContext';
 import { getOrgContext } from '../../hooks/useOrgContext';
 import { useTheme } from '../../hooks/useTheme';
 
@@ -21,6 +21,7 @@ interface Clinic {
 }
 
 export default function SystemAdminPage() {
+  const db = useTenantDb();
   const navigate = useNavigate();
   const { isDark, toggle } = useTheme();
   const [clinics, setClinics] = useState<Clinic[]>([]);
@@ -37,7 +38,7 @@ export default function SystemAdminPage() {
     (async () => {
       try {
         const { organizationId } = await getOrgContext();
-        const { data } = await supabase
+        const { data } = await db
           .from('clinics')
           .select('*')
           .eq('organization_id', organizationId)
@@ -54,7 +55,7 @@ export default function SystemAdminPage() {
   async function handleAddClinic() {
     if (!newName.trim()) return;
     const orgCtx = await getOrgContext();
-    const { data, error } = await supabase.from('clinics').insert({
+    const { data, error } = await db.from('clinics').insert({
       name: newName.trim(),
       address: newAddress.trim() || null,
       phone: newPhone.trim() || null,
@@ -76,7 +77,7 @@ export default function SystemAdminPage() {
   async function handleDelete(id: string) {
     setClinics(prev => prev.filter(c => c.id !== id));
     const { organizationId } = await getOrgContext();
-    await supabase.from('clinics').delete().eq('id', id).eq('organization_id', organizationId);
+    await db.from('clinics').delete().eq('id', id).eq('organization_id', organizationId);
   }
 
   async function handleSync(id: string) {
@@ -85,7 +86,7 @@ export default function SystemAdminPage() {
     // "Sync" = update the clinic metadata to match dev clinic structure
     const now = new Date().toISOString();
     const { organizationId } = await getOrgContext();
-    await supabase.from('clinics').update({
+    await db.from('clinics').update({
       last_synced_at: now,
       status: 'active',
     }).eq('id', id).eq('organization_id', organizationId);
@@ -233,11 +234,11 @@ export default function SystemAdminPage() {
                   className="flex items-center justify-center mb-4"
                   style={{
                     width: 48, height: 48, borderRadius: 12,
-                    background: clinic.is_dev ? 'rgba(236,72,153,0.1)' : 'rgba(45,106,79,0.08)',
-                    border: `1px solid ${clinic.is_dev ? 'rgba(236,72,153,0.25)' : 'rgba(45,106,79,0.2)'}`,
+                    background: clinic.is_dev ? 'rgba(236,72,153,0.1)' : 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)',
+                    border: `1px solid ${clinic.is_dev ? 'rgba(236,72,153,0.25)' : 'color-mix(in srgb, var(--brand-green-text) 20%, transparent)'}`,
                   }}
                 >
-                  <Building2 style={{ width: 22, height: 22, color: clinic.is_dev ? '#EC4899' : '#2D6A4F' }} />
+                  <Building2 style={{ width: 22, height: 22, color: clinic.is_dev ? '#EC4899' : 'var(--brand-green-text)' }} />
                 </div>
 
                 {/* Name */}
@@ -273,8 +274,8 @@ export default function SystemAdminPage() {
                   </div>
                   {clinic.last_synced_at && (
                     <div className="flex items-center gap-2">
-                      <RefreshCw style={{ width: 12, height: 12, color: '#2D6A4F', flexShrink: 0 }} />
-                      <span style={{ fontSize: 12, color: '#2D6A4F', fontWeight: 500 }}>
+                      <RefreshCw style={{ width: 12, height: 12, color: 'var(--brand-green-text)', flexShrink: 0 }} />
+                      <span style={{ fontSize: 12, color: 'var(--brand-green-text)', fontWeight: 500 }}>
                         Synced {formatDate(clinic.last_synced_at)}
                       </span>
                     </div>
@@ -301,7 +302,7 @@ export default function SystemAdminPage() {
                       className="flex items-center gap-1.5 transition-colors hover:opacity-80"
                       style={{
                         fontSize: 12, fontWeight: 600, padding: '6px 12px', borderRadius: 8,
-                        backgroundColor: '#2D6A4F', color: '#fff', border: 'none', cursor: 'pointer',
+                        backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)', border: 'none', cursor: 'pointer',
                         opacity: syncing === clinic.id ? 0.6 : 1,
                       }}
                     >
@@ -334,7 +335,7 @@ export default function SystemAdminPage() {
 
                 {clinic.is_dev && (
                   <div className="flex items-center gap-1.5" style={{ fontSize: 12, color: textSecondary, fontStyle: 'italic' }}>
-                    <CheckCircle2 style={{ width: 13, height: 13, color: '#2D6A4F' }} />
+                    <CheckCircle2 style={{ width: 13, height: 13, color: 'var(--brand-green-text)' }} />
                     Primary development instance
                   </div>
                 )}

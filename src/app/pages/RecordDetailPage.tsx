@@ -66,7 +66,7 @@ interface DetailedRecord {
 // ─── Color Maps ──────────────────────────────────────────────
 
 const recordTypeColors: Record<RecordType, { bg: string; text: string }> = {
-  Visit:        { bg: '#2D6A4F20', text: 'var(--brand-green-text)' },
+  Visit:        { bg: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)', text: 'var(--brand-green-text)' },
   Vaccination:  { bg: '#3B82F620', text: '#3B82F6' },
   'Lab Result': { bg: '#8B5CF620', text: '#8B5CF6' },
   Surgery:      { bg: '#EC489920', text: '#EC4899' },
@@ -405,7 +405,7 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 function SectionHeader({ icon: Icon, title }: { icon: React.ElementType; title: string }) {
   return (
     <div className="flex items-center gap-2 mb-4">
-      <div className="w-8 h-8 flex items-center justify-center" style={{ backgroundColor: '#2D6A4F20', borderRadius: '8px' }}>
+      <div className="w-8 h-8 flex items-center justify-center" style={{ backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)', borderRadius: '8px' }}>
         <Icon className="w-4 h-4 text-[var(--brand-green-text)]" />
       </div>
       <h3 className="text-[var(--text-primary)]" style={{ fontSize: '18px', fontWeight: 600 }}>{title}</h3>
@@ -442,7 +442,7 @@ export default function RecordDetailPage() {
       setLoading(true);
       const { data } = await supabase
         .from('medical_records')
-        .select('*, pets(id, name, species, breed, photo_url, date_of_birth, sex, weight_kg, color, microchip_no), clients(id, first_name, last_name, email, phone), staff!medical_records_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name)), record_vitals(weight_kg, temperature_c, heart_rate_bpm, respiratory_rate_bpm, blood_pressure_systolic, blood_pressure_diastolic, body_condition_score, pain_score, hydration_status), record_diagnoses(type, description, icd_code, notes), record_treatments(procedure_name, description, post_visit_instructions, activity_restrictions, home_care_plan)')
+        .select('*, pets(id, name, species, breed, photo_url, date_of_birth, sex, weight_kg, color, microchip_no), clients(id, first_name, last_name, email, phone), staff!medical_records_vet_org_fkey(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name)), record_vitals(weight_kg, temperature_c, heart_rate_bpm, respiratory_rate_bpm, blood_pressure_systolic, blood_pressure_diastolic, body_condition_score, pain_score, hydration_status), record_diagnoses(type, description, icd_code, notes), record_treatments(procedure_name, description, post_visit_instructions, activity_restrictions, home_care_plan)')
         .eq('id', id)
         .single();
       if (data) {
@@ -830,7 +830,7 @@ export default function RecordDetailPage() {
               if (w) { w.document.write(html); w.document.close(); }
             }}
             className="gap-2"
-            style={{ backgroundColor: 'var(--brand-green-text)', color: '#fff' }}
+            style={{ backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)' }}
           >
             <Download className="w-4 h-4" />
             Export PDF
@@ -869,7 +869,7 @@ export default function RecordDetailPage() {
             {record.patient.image ? (
               <img src={record.patient.image} alt={record.patient.name} className="w-16 h-16 object-cover" style={{ borderRadius: '9999px' }} />
             ) : (
-              <div className="w-16 h-16 flex items-center justify-center text-white font-bold flex-shrink-0" style={{ borderRadius: '9999px', backgroundColor: '#2D6A4F', fontSize: '18px' }}>{record.patient.name.slice(0, 2).toUpperCase()}</div>
+              <div className="w-16 h-16 flex items-center justify-center text-white font-bold flex-shrink-0" style={{ borderRadius: '9999px', backgroundColor: 'var(--brand-green-text)', fontSize: '18px' }}>{record.patient.name.slice(0, 2).toUpperCase()}</div>
             )}
             <div>
               <p className="text-[var(--text-primary)]" style={{ fontSize: '20px', fontWeight: 700 }}>{record.patient.name}</p>

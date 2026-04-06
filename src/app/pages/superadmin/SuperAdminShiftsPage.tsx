@@ -13,7 +13,7 @@ import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '../../components/ui/select';
 import { StatCard } from '../../components/StatCard';
-import { supabase } from '../../../lib/supabase';
+import { useTenantDb } from '../../context/TenantContext';
 import { getOrgContext } from '../../hooks/useOrgContext';
 import { useAuth } from '../../context/AuthContext';
 
@@ -74,7 +74,7 @@ const ROLE_DISPLAY: Record<string, string> = {
 };
 
 const ROLE_COLORS: Record<string, { color: string; bg: string }> = {
-  veterinarian:        { color: '#2D6A4F', bg: '#2D6A4F15' },
+  veterinarian:        { color: 'var(--brand-green-text)', bg: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)' },
   senior_veterinarian: { color: '#16A34A', bg: '#22C55E15' },
   specialist:          { color: '#374151', bg: '#6B728015' },
   vet_technician:      { color: '#2563EB', bg: '#3B82F615' },
@@ -88,12 +88,21 @@ const ROLE_COLORS: Record<string, { color: string; bg: string }> = {
 };
 
 const SHIFT_LABEL_COLORS: Record<string, string> = {
-  'Full Day':  '#2D6A4F',
+  'Full Day':  'var(--brand-green-text)',
   'Morning':   '#3B82F6',
   'Afternoon': '#F4A261',
   'Evening':   '#8B5CF6',
   'Custom':    '#06B6D4',
 };
+
+/** Produce a semi-transparent version of a colour. Works with both hex and CSS vars. */
+function withAlpha(color: string, hexAlpha: string): string {
+  if (color.startsWith('var(')) {
+    const pct = Math.round((parseInt(hexAlpha, 16) / 255) * 100);
+    return `color-mix(in srgb, ${color} ${pct}%, transparent)`;
+  }
+  return color + hexAlpha;
+}
 
 // Brighter text versions for readability on dark backgrounds
 const SHIFT_LABEL_TEXT: Record<string, string> = {
@@ -104,7 +113,7 @@ const SHIFT_LABEL_TEXT: Record<string, string> = {
   'Custom':    '#22D3EE',
 };
 
-const AVATAR_COLORS = ['#2D6A4F', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261', '#06B6D4', '#6366F1', '#DC2626', '#0EA5E9', '#14B8A6'];
+const AVATAR_COLORS = ['var(--brand-green-text)', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261', '#06B6D4', '#6366F1', '#DC2626', '#0EA5E9', '#14B8A6'];
 
 // ─── Time Helpers ─────────────────────────────────────────────
 function fmtShort(t: string): string {
@@ -158,6 +167,7 @@ function avatarColor(id: string): string {
 
 // ─── Component ────────────────────────────────────────────────
 export default function SuperAdminShiftsPage() {
+  const db = useTenantDb();
   const { user: authUser, loading: authLoading } = useAuth();
   const [weekStart, setWeekStart] = useState(() => getMonday(new Date()));
   const [staff, setStaff] = useState<StaffRow[]>([]);
@@ -205,20 +215,20 @@ export default function SuperAdminShiftsPage() {
       const { organizationId } = await getOrgContext();
 
       const [staffRes, shiftsRes, swapRes] = await Promise.all([
-        supabase
+        db
           .from('staff')
-          .select('id, role, status, profiles:profiles!staff_profile_id_fkey(first_name, last_name, avatar_url)')
+          .select('id, role, status, profiles:profiles!staff_profile_org_fkey(first_name, last_name, avatar_url)')
           .eq('organization_id', organizationId)
           .eq('status', 'Active')
           .order('role'),
-        supabase
+        db
           .from('shifts')
-          .select('*, staff:staff!shifts_staff_id_fkey(id, role, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
+          .select('*, staff:staff!shifts_staff_org_fkey(id, role, profiles:profiles!staff_profile_org_fkey(first_name, last_name))')
           .eq('organization_id', organizationId)
           .gte('date', weekStartStr)
           .lte('date', weekEndStr)
           .order('date'),
-        supabase
+        db
           .from('pending_requests')
           .select('*')
           .eq('organization_id', organizationId)
@@ -251,7 +261,7 @@ export default function SuperAdminShiftsPage() {
       const now = new Date();
       const monthStart = fmtDateISO(new Date(now.getFullYear(), now.getMonth(), 1));
       const monthEnd = fmtDateISO(new Date(now.getFullYear(), now.getMonth() + 1, 0));
-      const { data } = await supabase
+      const { data } = await db
         .from('shifts')
         .select('start_time, end_time')
         .eq('organization_id', organizationId)
@@ -276,9 +286,9 @@ export default function SuperAdminShiftsPage() {
       setStatsLoading(true);
       try {
         const { organizationId } = await getOrgContext();
-        const { data } = await supabase
+        const { data } = await db
           .from('shifts')
-          .select('*, staff:staff!shifts_staff_id_fkey(id, role, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
+          .select('*, staff:staff!shifts_staff_org_fkey(id, role, profiles:profiles!staff_profile_org_fkey(first_name, last_name))')
           .eq('organization_id', organizationId)
           .gte('date', statsMonthStr)
           .lte('date', statsMonthEnd)
@@ -367,7 +377,7 @@ export default function SuperAdminShiftsPage() {
         notes: formNotes || null,
         status: 'Active',
       }));
-      await supabase.from('shifts').insert(rows);
+      await db.from('shifts').insert(rows);
       setAssignOpen(false);
       resetForm();
       await loadData();
@@ -382,7 +392,7 @@ export default function SuperAdminShiftsPage() {
     if (!editingShift) return;
     setSaving(true);
     try {
-      await supabase.from('shifts').update({
+      await db.from('shifts').update({
         staff_id: formStaffId,
         date: formDate,
         start_time: formStartTime,
@@ -405,7 +415,7 @@ export default function SuperAdminShiftsPage() {
     if (!editingShift) return;
     setSaving(true);
     try {
-      await supabase.from('shifts').delete().eq('id', editingShift.id);
+      await db.from('shifts').delete().eq('id', editingShift.id);
       setEditOpen(false);
       setDeleteConfirm(false);
       setEditingShift(null);
@@ -420,13 +430,13 @@ export default function SuperAdminShiftsPage() {
 
   async function handleSwapApprove(req: SwapRequest) {
     try {
-      await supabase.from('pending_requests')
+      await db.from('pending_requests')
         .update({ status: 'approved', resolved_at: new Date().toISOString() })
         .eq('id', req.id);
 
       // Swap actual shifts if both staff IDs and shift_id are present
       if (req.shift_id && req.requester_staff_id && req.target_staff_id) {
-        const { data: originalShift } = await supabase
+        const { data: originalShift } = await db
           .from('shifts')
           .select('*')
           .eq('id', req.shift_id)
@@ -434,7 +444,7 @@ export default function SuperAdminShiftsPage() {
 
         if (originalShift) {
           const { organizationId } = await getOrgContext();
-          const { data: targetShift } = await supabase
+          const { data: targetShift } = await db
             .from('shifts')
             .select('*')
             .eq('organization_id', organizationId)
@@ -444,11 +454,23 @@ export default function SuperAdminShiftsPage() {
             .maybeSingle();
 
           // Swap staff_id on both shifts
-          await supabase.from('shifts').update({ staff_id: req.target_staff_id }).eq('id', originalShift.id);
+          await db.from('shifts').update({ staff_id: req.target_staff_id }).eq('id', originalShift.id);
           if (targetShift) {
-            await supabase.from('shifts').update({ staff_id: req.requester_staff_id }).eq('id', targetShift.id);
+            await db.from('shifts').update({ staff_id: req.requester_staff_id }).eq('id', targetShift.id);
           }
         }
+      }
+
+      // Notify the requester
+      if (req.requester_staff_id) {
+        const { organizationId } = await getOrgContext();
+        await db.from('notification_events').upsert({
+          id: `req-approved-${req.id}`,
+          type: 'request_resolved',
+          timestamp: new Date().toISOString(),
+          data: { decision: 'approved', requestType: req.type, title: req.title, detail: req.detail, vetId: req.requester_staff_id },
+          organization_id: organizationId,
+        });
       }
 
       await loadData();
@@ -459,13 +481,25 @@ export default function SuperAdminShiftsPage() {
 
   async function handleSwapDecline(req: SwapRequest) {
     try {
-      await supabase.from('pending_requests')
+      await db.from('pending_requests')
         .update({ status: 'declined', resolved_at: new Date().toISOString() })
         .eq('id', req.id);
 
       // Reset shift status back to Active if we have the shift_id
       if (req.shift_id) {
-        await supabase.from('shifts').update({ status: 'Active' }).eq('id', req.shift_id);
+        await db.from('shifts').update({ status: 'Active' }).eq('id', req.shift_id);
+      }
+
+      // Notify the requester
+      if (req.requester_staff_id) {
+        const { organizationId } = await getOrgContext();
+        await db.from('notification_events').upsert({
+          id: `req-declined-${req.id}`,
+          type: 'request_resolved',
+          timestamp: new Date().toISOString(),
+          data: { decision: 'declined', requestType: req.type, title: req.title, detail: req.detail, vetId: req.requester_staff_id },
+          organization_id: organizationId,
+        });
       }
 
       await loadData();
@@ -515,7 +549,7 @@ export default function SuperAdminShiftsPage() {
         <Button
           onClick={() => openAssignDialog()}
           style={{
-            backgroundColor: '#2D6A4F',
+            backgroundColor: 'var(--brand-green-text)',
             color: '#fff',
             fontWeight: 700,
             fontSize: 13,
@@ -537,7 +571,7 @@ export default function SuperAdminShiftsPage() {
           title="Staff On Shift Today"
           value={loading ? '...' : staffOnShiftToday}
           icon={Users}
-          iconColor="#2D6A4F"
+          iconColor="var(--brand-green-text)"
         />
         <StatCard
           title="Total Hours This Week"
@@ -780,8 +814,8 @@ export default function SuperAdminShiftsPage() {
                                 <div style={{
                                   display: 'inline-flex', flexDirection: 'column', alignItems: 'center',
                                   padding: '4px 8px', borderRadius: 8,
-                                  backgroundColor: (SHIFT_LABEL_COLORS[shift.label] || '#2D6A4F') + '15',
-                                  border: `1px solid ${(SHIFT_LABEL_COLORS[shift.label] || '#2D6A4F')}25`,
+                                  backgroundColor: withAlpha(SHIFT_LABEL_COLORS[shift.label] || 'var(--brand-green-text)', '15'),
+                                  border: `1px solid ${withAlpha(SHIFT_LABEL_COLORS[shift.label] || 'var(--brand-green-text)', '25')}`,
                                   minWidth: 60,
                                 }}>
                                   <span style={{
@@ -1096,7 +1130,7 @@ export default function SuperAdminShiftsPage() {
                 </span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <div style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: '#2D6A4F' }} />
+                    <div style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: 'var(--brand-green-text)' }} />
                     <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Regular</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1166,7 +1200,7 @@ export default function SuperAdminShiftsPage() {
                           <div style={{
                             position: 'absolute', left: 0, top: 0, bottom: 0,
                             width: `${regularPct}%`,
-                            backgroundColor: '#2D6A4F',
+                            backgroundColor: 'var(--brand-green-text)',
                             borderRadius: s.overtimeHours > 0 ? '6px 0 0 6px' : 6,
                             transition: 'width 0.5s ease',
                           }} />
@@ -1254,8 +1288,8 @@ export default function SuperAdminShiftsPage() {
                       style={{
                         padding: '6px 12px',
                         borderRadius: 8,
-                        border: `2px solid ${selected ? '#2D6A4F' : 'var(--border-color)'}`,
-                        backgroundColor: selected ? '#2D6A4F' : 'var(--surface-elevated)',
+                        border: `2px solid ${selected ? 'var(--brand-green-text)' : 'var(--border-color)'}`,
+                        backgroundColor: selected ? 'var(--brand-green-text)' : 'var(--surface-elevated)',
                         color: selected ? '#fff' : 'var(--text-primary)',
                         fontSize: 12,
                         fontWeight: selected ? 700 : 600,
@@ -1266,7 +1300,7 @@ export default function SuperAdminShiftsPage() {
                         alignItems: 'center',
                         gap: 1,
                         minWidth: 52,
-                        boxShadow: selected ? '0 2px 8px rgba(45,106,79,0.35)' : '0 1px 3px rgba(0,0,0,0.08)',
+                        boxShadow: selected ? '0 2px 8px color-mix(in srgb, var(--brand-green-text) 35%, transparent)' : '0 1px 3px rgba(0,0,0,0.08)',
                       }}
                     >
                       <span>{DAY_LABELS[i]}</span>
@@ -1355,7 +1389,7 @@ export default function SuperAdminShiftsPage() {
               disabled={saving || !formStaffId || formDates.length === 0}
               style={{
                 borderRadius: 8, fontSize: 13, fontWeight: 700,
-                backgroundColor: '#2D6A4F', color: '#fff',
+                backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)',
                 opacity: saving || !formStaffId || formDates.length === 0 ? 0.5 : 1,
               }}
             >
@@ -1537,7 +1571,7 @@ export default function SuperAdminShiftsPage() {
                 disabled={saving || !formStaffId || !formDate}
                 style={{
                   borderRadius: 8, fontSize: 13, fontWeight: 700,
-                  backgroundColor: '#2D6A4F', color: '#fff',
+                  backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)',
                   opacity: saving || !formStaffId || !formDate ? 0.5 : 1,
                 }}
               >

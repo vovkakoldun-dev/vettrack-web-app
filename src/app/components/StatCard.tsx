@@ -16,7 +16,7 @@ export function StatCard({ title, value, icon: Icon, trend, iconColor, onClick }
   return (
     <div
       className={`bg-[var(--surface-white)] p-6 border border-[var(--border-color)] transition-all ${
-        onClick ? 'cursor-pointer hover:border-[#2D6A4F] hover:shadow-sm' : ''
+        onClick ? 'cursor-pointer hover:border-[var(--brand-green-text)] hover:shadow-sm' : ''
       }`}
       style={{ borderRadius: '12px' }}
       onClick={onClick}

@@ -11,8 +11,7 @@ import {
 import {
   Table, TableHeader, TableBody, TableHead, TableRow, TableCell,
 } from '../components/ui/table';
-import { supabase } from '../../lib/supabase';
-
+import { useTenantDb } from '../context/TenantContext';
 // ─── Types ───────────────────────────────────────────────────
 
 type RecordType = 'Visit' | 'Vaccination' | 'Lab Result' | 'Surgery' | 'Prescription' | 'Dental' | 'Imaging';
@@ -36,7 +35,7 @@ interface MedicalRecord {
 // ─── Color Maps ──────────────────────────────────────────────
 
 const recordTypeColors: Record<RecordType, { bg: string; text: string }> = {
-  Visit:        { bg: '#2D6A4F20', text: 'var(--brand-green-text)' },
+  Visit:        { bg: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)', text: 'var(--brand-green-text)' },
   Vaccination:  { bg: '#3B82F620', text: '#3B82F6' },
   'Lab Result': { bg: '#8B5CF620', text: '#8B5CF6' },
   Surgery:      { bg: '#EC489920', text: '#EC4899' },
@@ -55,6 +54,7 @@ const statusColors: Record<RecordStatus, { bg: string; text: string }> = {
 // ─── Component ───────────────────────────────────────────────
 
 export default function RecordsPage() {
+  const db = useTenantDb();
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const basePath = pathname.startsWith('/admin') ? '/admin/records' : '/records';
@@ -89,7 +89,7 @@ export default function RecordsPage() {
     if (selectedIds.size === 0) return;
     setDeleting(true);
     const ids = Array.from(selectedIds);
-    const { error } = await supabase.from('medical_records').delete().in('id', ids);
+    const { error } = await db.from('medical_records').delete().in('id', ids);
     if (!error) {
       setRecords(prev => prev.filter(r => !r.dbId || !selectedIds.has(r.dbId)));
       setSelectedIds(new Set());
@@ -101,9 +101,9 @@ export default function RecordsPage() {
 
   useEffect(() => {
     (async () => {
-      const { data } = await supabase
+      const { data } = await db
         .from('medical_records')
-        .select('id, record_number, record_type, status, visit_date, visit_time, reason, clinical_notes, duration_minutes, pets!left(id, name, species, breed, photo_url), clients!left(id, first_name, last_name), staff!medical_records_vet_id_fkey!left(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
+        .select('id, record_number, record_type, status, visit_date, visit_time, reason, clinical_notes, duration_minutes, pets!left(id, name, species, breed, photo_url), clients!left(id, first_name, last_name), staff!medical_records_vet_org_fkey!left(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name))')
         .order('visit_date', { ascending: false });
       if (data) {
         const mapped: MedicalRecord[] = data.map((r: any, i: number) => {
@@ -273,10 +273,10 @@ export default function RecordsPage() {
                   style={{
                     width: '18px', height: '18px', borderRadius: '4px', cursor: 'pointer',
                     border: selectMode && selectedIds.size === filtered.length && filtered.length > 0
-                      ? '2px solid #2D6A4F'
+                      ? '2px solid var(--brand-green-text)'
                       : '2px solid var(--text-secondary)',
                     backgroundColor: selectMode && selectedIds.size === filtered.length && filtered.length > 0
-                      ? '#2D6A4F' : 'transparent',
+                      ? 'var(--brand-green-text)' : 'transparent',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     opacity: selectMode ? 1 : 0.5,
                     transition: 'all 0.15s ease',
@@ -307,7 +307,7 @@ export default function RecordsPage() {
                 <TableRow
                   key={rec.id}
                   className="hover:bg-[var(--surface-elevated)] cursor-pointer transition-colors"
-                  style={isSelected ? { backgroundColor: 'rgba(45,106,79,0.08)' } : undefined}
+                  style={isSelected ? { backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)' } : undefined}
                   onClick={() => navigate(`${basePath}/${rec.dbId || rec.id}`)}
                 >
                   {/* Checkbox */}
@@ -317,8 +317,8 @@ export default function RecordsPage() {
                         onClick={(e) => { e.stopPropagation(); toggleSelect(rec.dbId!); }}
                         style={{
                           width: '18px', height: '18px', borderRadius: '4px', cursor: 'pointer',
-                          border: isSelected ? '2px solid #2D6A4F' : '2px solid var(--text-secondary)',
-                          backgroundColor: isSelected ? '#2D6A4F' : 'transparent',
+                          border: isSelected ? '2px solid var(--brand-green-text)' : '2px solid var(--text-secondary)',
+                          backgroundColor: isSelected ? 'var(--brand-green-text)' : 'transparent',
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
                           transition: 'all 0.15s ease',
                         }}
@@ -335,7 +335,7 @@ export default function RecordsPage() {
                       {rec.petImage ? (
                         <img src={rec.petImage} alt={rec.petName} className="w-10 h-10 object-cover" style={{ borderRadius: '9999px' }} />
                       ) : (
-                        <div className="w-10 h-10 flex items-center justify-center text-white font-semibold flex-shrink-0" style={{ borderRadius: '9999px', backgroundColor: '#2D6A4F', fontSize: '13px' }}>{rec.petName.slice(0, 2).toUpperCase()}</div>
+                        <div className="w-10 h-10 flex items-center justify-center text-white font-semibold flex-shrink-0" style={{ borderRadius: '9999px', backgroundColor: 'var(--brand-green-text)', fontSize: '13px' }}>{rec.petName.slice(0, 2).toUpperCase()}</div>
                       )}
                       <div>
                         <p className="text-[var(--text-primary)]" style={{ fontSize: '15px', fontWeight: 600 }}>{rec.petName}</p>

@@ -63,7 +63,7 @@ interface DetailedRecord {
 // ─── Color Maps ──────────────────────────────────────────────
 
 const recordTypeColors: Record<RecordType, { bg: string; text: string }> = {
-  Visit:        { bg: '#2D6A4F20', text: 'var(--brand-green-text)' },
+  Visit:        { bg: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)', text: 'var(--brand-green-text)' },
   Vaccination:  { bg: '#3B82F620', text: '#3B82F6' },
   'Lab Result': { bg: '#8B5CF620', text: '#8B5CF6' },
   Surgery:      { bg: '#EC489920', text: '#EC4899' },
@@ -718,7 +718,7 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 function SectionHeader({ icon: Icon, title }: { icon: React.ElementType; title: string }) {
   return (
     <div className="flex items-center gap-2 mb-4">
-      <div className="w-8 h-8 flex items-center justify-center" style={{ backgroundColor: '#2D6A4F20', borderRadius: '8px' }}>
+      <div className="w-8 h-8 flex items-center justify-center" style={{ backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)', borderRadius: '8px' }}>
         <Icon className="w-4 h-4 text-[var(--brand-green-text)]" />
       </div>
       <h3 className="text-[var(--text-primary)]" style={{ fontSize: '18px', fontWeight: 600 }}>{title}</h3>
@@ -806,7 +806,7 @@ export default function OwnerRecordDetailPage() {
             {/* CTA */}
             <button
               onClick={() => navigate('/owner/records')}
-              style={{ width: '100%', padding: '12px', borderRadius: '10px', backgroundColor: '#2D6A4F', color: '#fff', border: 'none', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}
+              style={{ width: '100%', padding: '12px', borderRadius: '10px', backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)', border: 'none', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}
             >
               ← Back to My Records
             </button>
@@ -836,7 +836,7 @@ export default function OwnerRecordDetailPage() {
       </Link>
 
       {/* Header accent bar */}
-      <div style={{ height: 4, borderRadius: '4px 4px 0 0', background: 'linear-gradient(90deg, #2D6A4F, #52B788)', marginBottom: '-1px' }} />
+      <div style={{ height: 4, borderRadius: '4px 4px 0 0', background: 'linear-gradient(90deg, var(--brand-green-text), #52B788)', marginBottom: '-1px' }} />
 
       {/* Header card */}
       <div
@@ -871,7 +871,7 @@ export default function OwnerRecordDetailPage() {
             <Button
               onClick={() => window.print()}
               className="gap-2"
-              style={{ backgroundColor: '#2D6A4F', color: '#fff' }}
+              style={{ backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)' }}
             >
               <Download className="w-4 h-4" />
               Download PDF

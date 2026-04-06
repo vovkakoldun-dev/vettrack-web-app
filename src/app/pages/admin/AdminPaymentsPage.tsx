@@ -205,7 +205,7 @@ export default function AdminPaymentsPage() {
       }
       const total = totalRev || 1;
       const methodColors: Record<string, string> = {
-        'Credit Card': '#3B82F6', 'Debit Card': '#3B82F6', 'Cash': '#2D6A4F',
+        'Credit Card': '#3B82F6', 'Debit Card': '#3B82F6', 'Cash': 'var(--brand-green-text)',
         'Check': '#8B5CF6', 'Insurance': '#F4A261', 'Financing': '#06B6D4', 'Other': '#6B7280',
       };
       const breakdowns: MethodBreakdown[] = Array.from(methodMap.entries())
@@ -352,8 +352,8 @@ export default function AdminPaymentsPage() {
           value={`$${stats.totalRevenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
           subtitle="this month"
           icon={TrendingUp}
-          color="#2D6A4F"
-          bg="#2D6A4F15"
+          color="var(--brand-green-text)"
+          bg="color-mix(in srgb, var(--brand-green-text) 8%, transparent)"
         />
         <StatCard
           title="Pending"

@@ -69,7 +69,7 @@ export default function MyPatientsPage() {
       {/* Stat Chips */}
       <div className="flex items-center gap-3 mb-6">
         <div className="px-4 py-2 bg-[var(--surface-white)] border border-[var(--border-color)] flex items-center gap-2" style={{ borderRadius: '9999px' }}>
-          <div className="w-2 h-2 rounded-full bg-[#2D6A4F]" />
+          <div className="w-2 h-2 rounded-full bg-[var(--brand-green-text)]" />
           <span className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 600 }}>{healthyCount}</span>
           <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>Healthy</span>
         </div>

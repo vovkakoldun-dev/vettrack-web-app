@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { supabase } from '../../../lib/supabase';
+import { useTenantDb } from '../../context/TenantContext';
 import { getOrgContext } from '../../hooks/useOrgContext';
 import { ConnectionStatusBadge } from '../../components/ConnectionStatusBadge';
 import {
@@ -63,6 +64,7 @@ const NOTIF_TYPE_CFG = {
 };
 
 function NotificationsPanel() {
+  const db = useTenantDb();
   const navigate = useNavigate();
   const [notifs, setNotifs] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
@@ -76,7 +78,7 @@ function NotificationsPanel() {
         const built: Notification[] = [];
 
         // 1. Manual pending requests (PTO, shift swaps, etc.)
-        const { data: manualReqs } = await supabase
+        const { data: manualReqs } = await db
           .from('pending_requests')
           .select('*')
           .eq('organization_id', organizationId)
@@ -97,7 +99,7 @@ function NotificationsPanel() {
         }
 
         // 2. Overdue invoices → Finance Alert
-        const { data: overdueInv } = await supabase
+        const { data: overdueInv } = await db
           .from('invoices')
           .select('id, total, due_date, clients(first_name, last_name)')
           .eq('organization_id', organizationId)
@@ -123,7 +125,7 @@ function NotificationsPanel() {
         }
 
         // 3. Unpaid/Sent invoices → reminder
-        const { data: sentInv } = await supabase
+        const { data: sentInv } = await db
           .from('invoices')
           .select('id, total, due_date, clients(first_name, last_name)')
           .eq('organization_id', organizationId)
@@ -147,9 +149,9 @@ function NotificationsPanel() {
         }
 
         // 4. Urgent pending tasks → action needed
-        const { data: urgentTasks } = await supabase
+        const { data: urgentTasks } = await db
           .from('tasks')
-          .select('id, type, priority, due_date, pet:pets!tasks_pet_id_fkey(name), assignedByStaff:staff!tasks_assigned_by_id_fkey(profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
+          .select('id, type, priority, due_date, pet:pets!tasks_pet_org_fkey(name), assignedByStaff:staff!tasks_assigned_by_org_fkey(profiles:profiles!staff_profile_org_fkey(first_name, last_name))')
           .eq('organization_id', organizationId)
           .eq('status', 'Pending')
           .eq('priority', 'Urgent')
@@ -183,17 +185,94 @@ function NotificationsPanel() {
     const notif = notifs.find(n => n.id === id);
     setNotifs(prev => prev.map(n => n.id === id ? { ...n, status: 'approved' } : n));
     if (!id.includes('-invoices') && !id.startsWith('task-')) {
-      await supabase.from('pending_requests').update({ status: 'approved', resolved_at: new Date().toISOString() }).eq('id', id);
+      await db.from('pending_requests').update({ status: 'approved', resolved_at: new Date().toISOString() }).eq('id', id);
       // Notify the requester
       if (notif?.requesterId) {
         const { organizationId } = await getOrgContext();
-        await supabase.from('notification_events').upsert({
+        await db.from('notification_events').upsert({
           id: `req-approved-${id}`,
           type: 'request_resolved',
           timestamp: new Date().toISOString(),
           data: { decision: 'approved', requestType: notif.type, title: notif.title, detail: notif.detail, vetId: notif.requesterId },
           organization_id: organizationId,
         });
+        // Update staff_time_blocks status to Approved
+        const blockType = notif.type === 'pto' ? 'PTO' : notif.type === 'shift_swap' ? 'Sick Day' : null;
+        if (blockType) {
+          // Get the approved date range from staff_time_blocks
+          const { data: approvedBlocks } = await db.from('staff_time_blocks')
+            .update({ status: 'Approved' })
+            .eq('staff_id', notif.requesterId)
+            .eq('type', blockType)
+            .eq('status', 'Pending')
+            .select('date');
+
+          const doctorName = notif.title.split(' — ')[0] || 'Doctor';
+
+          // Also try to extract dates from the detail text if blocks are empty
+          let minDate = '';
+          let maxDate = '';
+          if (approvedBlocks && approvedBlocks.length > 0) {
+            const dates = approvedBlocks.map((b: any) => b.date).sort();
+            minDate = dates[0];
+            maxDate = dates[dates.length - 1];
+          }
+
+          const dateRangeLabel = minDate && maxDate
+            ? (minDate === maxDate
+              ? new Date(minDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+              : `${new Date(minDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(maxDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`)
+            : '';
+
+          // Check for appointments that need reassignment during the PTO/Sick Day period
+          let apptList: any[] = [];
+          if (minDate && maxDate) {
+            const { data: affectedAppts } = await db.from('appointments')
+              .select('id, scheduled_at, reason, status, pets(name, species), clients(first_name, last_name)')
+              .eq('organization_id', organizationId)
+              .eq('vet_id', notif.requesterId)
+              .gte('scheduled_at', `${minDate}T00:00:00`)
+              .lte('scheduled_at', `${maxDate}T23:59:59`)
+              .in('status', ['Scheduled', 'Confirmed'])
+              .order('scheduled_at');
+
+            if (affectedAppts && affectedAppts.length > 0) {
+              apptList = affectedAppts.map((a: any) => {
+                const pet = a.pets as any;
+                const client = a.clients as any;
+                const dt = new Date(a.scheduled_at);
+                return {
+                  id: a.id,
+                  petName: pet?.name || 'Unknown',
+                  species: pet?.species || '',
+                  ownerName: client ? `${client.first_name} ${client.last_name}`.trim() : 'Unknown',
+                  date: dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
+                  time: dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
+                  reason: a.reason || '',
+                };
+              });
+            }
+          }
+
+          // Always create coverage notification for admins when PTO/Sick Day is approved
+          await db.from('notification_events').upsert({
+            id: `coverage-needed-${id}`,
+            type: 'pto_coverage_needed',
+            timestamp: new Date().toISOString(),
+            data: {
+              adminOnly: true,
+              doctorName,
+              blockType,
+              dateRange: dateRangeLabel || notif.detail,
+              dateFrom: minDate,
+              dateTo: maxDate,
+              doctorId: notif.requesterId,
+              appointmentCount: apptList.length,
+              appointments: apptList,
+            },
+            organization_id: organizationId,
+          });
+        }
       }
     }
   }
@@ -201,24 +280,32 @@ function NotificationsPanel() {
     const notif = notifs.find(n => n.id === id);
     setNotifs(prev => prev.map(n => n.id === id ? { ...n, status: 'declined' } : n));
     if (!id.includes('-invoices') && !id.startsWith('task-')) {
-      await supabase.from('pending_requests').update({ status: 'declined', resolved_at: new Date().toISOString() }).eq('id', id);
+      await db.from('pending_requests').update({ status: 'declined', resolved_at: new Date().toISOString() }).eq('id', id);
       // Notify the requester
       if (notif?.requesterId) {
         const { organizationId } = await getOrgContext();
-        await supabase.from('notification_events').upsert({
+        await db.from('notification_events').upsert({
           id: `req-declined-${id}`,
           type: 'request_resolved',
           timestamp: new Date().toISOString(),
           data: { decision: 'declined', requestType: notif.type, title: notif.title, detail: notif.detail, vetId: notif.requesterId },
           organization_id: organizationId,
         });
+        // Update staff_time_blocks status to Denied
+        const blockType = notif.type === 'pto' ? 'PTO' : notif.type === 'shift_swap' ? 'Sick Day' : null;
+        if (blockType) {
+          await db.from('staff_time_blocks').update({ status: 'Denied' })
+            .eq('staff_id', notif.requesterId)
+            .eq('type', blockType)
+            .eq('status', 'Pending');
+        }
       }
     }
   }
   async function dismiss(id: string) {
     setNotifs(prev => prev.filter(n => n.id !== id));
     if (!id.includes('-invoices') && !id.startsWith('task-')) {
-      await supabase.from('pending_requests').delete().eq('id', id);
+      await db.from('pending_requests').delete().eq('id', id);
     }
   }
 
@@ -837,6 +924,7 @@ const QUICK_ACTIONS = [
 // ─── Component ────────────────────────────────────────────────
 
 export default function SuperAdminDashboardPage() {
+  const db = useTenantDb();
   const navigate = useNavigate();
   const [staffRows, setStaffRows] = useState<StaffRow[]>([]);
   const [staffLoading, setStaffLoading] = useState(true);
@@ -872,7 +960,7 @@ export default function SuperAdminDashboardPage() {
         const fmtTime = (ts: string) => new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 
         // 1. Payments received today
-        const { data: payments } = await supabase
+        const { data: payments } = await db
           .from('payments')
           .select('amount, created_at, invoices(clients(first_name, last_name))')
           .eq('organization_id', organizationId)
@@ -890,7 +978,7 @@ export default function SuperAdminDashboardPage() {
         });
 
         // 2. Appointments booked today
-        const { data: newAppts } = await supabase
+        const { data: newAppts } = await db
           .from('appointments')
           .select('created_at, pets(name), services(name)')
           .eq('organization_id', organizationId)
@@ -908,9 +996,9 @@ export default function SuperAdminDashboardPage() {
         });
 
         // 3. Medical records created today
-        const { data: newRecords } = await supabase
+        const { data: newRecords } = await db
           .from('medical_records')
-          .select('created_at, pets(name), staff:staff!medical_records_vet_id_fkey(profiles:profiles!staff_profile_id_fkey(last_name))')
+          .select('created_at, pets(name), staff:staff!medical_records_vet_org_fkey(profiles:profiles!staff_profile_org_fkey(last_name))')
           .eq('organization_id', organizationId)
           .gte('created_at', todayStart)
           .order('created_at', { ascending: false })
@@ -926,7 +1014,7 @@ export default function SuperAdminDashboardPage() {
         });
 
         // 4. Overdue invoices (any time — important alerts)
-        const { data: overdueInv } = await supabase
+        const { data: overdueInv } = await db
           .from('invoices')
           .select('total, updated_at, clients(first_name, last_name)')
           .eq('organization_id', organizationId)
@@ -944,7 +1032,7 @@ export default function SuperAdminDashboardPage() {
         });
 
         // 5. New pets registered today
-        const { data: newPets } = await supabase
+        const { data: newPets } = await db
           .from('pets')
           .select('name, created_at, clients(first_name, last_name)')
           .eq('organization_id', organizationId)
@@ -980,7 +1068,7 @@ export default function SuperAdminDashboardPage() {
         const prevEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59).toISOString();
 
         // This month invoices by status
-        const { data: thisMonthInv } = await supabase
+        const { data: thisMonthInv } = await db
           .from('invoices')
           .select('total, status')
           .eq('organization_id', organizationId)
@@ -993,7 +1081,7 @@ export default function SuperAdminDashboardPage() {
         const overdue = (thisMonthInv || []).filter((i: any) => i.status === 'Overdue').reduce((s: number, i: any) => s + (Number(i.total) || 0), 0);
 
         // Last month total
-        const { data: lastMonthInv } = await supabase
+        const { data: lastMonthInv } = await db
           .from('invoices')
           .select('total')
           .eq('organization_id', organizationId)
@@ -1014,9 +1102,9 @@ export default function SuperAdminDashboardPage() {
         const { organizationId } = await getOrgContext();
 
         // 1. Fetch all non-inactive staff with profile names
-        const { data: staffData } = await supabase
+        const { data: staffData } = await db
           .from('staff')
-          .select('id, role, status, profiles:profiles!staff_profile_id_fkey(first_name, last_name)')
+          .select('id, role, status, profiles:profiles!staff_profile_org_fkey(first_name, last_name)')
           .eq('organization_id', organizationId)
           .neq('status', 'Inactive')
           .order('role');
@@ -1029,7 +1117,7 @@ export default function SuperAdminDashboardPage() {
 
         // 2. Count today's appointments per vet
         const todayStr = new Date().toISOString().slice(0, 10);
-        const { data: todayAppts } = await supabase
+        const { data: todayAppts } = await db
           .from('appointments')
           .select('vet_id')
           .eq('organization_id', organizationId)
@@ -1043,7 +1131,7 @@ export default function SuperAdminDashboardPage() {
 
         // 3. Get last active time per staff member from user_sessions
         const staffIds = staffData.map((s: any) => s.id);
-        const { data: sessions } = await supabase
+        const { data: sessions } = await db
           .from('user_sessions')
           .select('user_id, last_active_at')
           .in('user_id', staffIds)
@@ -1055,7 +1143,7 @@ export default function SuperAdminDashboardPage() {
         });
 
         // 4. Check today's shifts to determine On Duty vs Off Today
-        const { data: todayShifts } = await supabase
+        const { data: todayShifts } = await db
           .from('shifts')
           .select('staff_id')
           .eq('organization_id', organizationId)
@@ -1117,7 +1205,7 @@ export default function SuperAdminDashboardPage() {
         const todayStr = new Date().toISOString().slice(0, 10);
 
         // ── Total Patients ──
-        const { count: petCount } = await supabase
+        const { count: petCount } = await db
           .from('pets')
           .select('id', { count: 'exact', head: true })
           .eq('organization_id', organizationId);
@@ -1126,7 +1214,7 @@ export default function SuperAdminDashboardPage() {
         // Pets added this week
         const weekAgo = new Date();
         weekAgo.setDate(weekAgo.getDate() - 7);
-        const { count: newPets } = await supabase
+        const { count: newPets } = await db
           .from('pets')
           .select('id', { count: 'exact', head: true })
           .eq('organization_id', organizationId)
@@ -1134,7 +1222,7 @@ export default function SuperAdminDashboardPage() {
         setKpiPatientsTrend(`+${newPets || 0} this week`);
 
         // ── Appointments Today ──
-        const { count: apptCount } = await supabase
+        const { count: apptCount } = await db
           .from('appointments')
           .select('id', { count: 'exact', head: true })
           .eq('organization_id', organizationId)
@@ -1143,7 +1231,7 @@ export default function SuperAdminDashboardPage() {
         if (apptCount !== null) setKpiApptsToday(String(apptCount));
 
         // In-progress appointments
-        const { count: inProgress } = await supabase
+        const { count: inProgress } = await db
           .from('appointments')
           .select('id', { count: 'exact', head: true })
           .eq('organization_id', organizationId)
@@ -1151,7 +1239,7 @@ export default function SuperAdminDashboardPage() {
         setKpiApptsTrend(`${inProgress || 0} in progress`);
 
         // ── Staff breakdown ──
-        const { data: staffBreakdown } = await supabase
+        const { data: staffBreakdown } = await db
           .from('staff')
           .select('role')
           .eq('organization_id', organizationId)
@@ -1177,7 +1265,7 @@ export default function SuperAdminDashboardPage() {
         // ── Greeting name from profile ──
         const { data: { user: authUser } } = await supabase.auth.getUser();
         if (authUser) {
-          const { data: prof } = await supabase.from('profiles').select('first_name').eq('id', authUser.id).single();
+          const { data: prof } = await db.from('profiles').select('first_name').eq('id', authUser.id).single();
           if (prof?.first_name) setGreetingName(prof.first_name);
         }
 
@@ -1187,7 +1275,7 @@ export default function SuperAdminDashboardPage() {
         for (let i = 7; i >= 0; i--) {
           const d = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59);
           patientLabels.push(monthNames[d.getMonth()]);
-          const { count } = await supabase
+          const { count } = await db
             .from('pets')
             .select('id', { count: 'exact', head: true })
             .eq('organization_id', organizationId)
@@ -1205,7 +1293,7 @@ export default function SuperAdminDashboardPage() {
           d.setDate(d.getDate() - i);
           const dayStr = d.toISOString().slice(0, 10);
           apptLabels.push(i === 0 ? 'Today' : dayNames[d.getDay()]);
-          const { count } = await supabase
+          const { count } = await db
             .from('appointments')
             .select('id', { count: 'exact', head: true })
             .eq('organization_id', organizationId)
@@ -1223,7 +1311,7 @@ export default function SuperAdminDashboardPage() {
           const mStart = mDate.toISOString();
           const mEnd = new Date(mDate.getFullYear(), mDate.getMonth() + 1, 0, 23, 59, 59).toISOString();
           revLabels.push(monthNames[mDate.getMonth()]);
-          const { data: inv } = await supabase
+          const { data: inv } = await db
             .from('invoices')
             .select('total')
             .eq('organization_id', organizationId)
@@ -1241,7 +1329,7 @@ export default function SuperAdminDashboardPage() {
         for (let i = 7; i >= 0; i--) {
           const d = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59);
           staffLabels.push(monthNames[d.getMonth()]);
-          const { count } = await supabase
+          const { count } = await db
             .from('staff')
             .select('id', { count: 'exact', head: true })
             .eq('organization_id', organizationId)
@@ -1264,7 +1352,7 @@ export default function SuperAdminDashboardPage() {
         const endOfMonth = new Date(year, month + 1, 0, 23, 59, 59).toISOString();
 
         // Current month revenue
-        const { data: monthInvoices } = await supabase
+        const { data: monthInvoices } = await db
           .from('invoices')
           .select('total')
           .eq('organization_id', organizationId)
@@ -1278,7 +1366,7 @@ export default function SuperAdminDashboardPage() {
         // Previous month revenue for comparison
         const prevStart = new Date(year, month - 1, 1).toISOString();
         const prevEnd = new Date(year, month, 0, 23, 59, 59).toISOString();
-        const { data: prevInvoices } = await supabase
+        const { data: prevInvoices } = await db
           .from('invoices')
           .select('total')
           .eq('organization_id', organizationId)

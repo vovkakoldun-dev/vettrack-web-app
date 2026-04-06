@@ -9,7 +9,7 @@ import { usePets } from '../../hooks/usePets';
 import { useOwnerClient } from '../../hooks/useOwnerClient';
 
 // ─── Brand ───────────────────────────────────────────────────
-const BRAND = '#2D6A4F';
+const BRAND = 'var(--brand-green-text)';
 const BRAND_TEXT = 'var(--brand-green-text)';
 
 // ─── Types ───────────────────────────────────────────────────
@@ -40,7 +40,7 @@ const PETS = [
 ];
 
 const SERVICES = [
-  { label: 'Annual Checkup',  color: '#2D6A4F', emoji: '🩺' },
+  { label: 'Annual Checkup',  color: 'var(--brand-green-text)', emoji: '🩺' },
   { label: 'Vaccination',     color: '#3B82F6', emoji: '💉' },
   { label: 'Dental Cleaning', color: '#8B5CF6', emoji: '🦷' },
   { label: 'Surgery',         color: '#EC4899', emoji: '🔬' },
@@ -51,7 +51,7 @@ const SERVICES = [
 ];
 
 const VETS = [
-  { name: 'Dr. Chen',   initials: 'SC', color: '#2D6A4F' },
+  { name: 'Dr. Chen',   initials: 'SC', color: 'var(--brand-green-text)' },
   { name: 'Dr. Patel',  initials: 'RP', color: '#3B82F6' },
   { name: 'Dr. Garcia', initials: 'MG', color: '#8B5CF6' },
 ];
@@ -172,7 +172,7 @@ export default function OwnerAppointmentsPage() {
   const upcomingList  = appointments.filter(a => a.status === 'upcoming').sort((a,b) => a.date.localeCompare(b.date));
 
   const statusConf = (s: Appointment['status']) => ({
-    upcoming:  { bg: `${BRAND}18`, text: BRAND_TEXT, label: 'Upcoming' },
+    upcoming:  { bg: 'color-mix(in srgb, var(--brand-green-text) 9%, transparent)', text: BRAND_TEXT, label: 'Upcoming' },
     completed: { bg: '#74C69D20', text: BRAND_TEXT,  label: 'Completed' },
     cancelled: { bg: '#d4183d15', text: '#d4183d',   label: 'Cancelled' },
   }[s]);
@@ -242,7 +242,7 @@ export default function OwnerAppointmentsPage() {
                     key={day}
                     onClick={() => openBooking(key)}
                     style={{ minHeight: '88px', padding: '8px', borderRight: colIdx < 6 ? '1px solid var(--border-color)' : 'none', borderBottom: '1px solid var(--border-color)', cursor: 'pointer', backgroundColor: isPast ? 'var(--surface-elevated)' : 'var(--surface-white)', transition: 'background-color 0.1s' }}
-                    onMouseEnter={e => !isPast && ((e.currentTarget as HTMLDivElement).style.backgroundColor = `${BRAND}08`)}
+                    onMouseEnter={e => !isPast && ((e.currentTarget as HTMLDivElement).style.backgroundColor = 'color-mix(in srgb, var(--brand-green-text) 3%, transparent)')}
                     onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.backgroundColor = isPast ? 'var(--surface-elevated)' : 'var(--surface-white)'}
                   >
                     <div style={{ width: '28px', height: '28px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: isToday ? 800 : 500, backgroundColor: isToday ? BRAND : 'transparent', color: isToday ? '#fff' : isPast ? 'var(--text-secondary)' : 'var(--text-primary)', marginBottom: '4px' }}>
@@ -253,7 +253,7 @@ export default function OwnerAppointmentsPage() {
                         <div
                           key={appt.id}
                           onClick={e => { e.stopPropagation(); setDetailAppt(appt); }}
-                          style={{ padding: '2px 5px', borderRadius: '4px', fontSize: '10px', fontWeight: 700, backgroundColor: appt.status === 'completed' ? '#74C69D25' : appt.status === 'cancelled' ? '#d4183d15' : `${BRAND}18`, color: appt.status === 'cancelled' ? '#d4183d' : BRAND, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'pointer' }}
+                          style={{ padding: '2px 5px', borderRadius: '4px', fontSize: '10px', fontWeight: 700, backgroundColor: appt.status === 'completed' ? '#74C69D25' : appt.status === 'cancelled' ? '#d4183d15' : 'color-mix(in srgb, var(--brand-green-text) 9%, transparent)', color: appt.status === 'cancelled' ? '#d4183d' : BRAND, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'pointer' }}
                         >
                           {appt.time} {appt.pet}
                         </div>
@@ -276,9 +276,9 @@ export default function OwnerAppointmentsPage() {
               <div style={{ padding: '8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 {upcomingList.length === 0 && <p style={{ fontSize: '13px', color: 'var(--text-secondary)', padding: '8px' }}>No upcoming appointments.</p>}
                 {upcomingList.map(appt => (
-                  <div key={appt.id} onClick={() => setDetailAppt(appt)} style={{ padding: '10px 12px', borderRadius: '10px', cursor: 'pointer', border: `1px solid ${BRAND}20`, backgroundColor: `${BRAND}06`, transition: 'background-color 0.1s' }}
-                    onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.backgroundColor = `${BRAND}12`}
-                    onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.backgroundColor = `${BRAND}06`}
+                  <div key={appt.id} onClick={() => setDetailAppt(appt)} style={{ padding: '10px 12px', borderRadius: '10px', cursor: 'pointer', border: '1px solid color-mix(in srgb, var(--brand-green-text) 12%, transparent)', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 2%, transparent)', transition: 'background-color 0.1s' }}
+                    onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.backgroundColor = 'color-mix(in srgb, var(--brand-green-text) 7%, transparent)'}
+                    onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.backgroundColor = 'color-mix(in srgb, var(--brand-green-text) 2%, transparent)'}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
                       <Avatar style={{ width: '24px', height: '24px', flexShrink: 0 }}>
@@ -353,7 +353,7 @@ export default function OwnerAppointmentsPage() {
                   <strong style={{ color: 'var(--text-primary)' }}>{formService}</strong> for <strong style={{ color: 'var(--text-primary)' }}>{formPet}</strong>
                 </p>
                 <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '24px' }}>{fmtDate(formDate)} at {formTime}</p>
-                <div style={{ padding: '12px 16px', borderRadius: '10px', backgroundColor: `${BRAND}08`, border: `1px solid ${BRAND}20`, marginBottom: '24px', textAlign: 'left' }}>
+                <div style={{ padding: '12px 16px', borderRadius: '10px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 3%, transparent)', border: '1px solid color-mix(in srgb, var(--brand-green-text) 12%, transparent)', marginBottom: '24px', textAlign: 'left' }}>
                   <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.6 }}>
                     📧 A confirmation will be sent via <strong>{confirmMethod}</strong>. A reminder will be sent <strong>{reminderTiming}</strong> before your appointment.
                   </p>
@@ -377,7 +377,7 @@ export default function OwnerAppointmentsPage() {
                         <button
                           key={pet.name}
                           onClick={() => setFormPet(pet.name)}
-                          style={{ flex: 1, padding: '10px 12px', borderRadius: '10px', cursor: 'pointer', border: formPet === pet.name ? `2px solid ${BRAND}` : '2px solid var(--border-color)', backgroundColor: formPet === pet.name ? `${BRAND}0c` : 'transparent', display: 'flex', alignItems: 'center', gap: '8px', transition: 'all 0.15s' }}
+                          style={{ flex: 1, padding: '10px 12px', borderRadius: '10px', cursor: 'pointer', border: formPet === pet.name ? `2px solid ${BRAND}` : '2px solid var(--border-color)', backgroundColor: formPet === pet.name ? 'color-mix(in srgb, var(--brand-green-text) 5%, transparent)' : 'transparent', display: 'flex', alignItems: 'center', gap: '8px', transition: 'all 0.15s' }}
                         >
                           <Avatar style={{ width: '32px', height: '32px', flexShrink: 0 }}>
                             <AvatarImage src={pet.image} alt={pet.name} style={{ objectFit: 'cover' }} />
@@ -504,7 +504,7 @@ export default function OwnerAppointmentsPage() {
                     <div style={{ display: 'flex', gap: '4px', marginBottom: '12px' }}>
                       {['Email','SMS','Both','None'].map(m => {
                         const active = confirmMethod === m;
-                        return <button key={m} onClick={() => setConfirmMethod(m)} style={{ flex: 1, padding: '4px 2px', borderRadius: '6px', fontSize: '11px', fontWeight: active ? 700 : 400, border: `1.5px solid ${active ? BRAND : 'var(--border-color)'}`, backgroundColor: active ? `${BRAND}15` : 'transparent', color: active ? BRAND_TEXT : 'var(--text-secondary)', cursor: 'pointer' }}>{m}</button>;
+                        return <button key={m} onClick={() => setConfirmMethod(m)} style={{ flex: 1, padding: '4px 2px', borderRadius: '6px', fontSize: '11px', fontWeight: active ? 700 : 400, border: `1.5px solid ${active ? BRAND : 'var(--border-color)'}`, backgroundColor: active ? 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)' : 'transparent', color: active ? BRAND_TEXT : 'var(--text-secondary)', cursor: 'pointer' }}>{m}</button>;
                       })}
                     </div>
                     {/* Reminder */}
@@ -512,7 +512,7 @@ export default function OwnerAppointmentsPage() {
                     <div style={{ display: 'flex', gap: '4px', marginBottom: reminderMethod !== 'None' ? '8px' : '0' }}>
                       {['Email','SMS','Both','None'].map(m => {
                         const active = reminderMethod === m;
-                        return <button key={m} onClick={() => setReminderMethod(m)} style={{ flex: 1, padding: '4px 2px', borderRadius: '6px', fontSize: '11px', fontWeight: active ? 700 : 400, border: `1.5px solid ${active ? BRAND : 'var(--border-color)'}`, backgroundColor: active ? `${BRAND}15` : 'transparent', color: active ? BRAND_TEXT : 'var(--text-secondary)', cursor: 'pointer' }}>{m}</button>;
+                        return <button key={m} onClick={() => setReminderMethod(m)} style={{ flex: 1, padding: '4px 2px', borderRadius: '6px', fontSize: '11px', fontWeight: active ? 700 : 400, border: `1.5px solid ${active ? BRAND : 'var(--border-color)'}`, backgroundColor: active ? 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)' : 'transparent', color: active ? BRAND_TEXT : 'var(--text-secondary)', cursor: 'pointer' }}>{m}</button>;
                       })}
                     </div>
                     {reminderMethod !== 'None' && (
@@ -521,7 +521,7 @@ export default function OwnerAppointmentsPage() {
                         <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
                           {['1 hr','4 hrs','1 day','2 days'].map(t => {
                             const active = reminderTiming === t;
-                            return <button key={t} onClick={() => setReminderTiming(t)} style={{ padding: '4px 8px', borderRadius: '5px', fontSize: '11px', fontWeight: active ? 700 : 400, border: `1.5px solid ${active ? BRAND : 'var(--border-color)'}`, backgroundColor: active ? `${BRAND}15` : 'transparent', color: active ? BRAND_TEXT : 'var(--text-secondary)', cursor: 'pointer' }}>{t}</button>;
+                            return <button key={t} onClick={() => setReminderTiming(t)} style={{ padding: '4px 8px', borderRadius: '5px', fontSize: '11px', fontWeight: active ? 700 : 400, border: `1.5px solid ${active ? BRAND : 'var(--border-color)'}`, backgroundColor: active ? 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)' : 'transparent', color: active ? BRAND_TEXT : 'var(--text-secondary)', cursor: 'pointer' }}>{t}</button>;
                           })}
                         </div>
                       </>
@@ -578,7 +578,7 @@ export default function OwnerAppointmentsPage() {
                 { icon: PawPrint, label: 'Vet', value: detailAppt.vet },
               ].map(({ icon: Icon, label, value }) => (
                 <div key={label} style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', marginBottom: '10px' }}>
-                  <div style={{ width: '30px', height: '30px', borderRadius: '8px', backgroundColor: `${BRAND}12`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <div style={{ width: '30px', height: '30px', borderRadius: '8px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 7%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     <Icon style={{ width: '14px', height: '14px', color: BRAND_TEXT }} />
                   </div>
                   <div>
@@ -588,7 +588,7 @@ export default function OwnerAppointmentsPage() {
                 </div>
               ))}
               {detailAppt.notes && (
-                <div style={{ marginTop: '14px', padding: '12px', borderRadius: '9px', backgroundColor: `${BRAND}08`, border: `1px solid ${BRAND}20` }}>
+                <div style={{ marginTop: '14px', padding: '12px', borderRadius: '9px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 3%, transparent)', border: '1px solid color-mix(in srgb, var(--brand-green-text) 12%, transparent)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '5px' }}>
                     <FileText style={{ width: '12px', height: '12px', color: BRAND_TEXT }} />
                     <span style={{ fontSize: '10px', fontWeight: 700, color: BRAND_TEXT, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Notes</span>
@@ -598,7 +598,7 @@ export default function OwnerAppointmentsPage() {
               )}
               {detailAppt.status === 'upcoming' && (
                 <div style={{ display: 'flex', gap: '8px', marginTop: '18px' }}>
-                  <button style={{ flex: 1, padding: '10px', borderRadius: '9px', backgroundColor: `${BRAND}12`, border: `1px solid ${BRAND}30`, color: BRAND_TEXT, fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>Reschedule</button>
+                  <button style={{ flex: 1, padding: '10px', borderRadius: '9px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 7%, transparent)', border: '1px solid color-mix(in srgb, var(--brand-green-text) 19%, transparent)', color: BRAND_TEXT, fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>Reschedule</button>
                   <button onClick={() => { setAppointments(prev => prev.map(a => a.id === detailAppt.id ? { ...a, status: 'cancelled' as const } : a)); setDetailAppt(null); }} style={{ flex: 1, padding: '10px', borderRadius: '9px', backgroundColor: '#d4183d10', border: '1px solid #d4183d25', color: '#d4183d', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
                 </div>
               )}

@@ -445,7 +445,7 @@ export default function SuperAdminAnalyticsPage() {
             .eq('organization_id', organizationId),
           supabase
             .from('staff')
-            .select('id, role, total_appointments, profiles:profiles!staff_profile_id_fkey(first_name, last_name)')
+            .select('id, role, total_appointments, profiles:profiles!staff_profile_org_fkey(first_name, last_name)')
             .eq('organization_id', organizationId)
             .eq('status', 'Active')
             .neq('role', 'owner')
@@ -716,10 +716,10 @@ export default function SuperAdminAnalyticsPage() {
   .page-break { page-break-before: always; }
 
   /* Header */
-  .header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 16px; border-bottom: 3px solid #2D6A4F; margin-bottom: 20px; }
+  .header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 16px; border-bottom: 3px solid var(--brand-green-text); margin-bottom: 20px; }
   .logo { display: flex; align-items: center; gap: 12px; }
-  .logo-icon { width: 44px; height: 44px; border-radius: 10px; background: linear-gradient(135deg, #2D6A4F, #4ADE80); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 18px; font-weight: 800; }
-  .logo-text h1 { font-size: 20px; font-weight: 800; color: #2D6A4F; letter-spacing: -0.5px; }
+  .logo-icon { width: 44px; height: 44px; border-radius: 10px; background: linear-gradient(135deg, var(--brand-green-text), #4ADE80); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 18px; font-weight: 800; }
+  .logo-text h1 { font-size: 20px; font-weight: 800; color: var(--brand-green-text); letter-spacing: -0.5px; }
   .logo-text p { font-size: 11px; color: #6b7280; }
   .header-right { text-align: right; }
   .header-right h2 { font-size: 14px; font-weight: 700; color: #1a2332; margin-bottom: 2px; }
@@ -728,8 +728,8 @@ export default function SuperAdminAnalyticsPage() {
 
   /* Section */
   .section { margin-bottom: 20px; }
-  .section-title { font-size: 13px; font-weight: 700; color: #2D6A4F; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1.5px solid #e5e7eb; display: flex; align-items: center; gap: 8px; }
-  .section-title::before { content: ''; width: 4px; height: 16px; border-radius: 2px; background: #2D6A4F; }
+  .section-title { font-size: 13px; font-weight: 700; color: var(--brand-green-text); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1.5px solid #e5e7eb; display: flex; align-items: center; gap: 8px; }
+  .section-title::before { content: ''; width: 4px; height: 16px; border-radius: 2px; background: var(--brand-green-text); }
 
   /* KPI Grid */
   .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
@@ -803,7 +803,7 @@ export default function SuperAdminAnalyticsPage() {
     <h2>Analytics Report</h2>
     <p>${reportDate}</p>
     <p style="margin-top:4px;">Period: ${chartSubtitle}</p>
-    <span class="badge" style="background:#2D6A4F15; color:#2D6A4F; margin-top:4px;">CONFIDENTIAL</span>
+    <span class="badge" style="background:color-mix(in srgb, var(--brand-green-text) 8%, transparent); color:var(--brand-green-text); margin-top:4px;">CONFIDENTIAL</span>
   </div>
 </div>
 
@@ -813,7 +813,7 @@ export default function SuperAdminAnalyticsPage() {
   <div class="kpi-grid">
     <div class="kpi-card" style="border-left: 3px solid #4ADE80;">
       <div class="kpi-label">Revenue (YTD)</div>
-      <div class="kpi-value" style="color:#2D6A4F;">$${revenueYtd.toLocaleString()}</div>
+      <div class="kpi-value" style="color:var(--brand-green-text);">$${revenueYtd.toLocaleString()}</div>
       <span class="kpi-trend ${revenueTrendUp ? 'up' : 'down'}">${revenueTrend}</span>
       <span class="kpi-sub"> vs last year</span>
     </div>
@@ -846,7 +846,7 @@ export default function SuperAdminAnalyticsPage() {
       <div class="summary-box" style="margin-bottom:12px;">
         <div class="summary-row">
           <span class="summary-label">This Month</span>
-          <span class="summary-val" style="color:#2D6A4F;">$${thisMonthRevenue.toLocaleString()}</span>
+          <span class="summary-val" style="color:var(--brand-green-text);">$${thisMonthRevenue.toLocaleString()}</span>
         </div>
         <div class="summary-row">
           <span class="summary-label">Monthly Target</span>
@@ -1055,7 +1055,7 @@ export default function SuperAdminAnalyticsPage() {
   <div class="section-title">Executive Summary</div>
   <div class="summary-box">
     <div class="summary-row"><span class="summary-label">Report Period</span><span class="summary-val">${chartSubtitle}</span></div>
-    <div class="summary-row"><span class="summary-label">Year-to-Date Revenue</span><span class="summary-val" style="color:#2D6A4F;">$${revenueYtd.toLocaleString()}</span></div>
+    <div class="summary-row"><span class="summary-label">Year-to-Date Revenue</span><span class="summary-val" style="color:var(--brand-green-text);">$${revenueYtd.toLocaleString()}</span></div>
     <div class="summary-row"><span class="summary-label">Monthly Revenue Target</span><span class="summary-val">$${revenueTarget.toLocaleString()}</span></div>
     <div class="summary-row"><span class="summary-label">Target Achievement</span><span class="summary-val" style="color:#16a34a;">${((thisMonthRevenue / revenueTarget) * 100).toFixed(0)}%</span></div>
     <div class="summary-row"><span class="summary-label">Total Appointments</span><span class="summary-val">${totalAppts.toLocaleString()}</span></div>

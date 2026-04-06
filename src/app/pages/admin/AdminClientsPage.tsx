@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import { Search, Plus, Mail, Phone, ChevronDown, CheckCircle2, AlertCircle, AlertTriangle, Trash2, Copy, Send, Check } from 'lucide-react';
-import { supabase } from '../../../lib/supabase';
+import { useTenantDb } from '../../context/TenantContext';
 import { getOrgContext } from '../../hooks/useOrgContext';
 import { AddClientDialog } from '../../components/AddClientDialog';
 import type { AddClientValues } from '../../hooks/useClients';
@@ -79,6 +79,7 @@ const STATUS_OPTIONS: {
 // ─── Page ─────────────────────────────────────────────────────
 
 export default function AdminClientsPage() {
+  const db = useTenantDb();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const { clients: supabaseClients, loading, addClient, deleteClient, refetch } = useClients();
@@ -140,7 +141,7 @@ export default function AdminClientsPage() {
       const supaId = (entry as Client & { _supaId: string })._supaId;
       setStatusOverrides((prev) => ({ ...prev, [supaId]: newStatus }));
       const { organizationId } = await getOrgContext();
-      await supabase.from('clients').update({ health_status: newStatus }).eq('id', supaId).eq('organization_id', organizationId);
+      await db.from('clients').update({ health_status: newStatus }).eq('id', supaId).eq('organization_id', organizationId);
       window.dispatchEvent(new CustomEvent('clientDataChanged'));
     }
   };
@@ -242,7 +243,7 @@ export default function AdminClientsPage() {
                           style={{
                             borderRadius: '9999px',
                             backgroundColor: 'var(--brand-green-bg, #74C69D20)',
-                            color: 'var(--brand-green-text, #2D6A4F)',
+                            color: 'var(--brand-green-text)',
                             fontSize: '14px',
                             fontWeight: 700,
                           }}

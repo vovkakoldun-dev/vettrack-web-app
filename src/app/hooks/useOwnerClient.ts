@@ -14,6 +14,7 @@ export interface OwnerClient {
   city: string | null
   state: string | null
   zip: string | null
+  country: string | null
 }
 
 const EMPTY: OwnerClient = {
@@ -28,6 +29,7 @@ const EMPTY: OwnerClient = {
   city: null,
   state: null,
   zip: null,
+  country: null,
 }
 
 export function useOwnerClient() {
@@ -41,7 +43,7 @@ export function useOwnerClient() {
     try {
       const { data } = await supabase
         .from('clients')
-        .select('id, first_name, last_name, email, phone, address, city, state, zip')
+        .select('id, first_name, last_name, email, phone, address, city, state, zip, country')
         .eq('profile_id', user.id)
         .limit(1)
         .single()
@@ -61,6 +63,7 @@ export function useOwnerClient() {
           city: data.city,
           state: data.state,
           zip: data.zip,
+          country: data.country,
         })
         setClientId(data.id)
       }

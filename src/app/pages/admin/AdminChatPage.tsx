@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { Input } from '../../components/ui/input';
 import { supabase } from '../../../lib/supabase';
+import { useTenantDb } from '../../context/TenantContext';
 import { useAuth } from '../../context/AuthContext';
 
 // ─── Emoji picker data ────────────────────────────────────────────────────────
@@ -87,7 +88,7 @@ const ROLE_LABELS: Record<string, string> = {
   superadmin: 'Super Administrator',
 };
 
-const AVATAR_COLORS: string[] = ['#2D6A4F', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261', '#06B6D4', '#DC2626', '#0891B2', '#7C3AED', '#059669'];
+const AVATAR_COLORS: string[] = ['var(--brand-green-text)', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261', '#06B6D4', '#DC2626', '#0891B2', '#7C3AED', '#059669'];
 
 function getAvatarColor(id: string): string {
   let hash = 0;
@@ -161,6 +162,7 @@ function DateSeparator({ label }: { label: string }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function AdminChatPage() {
+  const db = useTenantDb();
   const { user } = useAuth();
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -225,7 +227,7 @@ export default function AdminChatPage() {
     const timer = setTimeout(async () => {
       const { organizationId } = await getOrgContext();
       const q = searchQuery.trim().toLowerCase();
-      const { data } = await supabase
+      const { data } = await db
         .from('profiles')
         .select('id, first_name, last_name, role, avatar_url')
         .eq('organization_id', organizationId)
@@ -244,13 +246,13 @@ export default function AdminChatPage() {
   async function handleStartConversation(staff: StaffResult) {
     if (!user) return;
     const { organizationId } = await getOrgContext();
-    const { data: conv } = await supabase
+    const { data: conv } = await db
       .from('conversations')
       .insert({ organization_id: organizationId, type: 'direct', created_by: user.id })
       .select('id')
       .single();
     if (!conv) return;
-    await supabase.from('conversation_participants').insert([
+    await db.from('conversation_participants').insert([
       { organization_id: organizationId, conversation_id: conv.id, profile_id: user.id },
       { organization_id: organizationId, conversation_id: conv.id, profile_id: staff.id },
     ]);
@@ -266,7 +268,7 @@ export default function AdminChatPage() {
   async function handleCreateGroup() {
     if (!user || groupSelectedIds.length < 2) return;
     const { organizationId } = await getOrgContext();
-    const { data: conv } = await supabase
+    const { data: conv } = await db
       .from('conversations')
       .insert({
         organization_id: organizationId,
@@ -282,7 +284,7 @@ export default function AdminChatPage() {
       conversation_id: conv.id,
       profile_id: pid,
     }));
-    await supabase.from('conversation_participants').insert(participants);
+    await db.from('conversation_participants').insert(participants);
     setNewGroupOpen(false);
     setGroupName('');
     setGroupSelectedIds([]);
@@ -295,7 +297,7 @@ export default function AdminChatPage() {
   async function openNewGroupDialog() {
     if (!user) return;
     const { organizationId } = await getOrgContext();
-    const { data } = await supabase
+    const { data } = await db
       .from('profiles')
       .select('id, first_name, last_name, role, avatar_url')
       .eq('organization_id', organizationId)
@@ -314,7 +316,7 @@ export default function AdminChatPage() {
     if (!user) return;
     try {
     const { organizationId } = await getOrgContext();
-    const { data: parts } = await supabase
+    const { data: parts } = await db
       .from('conversation_participants')
       .select('conversation_id')
       .eq('organization_id', organizationId)
@@ -325,18 +327,18 @@ export default function AdminChatPage() {
 
     // Batch all queries in parallel instead of sequential per-conversation loop
     const [convMetaRes, allPartsRes, myPartsRes, lastMsgsRes, unreadRes] = await Promise.all([
-      supabase.from('conversations').select('id, type, title').eq('organization_id', organizationId).in('id', convIds),
-      supabase.from('conversation_participants')
-        .select('conversation_id, profile_id, last_read_at, profiles:profiles!conversation_participants_profile_id_fkey(id, first_name, last_name, role, avatar_url)')
+      db.from('conversations').select('id, type, title').eq('organization_id', organizationId).in('id', convIds),
+      db.from('conversation_participants')
+        .select('conversation_id, profile_id, last_read_at, profiles:profiles!conv_participants_profile_org_fkey(id, first_name, last_name, role, avatar_url)')
         .eq('organization_id', organizationId).in('conversation_id', convIds).neq('profile_id', user.id),
-      supabase.from('conversation_participants')
+      db.from('conversation_participants')
         .select('conversation_id, last_read_at')
         .eq('organization_id', organizationId).in('conversation_id', convIds).eq('profile_id', user.id),
-      supabase.from('messages')
+      db.from('messages')
         .select('conversation_id, content, sender_id, created_at')
         .eq('organization_id', organizationId).in('conversation_id', convIds)
         .order('created_at', { ascending: false }).limit(convIds.length * 2),
-      supabase.from('messages')
+      db.from('messages')
         .select('conversation_id, created_at')
         .eq('organization_id', organizationId).in('conversation_id', convIds).neq('sender_id', user.id),
     ]);
@@ -423,7 +425,7 @@ export default function AdminChatPage() {
     if (!user) return;
     const { organizationId } = await getOrgContext();
     setLoadingMsgs(true);
-    const { data } = await supabase
+    const { data } = await db
       .from('messages')
       .select('id, content, sender_id, image_url, file_url, file_name, file_size, created_at')
       .eq('organization_id', organizationId)
@@ -445,7 +447,7 @@ export default function AdminChatPage() {
     // Fetch reactions
     if (data && data.length > 0) {
       const msgIds = data.map((m: { id: string }) => m.id);
-      const { data: rxns } = await supabase
+      const { data: rxns } = await db
         .from('message_reactions')
         .select('message_id, emoji, user_id')
         .in('message_id', msgIds);
@@ -484,9 +486,9 @@ export default function AdminChatPage() {
       return { ...prev, [messageId]: current };
     });
     if (alreadyReacted) {
-      await supabase.from('message_reactions').delete().eq('message_id', messageId).eq('user_id', user.id).eq('emoji', emoji);
+      await db.from('message_reactions').delete().eq('message_id', messageId).eq('user_id', user.id).eq('emoji', emoji);
     } else {
-      await supabase.from('message_reactions').insert({ message_id: messageId, user_id: user.id, emoji });
+      await db.from('message_reactions').insert({ message_id: messageId, user_id: user.id, emoji });
     }
   }
 
@@ -509,7 +511,7 @@ export default function AdminChatPage() {
       const { organizationId } = await getOrgContext();
       const now = new Date().toISOString();
       lastReadAtRef.current = now;
-      await supabase
+      await db
         .from('conversation_participants')
         .update({ last_read_at: now })
         .eq('organization_id', organizationId)
@@ -530,9 +532,9 @@ export default function AdminChatPage() {
   async function handleDeleteConversation(convId: string) {
     if (!user) return;
     const { organizationId } = await getOrgContext();
-    await supabase.from('messages').delete().eq('organization_id', organizationId).eq('conversation_id', convId);
-    await supabase.from('conversation_participants').delete().eq('organization_id', organizationId).eq('conversation_id', convId);
-    await supabase.from('conversations').delete().eq('organization_id', organizationId).eq('id', convId);
+    await db.from('messages').delete().eq('organization_id', organizationId).eq('conversation_id', convId);
+    await db.from('conversation_participants').delete().eq('organization_id', organizationId).eq('conversation_id', convId);
+    await db.from('conversations').delete().eq('organization_id', organizationId).eq('id', convId);
     setConversations(prev => prev.filter(c => c.id !== convId));
     if (selectedId === convId) {
       setSelectedId(null);
@@ -676,7 +678,7 @@ export default function AdminChatPage() {
     // Insert into Supabase
     const { organizationId } = await getOrgContext();
     const msgContent = content || (imageUrl ? '📷 Image' : fileName ? `📎 ${fileName}` : '');
-    const { data } = await supabase
+    const { data } = await db
       .from('messages')
       .insert({
         organization_id: organizationId,
@@ -705,7 +707,7 @@ export default function AdminChatPage() {
     // Update my last_read_at
     const nowStr = now.toISOString();
     lastReadAtRef.current = nowStr;
-    await supabase
+    await db
       .from('conversation_participants')
       .update({ last_read_at: nowStr })
       .eq('organization_id', organizationId)
@@ -735,7 +737,7 @@ export default function AdminChatPage() {
           const now = new Date().toISOString();
           lastReadAtRef.current = now;
           getOrgContext().then(({ organizationId: oid }) =>
-            supabase
+            db
               .from('conversation_participants')
               .update({ last_read_at: now })
               .eq('organization_id', oid)
@@ -904,7 +906,7 @@ export default function AdminChatPage() {
                   onMouseLeave={(e) => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}
                 >
                   {conv.isGroup ? (
-                    <div style={{ width: 40, height: 40, borderRadius: '50%', backgroundColor: '#2D6A4F', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: '50%', backgroundColor: 'var(--brand-green-text)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                       <Users style={{ width: 20, height: 20, color: '#fff' }} />
                     </div>
                   ) : (
@@ -965,7 +967,7 @@ export default function AdminChatPage() {
             <div style={{ height: '64px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--surface-white)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                 {selectedConv.isGroup ? (
-                  <div style={{ width: 40, height: 40, borderRadius: '50%', backgroundColor: '#2D6A4F', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <div style={{ width: 40, height: 40, borderRadius: '50%', backgroundColor: 'var(--brand-green-text)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     <Users style={{ width: 20, height: 20, color: '#fff' }} />
                   </div>
                 ) : (
@@ -1274,7 +1276,7 @@ export default function AdminChatPage() {
                   <div style={{ position: 'absolute', bottom: 'calc(100% + 8px)', right: 0, width: '420px', backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)', borderRadius: '12px', boxShadow: '0 8px 24px rgba(0,0,0,0.14)', zIndex: 40, overflow: 'hidden' }}>
                     <div style={{ display: 'flex', borderBottom: '1px solid var(--border-color)', padding: '8px 8px 0', gap: '2px' }}>
                       {EMOJI_GROUPS.map((g, i) => (
-                        <button key={g.label} onClick={() => setEmojiTab(i)} style={{ flex: 1, padding: '6px 4px', borderRadius: '6px 6px 0 0', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap', backgroundColor: emojiTab === i ? 'var(--surface-elevated)' : 'transparent', color: emojiTab === i ? 'var(--text-primary)' : 'var(--text-secondary)', borderBottom: emojiTab === i ? '2px solid #2D6A4F' : '2px solid transparent', transition: 'all 0.15s' }}>
+                        <button key={g.label} onClick={() => setEmojiTab(i)} style={{ flex: 1, padding: '6px 4px', borderRadius: '6px 6px 0 0', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap', backgroundColor: emojiTab === i ? 'var(--surface-elevated)' : 'transparent', color: emojiTab === i ? 'var(--text-primary)' : 'var(--text-secondary)', borderBottom: emojiTab === i ? '2px solid var(--brand-green-text)' : '2px solid transparent', transition: 'all 0.15s' }}>
                           {g.label}
                         </button>
                       ))}
@@ -1348,7 +1350,7 @@ export default function AdminChatPage() {
                     onMouseEnter={(e) => { if (!selected) e.currentTarget.style.backgroundColor = 'var(--surface-elevated)'; }}
                     onMouseLeave={(e) => { if (!selected) e.currentTarget.style.backgroundColor = 'transparent'; }}
                   >
-                    <div style={{ width: '20px', height: '20px', borderRadius: '4px', border: selected ? 'none' : '2px solid var(--border-color)', backgroundColor: selected ? '#2D6A4F' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <div style={{ width: '20px', height: '20px', borderRadius: '4px', border: selected ? 'none' : '2px solid var(--border-color)', backgroundColor: selected ? 'var(--brand-green-text)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                       {selected && <Check style={{ width: '12px', height: '12px', color: '#fff' }} />}
                     </div>
                     <ChatAvatar name={`${s.first_name} ${s.last_name}`} color={getAvatarColor(s.id)} size={32} photoUrl={s.avatar_url || undefined} />
@@ -1365,7 +1367,7 @@ export default function AdminChatPage() {
               <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{groupSelectedIds.length} selected</span>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button onClick={() => setNewGroupOpen(false)} style={{ padding: '8px 16px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-white)', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: 'var(--text-primary)' }}>Cancel</button>
-                <button onClick={handleCreateGroup} disabled={groupSelectedIds.length < 2} style={{ padding: '8px 16px', borderRadius: '8px', border: 'none', backgroundColor: groupSelectedIds.length < 2 ? 'var(--border-color)' : '#2D6A4F', color: 'var(--on-brand-green)', fontSize: '13px', fontWeight: 600, cursor: groupSelectedIds.length < 2 ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <button onClick={handleCreateGroup} disabled={groupSelectedIds.length < 2} style={{ padding: '8px 16px', borderRadius: '8px', border: 'none', backgroundColor: groupSelectedIds.length < 2 ? 'var(--border-color)' : 'var(--brand-green-text)', color: 'var(--on-brand-green)', fontSize: '13px', fontWeight: 600, cursor: groupSelectedIds.length < 2 ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <Users style={{ width: '14px', height: '14px' }} /> Create Group
                 </button>
               </div>
