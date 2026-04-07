@@ -2512,7 +2512,7 @@ export default function ClientDetailPage() {
 // ─── Shared Helpers for Tab Sub-Components ─────────────────────
 // ═══════════════════════════════════════════════════════════════
 
-function SectionCard({ title, subtitle, icon: Icon, iconColor, action, children }: {
+export function SectionCard({ title, subtitle, icon: Icon, iconColor, action, children }: {
   title: string;
   subtitle?: string;
   icon?: React.ElementType;
@@ -2544,7 +2544,7 @@ function SectionCard({ title, subtitle, icon: Icon, iconColor, action, children 
   );
 }
 
-function StatTile({ label, value, sub, color }: { label: string; value: string | number; sub?: string; color?: string }) {
+export function StatTile({ label, value, sub, color }: { label: string; value: string | number; sub?: string; color?: string }) {
   return (
     <div
       className="p-4 border"
@@ -2561,7 +2561,7 @@ function StatTile({ label, value, sub, color }: { label: string; value: string |
   );
 }
 
-function EmptyState({ icon: Icon, title, description, action }: {
+export function EmptyState({ icon: Icon, title, description, action }: {
   icon: React.ElementType;
   title: string;
   description: string;
@@ -2612,7 +2612,7 @@ const INJECTION_SITES = [
   'Right Shoulder', 'Left Shoulder', 'Intranasal', 'Subcutaneous (Scruff)',
 ];
 
-function InjectionsTab({ petName, petDbId, onChanged }: { petName: string; petDbId: string; onChanged?: () => void }) {
+export function InjectionsTab({ petName, petDbId, onChanged }: { petName: string; petDbId: string; onChanged?: () => void }) {
   const db = useTenantDb();
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -2989,7 +2989,7 @@ const COMMON_REGIONS = [
   'Dental', 'Whole Body',
 ];
 
-function XRayTab({ petName, petDbId }: { petName: string; petDbId: string }) {
+export function XRayTab({ petName, petDbId }: { petName: string; petDbId: string }) {
   const db = useTenantDb();
   const { user } = useAuth();
 
@@ -3733,7 +3733,7 @@ const COMMON_SURGERIES = [
 
 const SURGERY_STATUSES = ['Scheduled', 'In Progress', 'Recovered', 'Complications', 'Deceased'] as const;
 
-function SurgeryTab({ petName, petDbId }: { petName: string; petDbId: string }) {
+export function SurgeryTab({ petName, petDbId }: { petName: string; petDbId: string }) {
   const db = useTenantDb();
   const { user } = useAuth();
 
@@ -4899,7 +4899,7 @@ const planStatusColor = (s: string) => {
   }
 };
 
-function PlanTab({ petName, petDbId }: { petName: string; petDbId: string }) {
+export function PlanTab({ petName, petDbId }: { petName: string; petDbId: string }) {
   const db = useTenantDb();
   const { user } = useAuth();
 
@@ -5652,7 +5652,7 @@ type WeightLogRow = {
   notes: string | null;
 };
 
-function DietTab({
+export function DietTab({
   petName,
   petSpecies: _petSpecies,
   petWeight,
@@ -6513,7 +6513,7 @@ type PetPhotoRow = {
   created_at: string;
 };
 
-function PhotosTab({
+export function PhotosTab({
   petName,
   petImage: _petImage,
   petDbId,

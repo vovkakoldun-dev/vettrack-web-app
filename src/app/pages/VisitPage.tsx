@@ -6,20 +6,31 @@ import {
   Scale, Thermometer, Heart, Activity, AlertCircle,
   Plus, X, Timer, ExternalLink,
   CheckSquare, Phone, Pill, FlaskConical, Bell, Calendar, FileText, Syringe, Shield, Ban,
+  Download, Eye, CheckCircle2, Clock, Save, Loader2, Camera, Scissors, ImageIcon, Utensils, StickyNote, ClipboardCheck,
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Textarea } from '../components/ui/textarea';
+import { Badge } from '../components/ui/badge';
 import { Avatar, AvatarImage, AvatarFallback } from '../components/ui/avatar';
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '../components/ui/select';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs';
 import { MOCK_APPOINTMENTS, LAB_TESTS } from '../data/mockAppointments';
 import type { Appointment as MockAppt } from '../data/mockAppointments';
 import { supabase } from '../../lib/supabase';
 import { useTenantDb } from '../context/TenantContext';
 import { getOrgContext } from '../hooks/useOrgContext';
 import { useAuth } from '../context/AuthContext';
+import {
+  InjectionsTab,
+  XRayTab,
+  SurgeryTab,
+  PlanTab,
+  DietTab,
+  PhotosTab,
+} from './ClientDetailPage';
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -369,7 +380,7 @@ export default function VisitPage() {
 
   if (loadingAppt) {
     return (
-      <div className="max-w-[960px] mx-auto p-8 text-center">
+      <div className="max-w-[960px] mx-auto p-4 sm:p-6 md:p-8 text-center">
         <p className="text-[var(--text-secondary)]" style={{ fontSize: '16px' }}>Loading appointment...</p>
       </div>
     );
@@ -377,7 +388,7 @@ export default function VisitPage() {
 
   if (!appt) {
     return (
-      <div className="max-w-[960px] mx-auto p-8">
+      <div className="max-w-[960px] mx-auto p-4 sm:p-6 md:p-8">
         <div
           className="bg-[var(--surface-white)] border border-[var(--border-color)] p-12 text-center"
           style={{ borderRadius: '12px' }}
@@ -453,15 +464,12 @@ export default function VisitPage() {
   }, {});
 
   return (
-    <div style={{ minHeight: '100%', backgroundColor: 'var(--bg-offwhite)', display: 'flex', flexDirection: 'column' }}>
+    <div className="w-full min-w-0 overflow-x-hidden" style={{ minHeight: '100%', backgroundColor: 'var(--bg-offwhite)', display: 'flex', flexDirection: 'column' }}>
       {/* ─── Header ─────────────────────────────────────── */}
-      <div
-        className="bg-[var(--surface-white)] border-b border-[var(--border-color)] sticky top-0 z-10"
-        style={{ padding: '16px 32px' }}
-      >
-        <div className="max-w-[960px] mx-auto flex flex-wrap items-center gap-3">
+      <div className="bg-[var(--surface-white)] border-b border-[var(--border-color)] sticky top-0 z-10 px-4 sm:px-6 md:px-8 py-3 sm:py-4 min-w-0">
+        <div className="max-w-[960px] mx-auto flex flex-wrap items-center gap-x-3 gap-y-2">
           {/* Left: back + title */}
-          <div className="flex items-center gap-3 min-w-0">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <button
               onClick={() => navigate('/appointments')}
               className="p-2 hover:bg-[var(--surface-elevated)] transition-colors flex-shrink-0"
@@ -470,13 +478,13 @@ export default function VisitPage() {
               <ArrowLeft className="w-4 h-4 text-[var(--text-secondary)]" />
             </button>
             <ClipboardList className="w-5 h-5 text-[var(--brand-green-text)] flex-shrink-0" />
-            <span className="text-[var(--text-primary)]" style={{ fontSize: '18px', fontWeight: 700 }}>
+            <span className="text-[var(--text-primary)] truncate" style={{ fontSize: '18px', fontWeight: 700 }}>
               Visit Notes
             </span>
           </div>
 
-          {/* Center: step breadcrumb */}
-          <div className="flex items-center gap-2 flex-shrink-0">
+          {/* Center: step breadcrumb — hidden on small screens */}
+          <div className="hidden lg:flex items-center gap-2 flex-shrink-0">
             <div
               className="flex items-center gap-2 px-3 py-1.5"
               style={{ borderRadius: '8px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 9%, transparent)' }}
@@ -486,7 +494,7 @@ export default function VisitPage() {
                   width: 20, height: 20, borderRadius: '50%',
                   backgroundColor: 'var(--brand-green-text)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: '11px', fontWeight: 700, color: '#fff',
+                  fontSize: '11px', fontWeight: 700, color: 'var(--on-brand-green)',
                   flexShrink: 0,
                 }}
               >1</div>
@@ -550,21 +558,21 @@ export default function VisitPage() {
       </div>
 
       {/* ─── Body ────────────────────────────────────────── */}
-      <div className="max-w-[960px] mx-auto p-8 space-y-6">
+      <div className="w-full max-w-[960px] mx-auto p-4 sm:p-6 md:p-8 space-y-6 min-w-0">
 
         {/* ── Patient Info Card ── */}
         <div
           className="bg-[var(--surface-white)] border border-[var(--border-color)]"
           style={{ borderRadius: '12px', borderLeft: '4px solid var(--brand-green-text)', overflow: 'hidden' }}
         >
-          <div className="p-5 flex items-center gap-5">
-            <Avatar className="w-16 h-16 flex-shrink-0">
+          <div className="p-4 sm:p-5 flex flex-wrap items-center gap-4 sm:gap-5">
+            <Avatar className="w-14 h-14 sm:w-16 sm:h-16 flex-shrink-0">
               <AvatarImage src={appt.petImage} alt={appt.petName} className="object-cover" />
               <AvatarFallback style={{ fontSize: '20px', fontWeight: 700 }}>{appt.petName.slice(0, 2)}</AvatarFallback>
             </Avatar>
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <p className="text-[var(--text-primary)]" style={{ fontSize: '22px', fontWeight: 700 }}>{appt.petName}</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-[var(--text-primary)] truncate" style={{ fontSize: '22px', fontWeight: 700 }}>{appt.petName}</p>
                 {appt.clientId && (
                   <Link
                     to={`/clients/${appt.clientId}`}
@@ -589,7 +597,7 @@ export default function VisitPage() {
                 {appt.species} · Owner: {appt.ownerName}
               </p>
             </div>
-            <div className="flex flex-col items-end gap-2 flex-shrink-0">
+            <div className="flex flex-row md:flex-col items-start md:items-end gap-2 flex-shrink-0 basis-full md:basis-auto flex-wrap">
               <span
                 className="inline-block px-3 py-1"
                 style={{
@@ -619,6 +627,30 @@ export default function VisitPage() {
             </div>
           </div>
         </div>
+
+        {/* ═════════════════════════════════════════════════════════
+            TABS — General holds all visit-specific form fields,
+            other tabs render the pet-profile components directly
+            so data flows into the same Supabase tables.
+            ═════════════════════════════════════════════════════════ */}
+        <Tabs defaultValue="general" className="min-w-0 w-full">
+          <div className="w-full max-w-full overflow-x-auto min-w-0" style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
+            <TabsList className="w-auto inline-flex">
+              <TabsTrigger value="general"><ClipboardList className="w-3.5 h-3.5" />General</TabsTrigger>
+              <TabsTrigger value="injections"><Syringe className="w-3.5 h-3.5" />Injections</TabsTrigger>
+              <TabsTrigger value="xray"><ImageIcon className="w-3.5 h-3.5" />X-Ray</TabsTrigger>
+              <TabsTrigger value="surgery"><Scissors className="w-3.5 h-3.5" />Surgery</TabsTrigger>
+              <TabsTrigger value="plan"><ClipboardCheck className="w-3.5 h-3.5" />Plan</TabsTrigger>
+              <TabsTrigger value="diet"><Utensils className="w-3.5 h-3.5" />Diet</TabsTrigger>
+              <TabsTrigger value="lab"><FlaskConical className="w-3.5 h-3.5" />Lab</TabsTrigger>
+              <TabsTrigger value="notes"><StickyNote className="w-3.5 h-3.5" />Notes</TabsTrigger>
+              <TabsTrigger value="photos"><Camera className="w-3.5 h-3.5" />Photos</TabsTrigger>
+              <TabsTrigger value="tasks"><CheckSquare className="w-3.5 h-3.5" />Front Desk Tasks</TabsTrigger>
+            </TabsList>
+          </div>
+
+          {/* ═══════════════ GENERAL TAB ═══════════════ */}
+          <TabsContent value="general" className="space-y-6 mt-4">
 
         {/* ── Section 1: Chief Complaint ── */}
         <SectionCard icon={<ClipboardList className="w-4 h-4" />} title="Chief Complaint">
@@ -837,7 +869,7 @@ export default function VisitPage() {
                       flexShrink: 0,
                     }}
                   >
-                    {wnl && <span style={{ color: '#fff', fontSize: '10px', lineHeight: 1, fontWeight: 700 }}>✓</span>}
+                    {wnl && <span style={{ color: 'var(--on-brand-green)', fontSize: '10px', lineHeight: 1, fontWeight: 700 }}>✓</span>}
                   </div>
                   <span
                     style={{
@@ -970,7 +1002,7 @@ export default function VisitPage() {
                           fontWeight: active ? 600 : 400,
                           border: `1.5px solid ${active ? 'var(--brand-green-text)' : 'var(--border-color)'}`,
                           backgroundColor: active ? 'var(--brand-green-text)' : 'transparent',
-                          color: active ? '#fff' : 'var(--text-secondary)',
+                          color: active ? 'var(--on-brand-green)' : 'var(--text-secondary)',
                           cursor: 'pointer',
                         }}
                       >
@@ -1161,6 +1193,80 @@ export default function VisitPage() {
           />
         </SectionCard>
 
+          </TabsContent>
+          {/* ═══════════════ END GENERAL TAB ═══════════════ */}
+
+          {/* ═══════════════ INJECTIONS TAB ═══════════════ */}
+          <TabsContent value="injections" className="mt-4">
+            {apptIds.petId ? (
+              <InjectionsTab petName={appt.petName} petDbId={apptIds.petId} />
+            ) : (
+              <MissingPetNotice />
+            )}
+          </TabsContent>
+
+          {/* ═══════════════ X-RAY TAB ═══════════════ */}
+          <TabsContent value="xray" className="mt-4">
+            {apptIds.petId ? (
+              <XRayTab petName={appt.petName} petDbId={apptIds.petId} />
+            ) : (
+              <MissingPetNotice />
+            )}
+          </TabsContent>
+
+          {/* ═══════════════ SURGERY TAB ═══════════════ */}
+          <TabsContent value="surgery" className="mt-4">
+            {apptIds.petId ? (
+              <SurgeryTab petName={appt.petName} petDbId={apptIds.petId} />
+            ) : (
+              <MissingPetNotice />
+            )}
+          </TabsContent>
+
+          {/* ═══════════════ PLAN TAB ═══════════════ */}
+          <TabsContent value="plan" className="mt-4">
+            {apptIds.petId ? (
+              <PlanTab petName={appt.petName} petDbId={apptIds.petId} />
+            ) : (
+              <MissingPetNotice />
+            )}
+          </TabsContent>
+
+          {/* ═══════════════ DIET TAB ═══════════════ */}
+          <TabsContent value="diet" className="mt-4">
+            {apptIds.petId ? (
+              <DietTab
+                petName={appt.petName}
+                petSpecies={appt.species || ''}
+                petWeight={weight || ''}
+                petDbId={apptIds.petId}
+              />
+            ) : (
+              <MissingPetNotice />
+            )}
+          </TabsContent>
+
+          {/* ═══════════════ LAB TAB ═══════════════ */}
+          <TabsContent value="lab" className="mt-4">
+            <VisitLabTab petDbId={apptIds.petId || ''} />
+          </TabsContent>
+
+          {/* ═══════════════ NOTES TAB ═══════════════ */}
+          <TabsContent value="notes" className="mt-4">
+            <VisitNotesTab petDbId={apptIds.petId || ''} />
+          </TabsContent>
+
+          {/* ═══════════════ PHOTOS TAB ═══════════════ */}
+          <TabsContent value="photos" className="mt-4">
+            {apptIds.petId ? (
+              <PhotosTab petName={appt.petName} petImage={appt.petImage || ''} petDbId={apptIds.petId} />
+            ) : (
+              <MissingPetNotice />
+            )}
+          </TabsContent>
+
+          {/* ═══════════════ FRONT DESK TASKS TAB ═══════════════ */}
+          <TabsContent value="tasks" className="mt-4">
         {/* ── Section 9: Front Desk Tasks ── */}
         <SectionCard icon={<CheckSquare className="w-4 h-4" />} title="Front Desk Tasks">
           <div className="flex items-center justify-between mb-4">
@@ -1324,16 +1430,20 @@ export default function VisitPage() {
             </div>
           )}
         </SectionCard>
+          </TabsContent>
+          {/* ═══════════════ END FRONT DESK TASKS TAB ═══════════════ */}
+
+        </Tabs>
 
       </div>
 
       {/* ─── Sticky Footer ────────────────────────────────── */}
       <div
-        className="sticky bottom-0 bg-[var(--surface-white)] border-t border-[var(--border-color)] mt-auto"
-        style={{ padding: '14px 32px', zIndex: 20 }}
+        className="sticky bottom-0 bg-[var(--surface-white)] border-t border-[var(--border-color)] mt-auto px-4 sm:px-6 md:px-8 py-3 sm:py-3.5"
+        style={{ zIndex: 20 }}
       >
-        <div className="max-w-[960px] mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-2">
+        <div className="max-w-[960px] mx-auto flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" onClick={() => navigate('/appointments')}>
               <ArrowLeft className="w-4 h-4 mr-2" />
               Back to Appointments
@@ -1742,6 +1852,352 @@ export default function VisitPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+// Missing Pet Notice — shown when appointment hasn't loaded yet
+// or the appointment isn't linked to a real pet record.
+// ══════════════════════════════════════════════════════════════
+function MissingPetNotice() {
+  return (
+    <div
+      className="bg-[var(--surface-white)] border border-[var(--border-color)] p-8 text-center"
+      style={{ borderRadius: '12px' }}
+    >
+      <AlertCircle className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--text-secondary)', opacity: 0.4 }} />
+      <p className="text-[var(--text-primary)]" style={{ fontSize: '16px', fontWeight: 600 }}>
+        Pet profile not linked
+      </p>
+      <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: '13px' }}>
+        This section needs a real pet record. If the appointment is still loading, please wait a moment.
+      </p>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+// VisitLabTab — list of uploaded lab files for this pet.
+// Uses the same `lab_results` table as ClientDetailPage's Lab tab
+// (filtered by pet_id + org). Read-only view — full upload UI
+// lives in the dedicated /lab page.
+// ══════════════════════════════════════════════════════════════
+function VisitLabTab({ petDbId }: { petDbId: string }) {
+  const db = useTenantDb();
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
+  const [files, setFiles] = useState<any[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!petDbId) { setFiles([]); setLoading(false); return; }
+      setLoading(true);
+      try {
+        const { organizationId } = await getOrgContext();
+        const { data } = await db
+          .from('lab_results')
+          .select(`
+            id, file_name, file_url, file_type, test_panel, test_name, notes,
+            review_status, reviewed_at, created_at, result_value, flag,
+            uploader:profiles!lab_results_uploaded_by_org_fkey(first_name, last_name),
+            reviewer:profiles!lab_results_reviewed_by_org_fkey(first_name, last_name)
+          `)
+          .eq('pet_id', petDbId)
+          .eq('organization_id', organizationId)
+          .not('file_url', 'is', null)
+          .order('created_at', { ascending: false });
+        if (!cancelled) setFiles(data || []);
+      } catch (e) {
+        console.error('Failed to load lab results:', e);
+        if (!cancelled) setFiles([]);
+      }
+      if (!cancelled) setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [db, petDbId]);
+
+  if (!petDbId) return <MissingPetNotice />;
+
+  return (
+    <div className="border border-[var(--border-color)] p-6" style={{ borderRadius: '12px', backgroundColor: 'var(--surface-white)' }}>
+      <div className="flex items-center justify-between mb-5">
+        <div>
+          <h3 className="text-[var(--text-primary)]" style={{ fontSize: 16, fontWeight: 600 }}>Lab Results</h3>
+          <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: 14 }}>
+            Uploaded lab files and diagnostic results for this pet
+          </p>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => navigate('/lab')}>
+          <FlaskConical className="w-3.5 h-3.5" /> Go to Lab
+        </Button>
+      </div>
+
+      {loading ? (
+        <div className="text-center py-10">
+          <Loader2 className="w-8 h-8 mx-auto mb-3 animate-spin" style={{ color: 'var(--text-secondary)', opacity: 0.4 }} />
+          <p className="text-[var(--text-secondary)]" style={{ fontSize: 14 }}>Loading lab results…</p>
+        </div>
+      ) : files.length === 0 ? (
+        <div className="text-center py-10">
+          <FlaskConical className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--text-secondary)', opacity: 0.4 }} />
+          <p className="text-[var(--text-secondary)]" style={{ fontSize: 14 }}>No lab results yet.</p>
+          <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: 13 }}>
+            Select lab samples in the General tab to queue tests — uploaded results appear here.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {files.map((f: any) => {
+            const isReviewed = f.review_status === 'reviewed';
+            const uploaderName = f.uploader ? `${f.uploader.first_name} ${f.uploader.last_name}`.trim() : '—';
+            const reviewerName = f.reviewer ? `Dr. ${f.reviewer.first_name} ${f.reviewer.last_name}`.trim() : '';
+            const isPdf = f.file_type === 'application/pdf';
+            const isImage = f.file_type?.startsWith('image/');
+            const uploadDate = f.created_at ? new Date(f.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+            const displayName = f.file_name || 'Unnamed file';
+            return (
+              <div key={f.id} className="border border-[var(--border-color)] flex items-center justify-between px-5 py-3.5" style={{ borderRadius: '10px' }}>
+                <div className="flex items-center gap-3 min-w-0">
+                  <div
+                    className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+                    style={{ backgroundColor: isPdf ? '#EF444415' : isImage ? '#3B82F615' : '#6B728015' }}
+                  >
+                    {isPdf ? <FileText className="w-4 h-4" style={{ color: '#EF4444' }} />
+                      : isImage ? <Eye className="w-4 h-4" style={{ color: '#3B82F6' }} />
+                      : <FileText className="w-4 h-4" style={{ color: '#6B7280' }} />}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[var(--text-primary)] truncate" style={{ fontSize: 14, fontWeight: 600 }}>{displayName}</p>
+                    <p className="text-[var(--text-secondary)]" style={{ fontSize: 12 }}>
+                      {f.test_panel && f.test_panel !== 'General' ? `${f.test_panel} · ` : ''}{uploadDate} · by {uploaderName}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <span
+                    className="inline-flex items-center gap-1 px-2 py-0.5"
+                    style={{
+                      backgroundColor: isReviewed ? 'rgba(22, 163, 74, 0.08)' : 'rgba(245, 158, 11, 0.08)',
+                      color: isReviewed ? '#16A34A' : '#D97706',
+                      borderRadius: 9999, fontSize: 11, fontWeight: 700,
+                      border: `1px solid ${isReviewed ? 'rgba(22, 163, 74, 0.2)' : 'rgba(245, 158, 11, 0.2)'}`,
+                    }}
+                  >
+                    {isReviewed ? <CheckCircle2 className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
+                    {isReviewed ? 'Reviewed' : 'Awaiting Review'}
+                  </span>
+                  {isReviewed && reviewerName && (
+                    <span className="text-[var(--text-secondary)]" style={{ fontSize: 11 }}>
+                      {reviewerName}
+                    </span>
+                  )}
+                  {f.file_url && (
+                    <a
+                      href={f.file_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      style={{
+                        width: 32, height: 32, borderRadius: 8,
+                        border: '1px solid var(--border-color)',
+                        backgroundColor: 'transparent', display: 'flex',
+                        alignItems: 'center', justifyContent: 'center',
+                        color: 'var(--text-secondary)', textDecoration: 'none',
+                      }}
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                    </a>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+// VisitNotesTab — same vet/client note structure as the pet
+// profile Notes tab. Writes to the `pet_notes` table so both
+// places stay in sync.
+// ══════════════════════════════════════════════════════════════
+type PetNoteRow = {
+  id: string;
+  type: string;
+  content: string;
+  created_at: string;
+  author: { first_name: string; last_name: string } | null;
+};
+
+function VisitNotesTab({ petDbId }: { petDbId: string }) {
+  const db = useTenantDb();
+  const { user } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [notes, setNotes] = useState<PetNoteRow[]>([]);
+  const [newVetNote, setNewVetNote] = useState('');
+  const [newClientNote, setNewClientNote] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const loadNotes = useCallback(async () => {
+    if (!petDbId) { setNotes([]); setLoading(false); return; }
+    setLoading(true);
+    try {
+      const { organizationId } = await getOrgContext();
+      const { data } = await db
+        .from('pet_notes')
+        .select('id, type, content, created_at, author:profiles!pet_notes_author_id_org_fkey(first_name, last_name)')
+        .eq('pet_id', petDbId)
+        .eq('organization_id', organizationId)
+        .order('created_at', { ascending: false });
+      setNotes((data || []) as unknown as PetNoteRow[]);
+    } catch (e) {
+      console.error('Failed to load notes:', e);
+      setNotes([]);
+    }
+    setLoading(false);
+  }, [db, petDbId]);
+
+  useEffect(() => { loadNotes(); }, [loadNotes]);
+
+  const handleSave = async (type: 'vet' | 'client') => {
+    const content = (type === 'vet' ? newVetNote : newClientNote).trim();
+    if (!content || !user || !petDbId) return;
+    setSaving(true);
+    try {
+      const { organizationId } = await getOrgContext();
+      await db.from('pet_notes').insert({
+        pet_id: petDbId,
+        organization_id: organizationId,
+        author_id: user.id,
+        type,
+        content,
+      });
+      if (type === 'vet') setNewVetNote(''); else setNewClientNote('');
+      await loadNotes();
+    } catch (e) {
+      console.error('Failed to save note:', e);
+    }
+    setSaving(false);
+  };
+
+  if (!petDbId) return <MissingPetNotice />;
+
+  const vetNotes = notes.filter(n => n.type === 'vet');
+  const clientNotes = notes.filter(n => n.type === 'client');
+
+  return (
+    <div className="space-y-6">
+      {/* Vet Notes (Private) */}
+      <div className="border border-[var(--border-color)] p-6" style={{ borderRadius: '12px', backgroundColor: 'var(--surface-white)' }}>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-[var(--text-primary)]" style={{ fontSize: 16, fontWeight: 600 }}>Vet Notes</h3>
+            <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: 14 }}>
+              Private — only visible to clinic staff
+            </p>
+          </div>
+          <Badge variant="outline" className="border-[#F4A261] text-[#F4A261]">Private</Badge>
+        </div>
+        <Textarea
+          value={newVetNote}
+          onChange={(e) => setNewVetNote(e.target.value)}
+          className="min-h-24 bg-[var(--surface-white)]"
+          placeholder="Add internal notes about this patient..."
+        />
+        <div className="flex justify-end mt-3">
+          <Button size="sm" disabled={!newVetNote.trim() || saving} onClick={() => handleSave('vet')}>
+            <Save className="w-4 h-4" /> {saving ? 'Saving...' : 'Save Note'}
+          </Button>
+        </div>
+
+        {!loading && vetNotes.length > 0 && (
+          <div className="mt-5 pt-5 border-t border-[var(--border-color)]">
+            <p className="text-[var(--text-secondary)] mb-3" style={{ fontSize: '13px', fontWeight: 600 }}>Note History</p>
+            <div className="space-y-3">
+              {vetNotes.map((note) => (
+                <div key={note.id} className="border border-[var(--border-color)] p-4" style={{ borderRadius: '10px', backgroundColor: 'var(--surface-elevated)' }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <div style={{ width: 28, height: 28, borderRadius: '50%', backgroundColor: '#F4A26120', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: '#F4A261' }}>
+                          {note.author?.first_name?.[0] || '?'}{note.author?.last_name?.[0] || ''}
+                        </span>
+                      </div>
+                      <div>
+                        <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+                          Dr. {note.author?.first_name || ''} {note.author?.last_name || ''}
+                        </p>
+                      </div>
+                    </div>
+                    <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                      {new Date(note.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} at {new Date(note.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                    </span>
+                  </div>
+                  <p style={{ fontSize: 14, color: 'var(--text-primary)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{note.content}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Client Notes (Visible) */}
+      <div className="border border-[var(--border-color)] p-6" style={{ borderRadius: '12px', backgroundColor: 'var(--surface-white)' }}>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-[var(--text-primary)]" style={{ fontSize: 16, fontWeight: 600 }}>Client Notes</h3>
+            <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: 14 }}>
+              Visible to pet owner on their portal
+            </p>
+          </div>
+          <Badge variant="outline" className="border-[var(--brand-green-text)] text-[var(--brand-green-text)]">Visible to Client</Badge>
+        </div>
+        <Textarea
+          value={newClientNote}
+          onChange={(e) => setNewClientNote(e.target.value)}
+          className="min-h-24 bg-[var(--surface-white)]"
+          placeholder="Add notes for the pet owner..."
+        />
+        <div className="flex justify-end mt-3">
+          <Button size="sm" disabled={!newClientNote.trim() || saving} onClick={() => handleSave('client')}>
+            <Save className="w-4 h-4" /> {saving ? 'Saving...' : 'Save Note'}
+          </Button>
+        </div>
+
+        {!loading && clientNotes.length > 0 && (
+          <div className="mt-5 pt-5 border-t border-[var(--border-color)]">
+            <p className="text-[var(--text-secondary)] mb-3" style={{ fontSize: '13px', fontWeight: 600 }}>Note History</p>
+            <div className="space-y-3">
+              {clientNotes.map((note) => (
+                <div key={note.id} className="border border-[var(--border-color)] p-4" style={{ borderRadius: '10px', backgroundColor: 'var(--surface-elevated)' }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <div style={{ width: 28, height: 28, borderRadius: '50%', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand-green-text)' }}>
+                          {note.author?.first_name?.[0] || '?'}{note.author?.last_name?.[0] || ''}
+                        </span>
+                      </div>
+                      <div>
+                        <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+                          Dr. {note.author?.first_name || ''} {note.author?.last_name || ''}
+                        </p>
+                      </div>
+                    </div>
+                    <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                      {new Date(note.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} at {new Date(note.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                    </span>
+                  </div>
+                  <p style={{ fontSize: 14, color: 'var(--text-primary)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{note.content}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

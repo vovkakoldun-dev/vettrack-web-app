@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { Search, Plus, Mail, Phone, ChevronDown, CheckCircle2, AlertCircle, AlertTriangle, Loader2, Users, Trash2, Filter, X, ArrowUpDown, Copy } from 'lucide-react';
 import { AddClientDialog } from '../components/AddClientDialog';
-import { useClients, deletePetCascade } from '../hooks/useClients';
+import { useClients, deletePetCascade, deleteClientsBulk, deletePetsBulk } from '../hooks/useClients';
 import { useTenantDb } from '../context/TenantContext';
 import { getOrgContext } from '../hooks/useOrgContext';
 import type { AddClientValues } from '../hooks/useClients';
@@ -57,7 +57,17 @@ export default function ClientsPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [addClientOpen, setAddClientOpen] = useState(false);
-  const { clients, loading, addClient, deleteClient, refetch } = useClients();
+  const {
+    clients,
+    loading,
+    loadingMore,
+    hasMore,
+    totalCount,
+    addClient,
+    deleteClient,
+    refetch,
+    loadMore,
+  } = useClients({ pageSize: 30 });
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -70,6 +80,7 @@ export default function ClientsPage() {
   const [filterStatus, setFilterStatus] = useState<string>('All');
   const [filterVet, setFilterVet] = useState<string>('All');
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest' | 'name-az' | 'name-za'>('newest');
+  const [totalPetCount, setTotalPetCount] = useState<number | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -80,6 +91,47 @@ export default function ClientsPage() {
       } catch {}
     })();
   }, []);
+
+  // ── Total pet count for the header (independent of pagination) ──
+  useEffect(() => {
+    let cancelled = false;
+    const fetchPetCount = async () => {
+      try {
+        const { organizationId } = await getOrgContext();
+        const { count } = await db
+          .from('pets')
+          .select('id', { count: 'exact', head: true })
+          .eq('organization_id', organizationId);
+        if (!cancelled && typeof count === 'number') setTotalPetCount(count);
+      } catch {}
+    };
+    fetchPetCount();
+    const handler = () => fetchPetCount();
+    window.addEventListener('clientDataChanged', handler);
+    window.addEventListener('petDataChanged', handler);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('clientDataChanged', handler);
+      window.removeEventListener('petDataChanged', handler);
+    };
+  }, [db]);
+
+  // ── Infinite scroll: fire loadMore when sentinel scrolls into view ──
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          loadMore();
+        }
+      },
+      { rootMargin: '400px 0px' } // start loading 400px before user reaches the bottom
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [loadMore, hasMore, loading]);
 
   const handleAddClient = async (values: AddClientValues): Promise<string | void> => {
     const { data, error } = await addClient(values);
@@ -105,20 +157,45 @@ export default function ClientsPage() {
   const handleBulkDelete = async () => {
     if (selectedIds.size === 0) return;
     setBulkDeleting(true);
+
+    // Split selection into:
+    //   - clientIdsToDelete: full client + all its pets
+    //   - petIdsToDelete: just one pet (when client has multiple pets)
+    const clientIdsToDelete: string[] = [];
+    const petIdsToDelete: string[] = [];
     for (const rowKey of selectedIds) {
       const row = filtered.find(c => c.rowKey === rowKey);
       if (!row) continue;
       if (row.petCount <= 1 || !row.petId) {
-        await deleteClient(row.id);
+        clientIdsToDelete.push(row.id);
       } else {
-        await deletePetCascade(row.petId);
+        petIdsToDelete.push(row.petId);
       }
     }
-    refetch();
+
+    const errors: string[] = [];
+    try {
+      // Two RPC calls — each runs in a single transaction on the server
+      if (clientIdsToDelete.length > 0) {
+        await deleteClientsBulk(clientIdsToDelete);
+      }
+      if (petIdsToDelete.length > 0) {
+        await deletePetsBulk(petIdsToDelete);
+      }
+    } catch (e: any) {
+      errors.push(e?.message || 'Unknown error');
+    }
+
+    await refetch();
+    window.dispatchEvent(new CustomEvent('clientDataChanged'));
     setSelectedIds(new Set());
     setSelectMode(false);
     setBulkDeleting(false);
     setShowBulkDeleteConfirm(false);
+    if (errors.length > 0) {
+      console.error('[handleBulkDelete] errors:', errors);
+      alert(`Delete failed:\n\n${errors.join('\n')}`);
+    }
   };
 
   // Map Supabase rows to display shape — one row per pet
@@ -208,104 +285,175 @@ export default function ClientsPage() {
         </Button>
       </div>
 
-      {/* Search + Filters */}
-      <div className="mb-6 flex items-center gap-3 flex-wrap">
-        <div className="relative" style={{ minWidth: '280px' }}>
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-secondary)]" />
-          <Input
+      {/* Search + Filters + Sort — unified toolbar */}
+      <div
+        className="mb-6 flex items-center bg-[var(--surface-elevated)] border border-[var(--border-color)]"
+        style={{
+          borderRadius: '10px',
+          padding: '6px',
+          gap: '4px',
+        }}
+      >
+        {/* Search input — borderless, blends into the panel */}
+        <div className="relative flex-1 min-w-0" style={{ minWidth: '240px' }}>
+          <Search
+            className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-secondary)] pointer-events-none"
+          />
+          <input
+            type="text"
             placeholder="Search by pet, owner, or breed..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-9"
+            className="w-full bg-transparent border-0 outline-none focus:outline-none focus:ring-0"
+            style={{
+              height: '32px',
+              paddingLeft: '34px',
+              paddingRight: '12px',
+              fontSize: '13px',
+              color: 'var(--text-primary)',
+            }}
           />
         </div>
 
-        <div className="flex items-center gap-1 p-1 bg-[var(--surface-elevated)]" style={{ borderRadius: '8px' }}>
-          <Filter className="w-3.5 h-3.5 text-[var(--text-secondary)] ml-2" />
-          {/* Species Filter */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button className="flex items-center gap-1 px-3 py-1.5 transition-colors" style={{
-                borderRadius: '6px', fontSize: '13px', fontWeight: filterSpecies !== 'All' ? 600 : 400,
-                backgroundColor: filterSpecies !== 'All' ? 'var(--surface-white)' : 'transparent',
+        {/* Vertical separator */}
+        <div style={{ width: '1px', height: '24px', backgroundColor: 'var(--border-color)' }} />
+
+        {/* Filter icon */}
+        <Filter
+          className="w-3.5 h-3.5 text-[var(--text-secondary)]"
+          style={{ marginLeft: '6px', marginRight: '2px', flexShrink: 0 }}
+        />
+
+        {/* Species Filter */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              className="flex items-center gap-1 px-2.5 py-1.5 transition-colors hover:bg-[var(--surface-elevated)]"
+              style={{
+                borderRadius: '6px',
+                fontSize: '13px',
+                fontWeight: filterSpecies !== 'All' ? 600 : 500,
+                backgroundColor: filterSpecies !== 'All' ? 'var(--surface-elevated)' : 'transparent',
                 color: filterSpecies !== 'All' ? 'var(--text-primary)' : 'var(--text-secondary)',
-                boxShadow: filterSpecies !== 'All' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
-              }}>
-                {filterSpecies === 'All' ? 'Species' : filterSpecies}
-                <ChevronDown className="w-3 h-3" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              <DropdownMenuItem onClick={() => setFilterSpecies('All')}>All Species</DropdownMenuItem>
-              <DropdownMenuSeparator />
-              {speciesOptions.map(s => (
-                <DropdownMenuItem key={s} onClick={() => setFilterSpecies(s)}>{s}</DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+                border: 'none',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {filterSpecies === 'All' ? 'Species' : filterSpecies}
+              <ChevronDown className="w-3 h-3 opacity-60" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem onClick={() => setFilterSpecies('All')}>All Species</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            {speciesOptions.map(s => (
+              <DropdownMenuItem key={s} onClick={() => setFilterSpecies(s)}>{s}</DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
-          {/* Status Filter */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button className="flex items-center gap-1 px-3 py-1.5 transition-colors" style={{
-                borderRadius: '6px', fontSize: '13px', fontWeight: filterStatus !== 'All' ? 600 : 400,
-                backgroundColor: filterStatus !== 'All' ? 'var(--surface-white)' : 'transparent',
+        {/* Status Filter */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              className="flex items-center gap-1 px-2.5 py-1.5 transition-colors hover:bg-[var(--surface-elevated)]"
+              style={{
+                borderRadius: '6px',
+                fontSize: '13px',
+                fontWeight: filterStatus !== 'All' ? 600 : 500,
+                backgroundColor: filterStatus !== 'All' ? 'var(--surface-elevated)' : 'transparent',
                 color: filterStatus !== 'All' ? 'var(--text-primary)' : 'var(--text-secondary)',
-                boxShadow: filterStatus !== 'All' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
-              }}>
-                {filterStatus === 'All' ? 'Status' : filterStatus}
-                <ChevronDown className="w-3 h-3" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              <DropdownMenuItem onClick={() => setFilterStatus('All')}>All Statuses</DropdownMenuItem>
-              <DropdownMenuSeparator />
-              {STATUS_OPTIONS.map(s => {
-                const Icon = s.icon;
-                return (
-                  <DropdownMenuItem key={s.value} onClick={() => setFilterStatus(s.value)}>
-                    <Icon className="w-3.5 h-3.5 mr-2" style={{ color: s.text }} />
-                    {s.value}
-                  </DropdownMenuItem>
-                );
-              })}
-            </DropdownMenuContent>
-          </DropdownMenu>
+                border: 'none',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {filterStatus === 'All' ? 'Status' : filterStatus}
+              <ChevronDown className="w-3 h-3 opacity-60" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem onClick={() => setFilterStatus('All')}>All Statuses</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            {STATUS_OPTIONS.map(s => {
+              const Icon = s.icon;
+              return (
+                <DropdownMenuItem key={s.value} onClick={() => setFilterStatus(s.value)}>
+                  <Icon className="w-3.5 h-3.5 mr-2" style={{ color: s.text }} />
+                  {s.value}
+                </DropdownMenuItem>
+              );
+            })}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
-          {/* Vet Filter */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button className="flex items-center gap-1 px-3 py-1.5 transition-colors" style={{
-                borderRadius: '6px', fontSize: '13px', fontWeight: filterVet !== 'All' ? 600 : 400,
-                backgroundColor: filterVet !== 'All' ? 'var(--surface-white)' : 'transparent',
+        {/* Vet Filter */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              className="flex items-center gap-1 px-2.5 py-1.5 transition-colors hover:bg-[var(--surface-elevated)]"
+              style={{
+                borderRadius: '6px',
+                fontSize: '13px',
+                fontWeight: filterVet !== 'All' ? 600 : 500,
+                backgroundColor: filterVet !== 'All' ? 'var(--surface-elevated)' : 'transparent',
                 color: filterVet !== 'All' ? 'var(--text-primary)' : 'var(--text-secondary)',
-                boxShadow: filterVet !== 'All' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
-              }}>
-                {filterVet === 'All' ? 'Doctor' : filterVet}
-                <ChevronDown className="w-3 h-3" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              <DropdownMenuItem onClick={() => setFilterVet('All')}>All Doctors</DropdownMenuItem>
-              <DropdownMenuSeparator />
-              {vets.map(v => (
-                <DropdownMenuItem key={v.id} onClick={() => setFilterVet(v.name)}>{v.name}</DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+                border: 'none',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {filterVet === 'All' ? 'Doctor' : filterVet}
+              <ChevronDown className="w-3 h-3 opacity-60" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem onClick={() => setFilterVet('All')}>All Doctors</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            {vets.map(v => (
+              <DropdownMenuItem key={v.id} onClick={() => setFilterVet(v.name)}>{v.name}</DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        {/* Clear filters chip — only when something is filtered */}
+        {hasActiveFilters && (
+          <button
+            onClick={() => { setFilterSpecies('All'); setFilterStatus('All'); setFilterVet('All'); }}
+            className="flex items-center gap-1 px-2 py-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+            style={{ fontSize: '12px', fontWeight: 500, border: 'none', background: 'transparent', cursor: 'pointer' }}
+            title="Clear filters"
+          >
+            <X className="w-3 h-3" />
+          </button>
+        )}
+
+        {/* Vertical separator */}
+        <div style={{ width: '1px', height: '24px', backgroundColor: 'var(--border-color)', marginLeft: 'auto' }} />
 
         {/* Sort */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="flex items-center gap-1.5 px-3 py-1.5 border border-[var(--border-color)] transition-colors hover:bg-[var(--surface-elevated)]" style={{
-              borderRadius: '8px', fontSize: '13px', fontWeight: 500, color: 'var(--text-secondary)',
-            }}>
+            <button
+              className="flex items-center gap-1.5 px-2.5 py-1.5 transition-colors hover:bg-[var(--surface-elevated)]"
+              style={{
+                borderRadius: '6px',
+                fontSize: '13px',
+                fontWeight: 500,
+                color: 'var(--text-secondary)',
+                border: 'none',
+                background: 'transparent',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
               <ArrowUpDown className="w-3.5 h-3.5" />
               {sortOrder === 'newest' ? 'Newest first' : sortOrder === 'oldest' ? 'Oldest first' : sortOrder === 'name-az' ? 'Name A–Z' : 'Name Z–A'}
+              <ChevronDown className="w-3 h-3 opacity-60" />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
+          <DropdownMenuContent align="end">
             <DropdownMenuLabel>Sort by</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => setSortOrder('newest')}>
@@ -327,17 +475,6 @@ export default function ClientsPage() {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-
-        {hasActiveFilters && (
-          <button
-            onClick={() => { setFilterSpecies('All'); setFilterStatus('All'); setFilterVet('All'); }}
-            className="flex items-center gap-1 px-2 py-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-            style={{ fontSize: '12px', fontWeight: 500 }}
-          >
-            <X className="w-3 h-3" />
-            Clear filters
-          </button>
-        )}
       </div>
 
       {/* Selection bar */}
@@ -434,9 +571,41 @@ export default function ClientsPage() {
               </TableHead>
               <TableHead className="py-3 px-4" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>
                 Pet
+                {totalPetCount != null && (
+                  <span
+                    className="ml-2 inline-flex items-center justify-center"
+                    style={{
+                      backgroundColor: 'var(--surface-elevated)',
+                      color: 'var(--text-secondary)',
+                      borderRadius: '9999px',
+                      padding: '2px 8px',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      minWidth: '24px',
+                    }}
+                  >
+                    {totalPetCount}
+                  </span>
+                )}
               </TableHead>
               <TableHead className="py-3 px-4" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>
                 Owner
+                {totalCount != null && (
+                  <span
+                    className="ml-2 inline-flex items-center justify-center"
+                    style={{
+                      backgroundColor: 'var(--surface-elevated)',
+                      color: 'var(--text-secondary)',
+                      borderRadius: '9999px',
+                      padding: '2px 8px',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      minWidth: '24px',
+                    }}
+                  >
+                    {totalCount}
+                  </span>
+                )}
               </TableHead>
               <TableHead className="py-3 px-4" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>
                 Species
@@ -787,13 +956,37 @@ export default function ClientsPage() {
                 </TableRow>
               );
             })}
+            {/* Loading-more indicator (shown while a new page is being fetched) */}
+            {loadingMore && (
+              <TableRow>
+                <TableCell colSpan={9} className="py-6 text-center">
+                  <div className="flex items-center justify-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin" style={{ color: 'var(--text-secondary)' }} />
+                    <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Loading more clients…</span>
+                  </div>
+                </TableCell>
+              </TableRow>
+            )}
           </TableBody>
         </Table>
+
+        {/* Infinite-scroll sentinel — when this scrolls into view, loadMore() fires */}
+        {hasMore && !loading && (
+          <div ref={sentinelRef} aria-hidden="true" style={{ height: '1px' }} />
+        )}
 
         {/* Footer */}
         <div className="px-6 py-4 border-t border-[var(--border-color)] flex items-center justify-between">
           <p className="text-[var(--text-secondary)]" style={{ fontSize: '14px', fontWeight: 400 }}>
-            Showing {filtered.length} of {displayClients.length} entries ({clients.length} clients)
+            {totalCount != null
+              ? `Showing ${clients.length} of ${totalCount} clients`
+              : `Showing ${clients.length} clients`}
+            {hasMore && !loadingMore && (
+              <span style={{ marginLeft: '8px', opacity: 0.7 }}>· scroll for more</span>
+            )}
+            {!hasMore && clients.length > 0 && (
+              <span style={{ marginLeft: '8px', opacity: 0.7 }}>· all loaded</span>
+            )}
           </p>
         </div>
       </div>
