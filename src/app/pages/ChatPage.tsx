@@ -15,12 +15,15 @@ import {
   FileText,
   Download,
   Image as ImageIcon,
+  Forward,
 } from 'lucide-react';
 import { Input } from '../components/ui/input';
 import { getOrgContext } from '../hooks/useOrgContext';
 import { supabase } from '../../lib/supabase';
 import { useTenantDb } from '../context/TenantContext';
 import { useAuth } from '../context/AuthContext';
+import { useProfile } from '../hooks/useProfile';
+import { ForwardMessageDialog, type ForwardableMessage } from '../components/ForwardMessageDialog';
 
 // ─── Emoji picker data ────────────────────────────────────────────────────────
 
@@ -44,6 +47,10 @@ type DisplayMessage = {
   fileUrl?: string;
   fileName?: string;
   fileSize?: number;
+  /** Full display name of whoever actually typed this message (joined from profiles). */
+  senderName?: string;
+  /** If this message was forwarded, name of the original author. */
+  forwardedFromName?: string;
 };
 
 type Reaction = {
@@ -164,6 +171,7 @@ function DateSeparator({ label }: { label: string }) {
 export default function ChatPage() {
   const db = useTenantDb();
   const { user } = useAuth();
+  const { profile: myProfile } = useProfile('doctor');
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
@@ -206,6 +214,10 @@ export default function ChatPage() {
   // Reactions
   const [reactions, setReactions] = useState<Record<string, Reaction[]>>({});
   const [hoveredMsgId, setHoveredMsgId] = useState<string | null>(null);
+
+  // Forward message
+  const [forwardOpen, setForwardOpen] = useState(false);
+  const [forwardMsg, setForwardMsg] = useState<ForwardableMessage | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const lastReadAtRef = useRef<string | null>(null);
@@ -441,22 +453,30 @@ export default function ChatPage() {
     const { organizationId } = await getOrgContext();
     const { data } = await db
       .from('messages')
-      .select('id, content, sender_id, image_url, file_url, file_name, file_size, created_at')
+      .select('id, content, sender_id, image_url, file_url, file_name, file_size, forwarded_from_name, created_at, sender:profiles!messages_sender_org_fkey(first_name, last_name, role)')
       .eq('organization_id', organizationId)
       .eq('conversation_id', convId)
       .order('created_at', { ascending: true });
 
     if (data) {
-      setMessages(data.map(m => ({
-        id: m.id,
-        from: m.sender_id === user.id ? 'me' as const : 'them' as const,
-        text: m.content,
-        timestamp: new Date(m.created_at),
-        imageUrl: m.image_url || undefined,
-        fileUrl: m.file_url || undefined,
-        fileName: m.file_name || undefined,
-        fileSize: m.file_size || undefined,
-      })));
+      setMessages(data.map((m: any) => {
+        const sp = Array.isArray(m.sender) ? m.sender[0] : m.sender;
+        const rawName = sp ? `${sp.first_name ?? ''} ${sp.last_name ?? ''}`.trim() : '';
+        const isVet = sp?.role === 'doctor' || sp?.role === 'veterinarian' || sp?.role === 'senior_veterinarian' || sp?.role === 'specialist';
+        const senderName = rawName ? (isVet ? `Dr. ${rawName}` : rawName) : undefined;
+        return {
+          id: m.id,
+          from: m.sender_id === user.id ? 'me' as const : 'them' as const,
+          text: m.content,
+          timestamp: new Date(m.created_at),
+          imageUrl: m.image_url || undefined,
+          fileUrl: m.file_url || undefined,
+          fileName: m.file_name || undefined,
+          fileSize: m.file_size || undefined,
+          senderName,
+          forwardedFromName: m.forwarded_from_name || undefined,
+        };
+      }));
     }
     // Fetch reactions for these messages
     if (data && data.length > 0) {
@@ -527,6 +547,64 @@ export default function ChatPage() {
     setMsgSearchOpen(false);
     setMsgSearchQuery('');
     setMsgSearchIndex(0);
+  }
+
+  // ── Forward message ──────────────────────────────────────────────────────────
+  // Insert one new message per target conversation, copying the original
+  // text/image/file. The new messages are sent by the current user with the
+  // current timestamp, so they slot naturally into each conversation timeline.
+  async function handleForward(targetIds: string[], message: ForwardableMessage) {
+    if (!user || targetIds.length === 0) return;
+    const { organizationId } = await getOrgContext();
+    const nowIso = new Date().toISOString();
+    // Preserve the original author chain: if the source was already forwarded,
+    // keep that name; otherwise label the forward with the original sender.
+    const forwardedFromName = message.forwardedFromName || null;
+    const rows = targetIds.map(convId => ({
+      organization_id: organizationId,
+      conversation_id: convId,
+      sender_id: user.id,
+      content: message.text || (message.imageUrl ? '📷 Image' : message.fileName ? `📎 ${message.fileName}` : ''),
+      image_url: message.imageUrl || null,
+      file_url: message.fileUrl || null,
+      file_name: message.fileName || null,
+      file_size: message.fileSize ?? null,
+      forwarded_from_name: forwardedFromName,
+      created_at: nowIso,
+    }));
+    const { data, error } = await db.from('messages').insert(rows).select('id, conversation_id');
+    if (error) {
+      console.error('[handleForward] insert failed:', error.message);
+      throw error;
+    }
+
+    // If the user forwarded TO the conversation they're currently looking at,
+    // append the new message to the local state so it shows immediately.
+    if (selectedId && data) {
+      const inserted = data.find(r => r.conversation_id === selectedId);
+      if (inserted) {
+        setMessages(prev => [...prev, {
+          id: inserted.id,
+          from: 'me',
+          text: message.text || (message.imageUrl ? '📷 Image' : message.fileName ? `📎 ${message.fileName}` : ''),
+          timestamp: new Date(nowIso),
+          imageUrl: message.imageUrl,
+          fileUrl: message.fileUrl,
+          fileName: message.fileName,
+          fileSize: message.fileSize,
+          forwardedFromName: forwardedFromName || undefined,
+        }]);
+      }
+    }
+
+    // Update conversation list previews
+    const previewLabel = message.text || (message.imageUrl ? '📷 Image' : message.fileName ? `📎 ${message.fileName}` : '');
+    setConversations(prev => prev.map(c =>
+      targetIds.includes(c.id)
+        ? { ...c, lastMessage: previewLabel, lastMessageTime: new Date(nowIso), lastMessageIsMe: true }
+        : c
+    ));
+    fetchConversations();
   }
 
   // ── Select conversation ─────────────────────────────────────────────────────
@@ -1127,6 +1205,41 @@ export default function ChatPage() {
                                     </button>
                                   );
                                 })}
+                                {/* Divider + Forward */}
+                                <div style={{ width: '1px', backgroundColor: 'var(--border-color)', margin: '4px 2px' }} />
+                                <button
+                                  title="Forward"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    // Preserve the original author when re-forwarding an already-forwarded message.
+                                    // Otherwise resolve by whether the current user or the other party wrote it.
+                                    const originalAuthor =
+                                      msg.forwardedFromName
+                                      || msg.senderName
+                                      || (msg.from === 'me' ? (myProfile.fullName || 'You') : (selectedConv?.otherName || 'Unknown'));
+                                    setForwardMsg({
+                                      id: msg.id,
+                                      text: msg.text,
+                                      imageUrl: msg.imageUrl,
+                                      fileUrl: msg.fileUrl,
+                                      fileName: msg.fileName,
+                                      fileSize: msg.fileSize,
+                                      forwardedFromName: originalAuthor,
+                                    });
+                                    setForwardOpen(true);
+                                  }}
+                                  style={{
+                                    width: '28px', height: '28px', borderRadius: '50%', border: 'none',
+                                    backgroundColor: 'transparent',
+                                    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    color: 'var(--text-secondary)',
+                                    transition: 'transform 0.15s, background-color 0.15s, color 0.15s',
+                                  }}
+                                  onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.15)'; e.currentTarget.style.backgroundColor = 'var(--surface-elevated)'; e.currentTarget.style.color = 'var(--brand-green-text)'; }}
+                                  onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+                                >
+                                  <Forward style={{ width: '15px', height: '15px' }} />
+                                </button>
                               </div>
                             )}
 
@@ -1138,6 +1251,22 @@ export default function ChatPage() {
                               fontSize: '14px', lineHeight: 1.5, wordBreak: 'break-word',
                               overflow: 'hidden',
                             }}>
+                              {msg.forwardedFromName && (
+                                <div style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  fontStyle: 'italic',
+                                  opacity: 0.85,
+                                  padding: (msg.imageUrl || msg.fileUrl) ? '6px 10px 0' : '0 0 4px',
+                                  color: isMe ? 'var(--on-brand-green)' : 'var(--brand-green-text)',
+                                }}>
+                                  <Forward style={{ width: '11px', height: '11px' }} />
+                                  Forwarded from {msg.forwardedFromName}
+                                </div>
+                              )}
                               {msg.imageUrl && (
                                 <img src={msg.imageUrl} alt="Attachment" style={{ maxWidth: '240px', maxHeight: '200px', borderRadius: msg.text && msg.text !== '📷 Image' ? '12px 12px 0 0' : '12px', display: 'block', objectFit: 'cover' }} />
                               )}
@@ -1433,6 +1562,22 @@ export default function ChatPage() {
           </div>
         </div>
       )}
+
+      {/* ── Forward message dialog ─────────────────────────────────────────── */}
+      <ForwardMessageDialog
+        open={forwardOpen}
+        onOpenChange={setForwardOpen}
+        message={forwardMsg}
+        conversations={conversations.map(c => ({
+          id: c.id,
+          isGroup: c.isGroup,
+          otherName: c.isGroup ? c.groupTitle : c.otherName,
+          otherProfileId: c.otherProfileId,
+          otherAvatarUrl: c.otherAvatarUrl,
+        }))}
+        excludeIds={selectedId ? [selectedId] : []}
+        onForward={handleForward}
+      />
 
       {/* ── Delete confirmation dialog ─────────────────────────────────────── */}
       {deleteConfirmId && (

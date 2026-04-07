@@ -507,11 +507,12 @@ export default function SuperAdminServicesPage() {
               <div style={{ width: '100%', height: '14px' }} />
             </div>
             {[1, 2, 3, 4, 5, 6, 7, 8].map(i => (
-              <div key={i} style={{ display: 'grid', gridTemplateColumns: '2.5fr 140px 100px 80px 70px 90px 100px', gap: '0', padding: '14px 20px', alignItems: 'center', borderBottom: '1px solid var(--border-color)' }}>
+              <div key={i} style={{ display: 'grid', gridTemplateColumns: '2.2fr 110px 130px 100px 80px 70px 90px 100px', gap: '0', padding: '14px 20px', alignItems: 'center', borderBottom: '1px solid var(--border-color)' }}>
                 <div>
                   <div style={{ width: `${140 + (i % 3) * 40}px`, height: '14px', borderRadius: '4px', backgroundColor: 'var(--surface-elevated)', marginBottom: '6px' }} />
                   <div style={{ width: `${200 + (i % 2) * 60}px`, height: '12px', borderRadius: '4px', backgroundColor: 'var(--surface-elevated)' }} />
                 </div>
+                <div style={{ width: '80px', height: '20px', borderRadius: '6px', backgroundColor: 'var(--surface-elevated)' }} />
                 <div style={{ width: '80px', height: '22px', borderRadius: '9999px', backgroundColor: 'var(--surface-elevated)' }} />
                 <div style={{ width: '50px', height: '14px', borderRadius: '4px', backgroundColor: 'var(--surface-elevated)' }} />
                 <div style={{ width: '35px', height: '14px', borderRadius: '4px', backgroundColor: 'var(--surface-elevated)' }} />
@@ -627,8 +628,8 @@ export default function SuperAdminServicesPage() {
       {/* ── Services Table ── */}
       <div style={{ backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)', borderRadius: '14px', overflow: 'hidden' }}>
         {/* Table Header */}
-        <div style={{ display: 'grid', gridTemplateColumns: '2.5fr 140px 100px 80px 70px 90px 100px', gap: '0', padding: '11px 20px', backgroundColor: 'var(--surface-elevated)', borderBottom: '1px solid var(--border-color)' }}>
-          {['Service', 'Category', 'Price', 'Duration', 'Tax', 'Status', 'Actions'].map(h => (
+        <div style={{ display: 'grid', gridTemplateColumns: '2.2fr 110px 130px 100px 80px 70px 90px 100px', gap: '0', padding: '11px 20px', backgroundColor: 'var(--surface-elevated)', borderBottom: '1px solid var(--border-color)' }}>
+          {['Service', 'Code', 'Category', 'Price', 'Duration', 'Tax', 'Status', 'Actions'].map(h => (
             <span key={h} style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</span>
           ))}
         </div>
@@ -643,7 +644,7 @@ export default function SuperAdminServicesPage() {
             key={svc.id}
             style={{
               display: 'grid',
-              gridTemplateColumns: '2.5fr 140px 100px 80px 70px 90px 100px',
+              gridTemplateColumns: '2.2fr 110px 130px 100px 80px 70px 90px 100px',
               gap: '0', padding: '14px 20px', alignItems: 'center',
               borderBottom: i < filtered.length - 1 ? '1px solid var(--border-color)' : undefined,
               opacity: svc.active ? 1 : 0.55,
@@ -661,7 +662,34 @@ export default function SuperAdminServicesPage() {
                 )}
               </div>
               <p style={{ fontSize: '12px', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{svc.description}</p>
-              <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{svc.sku}</span>
+            </div>
+
+            {/* Code (formerly inline beneath the description) */}
+            <div style={{ minWidth: 0 }}>
+              {svc.sku ? (
+                <span
+                  title={svc.sku}
+                  style={{
+                    display: 'inline-block',
+                    maxWidth: '100%',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    fontFamily: 'monospace',
+                    color: 'var(--text-secondary)',
+                    backgroundColor: 'var(--surface-elevated)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '6px',
+                    padding: '2px 7px',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {svc.sku}
+                </span>
+              ) : (
+                <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>—</span>
+              )}
             </div>
 
             {/* Category */}

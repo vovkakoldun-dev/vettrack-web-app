@@ -1,9 +1,9 @@
-import { useState, useRef, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import {
   ArrowLeft, Calendar, Syringe, FileText,
   AlertCircle, CheckCircle2, ChevronRight, PawPrint,
-  Heart, Scale, Dna, Palette, Clock, MessageCircle, Camera, ImagePlus, Check,
+  Heart, Scale, Dna, Palette, Clock, MessageCircle, Camera,
 } from 'lucide-react';
 import { Avatar, AvatarImage, AvatarFallback } from '../../components/ui/avatar';
 import { Badge } from '../../components/ui/badge';
@@ -32,18 +32,16 @@ function calcAge(dob: string | null): string {
   return `${years} years`;
 }
 
-// ─── Banner presets ───────────────────────────────────────────
-const BANNER_PRESETS = [
-  { id: 'forest',  label: 'Forest',  gradient: 'linear-gradient(135deg, #1B4332 0%, var(--brand-green-text) 50%, #52B788 100%)' },
-  { id: 'ocean',   label: 'Ocean',   gradient: 'linear-gradient(135deg, #0C4A6E 0%, #0369A1 50%, #38BDF8 100%)' },
-  { id: 'sunset',  label: 'Sunset',  gradient: 'linear-gradient(135deg, #7C2D12 0%, #C2410C 50%, #FB923C 100%)' },
-  { id: 'lavender',label: 'Lavender',gradient: 'linear-gradient(135deg, #3B0764 0%, #6D28D9 50%, #A78BFA 100%)' },
-  { id: 'rose',    label: 'Rose',    gradient: 'linear-gradient(135deg, #881337 0%, #BE123C 50%, #FB7185 100%)' },
-  { id: 'slate',   label: 'Slate',   gradient: 'linear-gradient(135deg, #0F172A 0%, #334155 50%, #94A3B8 100%)' },
-];
+// ─── Banner default (used when the clinic hasn't set one) ────
+const DEFAULT_BANNER_GRADIENT =
+  'linear-gradient(135deg, #1B4332 0%, var(--brand-green-text) 50%, #52B788 100%)';
 
-// Default banner
-const DEFAULT_BANNER = BANNER_PRESETS[0].gradient;
+interface ClinicBranding {
+  banner_image_url: string | null;
+  banner_gradient: string | null;
+  banner_text: string | null;
+  logo_image_url: string | null;
+}
 
 // ─── Status config ────────────────────────────────────────────
 const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
@@ -154,11 +152,31 @@ export default function OwnerPetProfilePage() {
   const statusColor = STATUS_COLORS[pet?.status ?? 'Healthy'] ?? STATUS_COLORS.Healthy;
 
   const [expandedVisit, setExpandedVisit] = useState<number | null>(null);
-  const [bannerGradient, setBannerGradient] = useState(DEFAULT_BANNER);
-  const [bannerPickerOpen, setBannerPickerOpen] = useState(false);
-  const bannerPickerRef = useRef<HTMLDivElement>(null);
 
-  const IS_SUPER_ADMIN = true;
+  // ── Clinic banner / branding (set centrally by super admin) ─
+  const [clinicBranding, setClinicBranding] = useState<ClinicBranding | null>(null);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const { data } = await supabase
+        .from('clinics')
+        .select('banner_image_url, banner_gradient, banner_text, logo_image_url')
+        .eq('is_active', true)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (alive && data) setClinicBranding(data as ClinicBranding);
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  const bannerHasImage = !!clinicBranding?.banner_image_url;
+  const bannerGradient = clinicBranding?.banner_gradient || DEFAULT_BANNER_GRADIENT;
+  const bannerText = clinicBranding?.banner_text || '';
+  const clinicLogoUrl = clinicBranding?.logo_image_url || null;
+  const bannerBackground = bannerHasImage
+    ? `url(${clinicBranding?.banner_image_url}) center/cover no-repeat`
+    : bannerGradient;
 
   const activeConditions = pet?.conditions.filter((c) => c.status === 'active') ?? [];
   const resolvedConditions = pet?.conditions.filter((c) => c.status === 'resolved') ?? [];
@@ -189,75 +207,49 @@ export default function OwnerPetProfilePage() {
             marginBottom: '24px',
           }}
         >
-          {/* Banner */}
-          <div style={{ position: 'relative', height: '160px', background: bannerGradient, overflow: 'visible' }}>
+          {/* Banner — clinic-wide branding set centrally by super admin */}
+          <div style={{ position: 'relative', height: '160px', background: bannerBackground, overflow: 'hidden' }}>
             {/* Subtle paw pattern overlay */}
             <div style={{
               position: 'absolute', inset: 0,
               backgroundImage: `radial-gradient(circle, rgba(255,255,255,0.07) 1px, transparent 1px)`,
               backgroundSize: '28px 28px',
+              pointerEvents: 'none',
             }} />
             {/* Bottom fade */}
-            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, transparent 50%, rgba(0,0,0,0.18))' }} />
+            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, transparent 50%, rgba(0,0,0,0.18))', pointerEvents: 'none' }} />
 
-            {IS_SUPER_ADMIN && (
-              <div ref={bannerPickerRef} style={{ position: 'absolute', top: '12px', right: '12px', zIndex: 10 }}>
-                <button
-                  onClick={() => setBannerPickerOpen((o) => !o)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: '6px',
-                    padding: '6px 12px', borderRadius: '8px',
-                    backgroundColor: 'rgba(0,0,0,0.35)',
-                    backdropFilter: 'blur(6px)',
-                    border: '1px solid rgba(255,255,255,0.2)',
-                    color: '#fff', fontSize: '12px', fontWeight: 600,
-                    cursor: 'pointer',
-                  }}
-                >
-                  <ImagePlus style={{ width: '13px', height: '13px' }} />
-                  Edit Banner
-                </button>
-
-                {/* Preset picker popover */}
-                {bannerPickerOpen && (
-                  <div
-                    style={{
-                      position: 'absolute', top: '38px', right: 0,
-                      backgroundColor: 'var(--surface-white)',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: '12px', padding: '14px',
-                      boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
-                      width: '220px', zIndex: 50,
-                    }}
-                  >
-                    <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '10px' }}>
-                      Choose Banner
-                    </p>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                      {BANNER_PRESETS.map((preset) => {
-                        const isActive = bannerGradient === preset.gradient;
-                        return (
-                          <button
-                            key={preset.id}
-                            onClick={() => { setBannerGradient(preset.gradient); setBannerPickerOpen(false); }}
-                            style={{
-                              border: isActive ? `2px solid ${BRAND}` : '2px solid transparent',
-                              borderRadius: '8px', overflow: 'hidden', cursor: 'pointer',
-                              padding: 0, position: 'relative',
-                            }}
-                          >
-                            <div style={{ height: '44px', background: preset.gradient, borderRadius: '6px' }} />
-                            <p style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-primary)', margin: '4px 0 3px', textAlign: 'center' }}>{preset.label}</p>
-                            {isActive && (
-                              <div style={{ position: 'absolute', top: '4px', right: '4px', width: '16px', height: '16px', borderRadius: '50%', backgroundColor: BRAND, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                <Check style={{ width: '9px', height: '9px', color: '#fff' }} />
-                              </div>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
+            {/* Centered clinic logo + text overlay (uploaded by super admin) */}
+            {(clinicLogoUrl || bannerText) && (
+              <div style={{
+                position: 'absolute', inset: 0,
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                gap: '8px', textAlign: 'center', padding: '12px',
+                pointerEvents: 'none',
+              }}>
+                {clinicLogoUrl && (
+                  <div style={{
+                    width: 60, height: 60, borderRadius: '12px',
+                    backgroundColor: 'rgba(255,255,255,0.92)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    boxShadow: '0 4px 14px rgba(0,0,0,0.18)',
+                    padding: 6,
+                  }}>
+                    <img
+                      src={clinicLogoUrl}
+                      alt="Clinic logo"
+                      style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                    />
                   </div>
+                )}
+                {bannerText && (
+                  <p style={{
+                    color: '#fff', fontSize: '18px', fontWeight: 700,
+                    textShadow: '0 2px 8px rgba(0,0,0,0.45)',
+                    margin: 0, maxWidth: '90%',
+                  }}>
+                    {bannerText}
+                  </p>
                 )}
               </div>
             )}

@@ -1,9 +1,11 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   Search, MonitorSmartphone, Users, UserCheck, UserX, AlertTriangle,
   Clock, Mail, Trash2, Bell, ChevronDown, ChevronUp, X, Shield,
-  PawPrint, Calendar, LogIn, Send, CheckCircle2,
+  PawPrint, Calendar, LogIn, Send, CheckCircle2, Loader2,
 } from 'lucide-react';
+import { supabase } from '../../../lib/supabase';
+import { useTenantDb } from '../../context/TenantContext';
 
 // ─── Dark mode hook ───────────────────────────────────────────
 function useDarkMode(): boolean {
@@ -32,7 +34,8 @@ const ONE_YEAR_AGO = '2025-03-15';
 type AccountStatus = 'Active' | 'Inactive' | 'Warned' | 'Suspended';
 
 interface PortalUser {
-  id: string;
+  id: string;          // clients.id
+  profileId: string;   // profiles.id (for user_sessions lookup)
   name: string;
   email: string;
   phone: string;
@@ -40,25 +43,34 @@ interface PortalUser {
   avatarColor: string;
   pets: string[];
   clinic: string;
-  accountCreated: string; // ISO
-  lastLogin: string;      // ISO
+  accountCreated: string; // ISO (date-only, YYYY-MM-DD)
+  lastLogin: string | null; // ISO date-only or null if never logged in
   status: AccountStatus;
   reminderSentAt?: string; // ISO — set when warning is sent
 }
 
 // ─── Helpers ──────────────────────────────────────────────────
-function daysSince(iso: string): number {
+/** Convert an ISO timestamp (date or full timestamptz) to a YYYY-MM-DD string. */
+function toDateOnly(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  return iso.length >= 10 ? iso.slice(0, 10) : iso;
+}
+
+function daysSince(iso: string | null): number {
+  if (!iso) return Number.POSITIVE_INFINITY;
   const ms = TODAY.getTime() - new Date(iso + 'T00:00:00').getTime();
   return Math.floor(ms / 86_400_000);
 }
 
-function fmtDate(iso: string) {
+function fmtDate(iso: string | null) {
+  if (!iso) return '—';
   return new Date(iso + 'T00:00:00').toLocaleDateString('en-US', {
     month: 'short', day: 'numeric', year: 'numeric',
   });
 }
 
-function lastLoginLabel(iso: string) {
+function lastLoginLabel(iso: string | null) {
+  if (!iso) return 'Never';
   const d = daysSince(iso);
   if (d === 0) return 'Today';
   if (d === 1) return 'Yesterday';
@@ -67,8 +79,29 @@ function lastLoginLabel(iso: string) {
   return `${(d / 365).toFixed(1)}y ago`;
 }
 
-// ─── Mock Data ────────────────────────────────────────────────
-const INITIAL_USERS: PortalUser[] = []
+const AVATAR_PALETTE = ['#F4A261', '#3B82F6', '#8B5CF6', '#EC4899', '#10B981', '#F59E0B', '#06B6D4', '#EF4444'];
+function avatarColorFor(seed: string): string {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) hash = seed.charCodeAt(i) + ((hash << 5) - hash);
+  return AVATAR_PALETTE[Math.abs(hash) % AVATAR_PALETTE.length];
+}
+function initialsOf(first?: string | null, last?: string | null, fallback = '?'): string {
+  const f = (first || '').trim();
+  const l = (last || '').trim();
+  const i = `${f[0] || ''}${l[0] || ''}`.toUpperCase();
+  return i || fallback;
+}
+
+function normalizeStatus(raw: string | null | undefined, isActive: boolean): AccountStatus {
+  if (!isActive) return 'Suspended';
+  switch ((raw || '').toLowerCase()) {
+    case 'inactive':  return 'Inactive';
+    case 'warned':    return 'Warned';
+    case 'suspended': return 'Suspended';
+    case 'active':
+    default:          return 'Active';
+  }
+}
 
 // ─── Status config ────────────────────────────────────────────
 const STATUS_CFG: Record<AccountStatus, { color: string; bg: string; dot: string; label: string }> = {
@@ -81,7 +114,7 @@ const STATUS_CFG: Record<AccountStatus, { color: string; bg: string; dot: string
 const TABS = ['All', 'Active', 'Inactive', 'Warned', 'Suspended'] as const;
 type Tab = typeof TABS[number];
 
-const CLINICS = ['All Clinics', 'Downtown Hugory Vet', 'Westside Animal Care', 'Northpark Pet Hospital'];
+// Clinic dropdown options are now built dynamically from fetched data.
 
 // ─── Sub-components ───────────────────────────────────────────
 function AvatarCircle({ initials, color, size = 36 }: { initials: string; color: string; size?: number }) {
@@ -317,16 +350,116 @@ function ReminderToast({ name, onDismiss }: { name: string; onDismiss: () => voi
 // ─── Main Page ────────────────────────────────────────────────
 export default function SuperAdminPatientPortalsPage() {
   const isDark = useDarkMode();
-  const [users, setUsers]             = useState<PortalUser[]>(INITIAL_USERS);
+  const db = useTenantDb();
+  const [users, setUsers]             = useState<PortalUser[]>([]);
+  const [loading, setLoading]         = useState(true);
   const [search, setSearch]           = useState('');
   const [tab, setTab]                 = useState<Tab>('All');
   const [clinicFilter, setClinicFilter] = useState('All Clinics');
+  const [clinicOptions, setClinicOptions] = useState<string[]>(['All Clinics']);
   const [toast, setToast]             = useState<{ name: string } | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
+  // ── Fetch portal accounts from Supabase ─────────────────────
+  const fetchPortalUsers = useCallback(async () => {
+    try {
+      // 1. Pull every client row that has a linked profile (= a real portal account).
+      const { data: clientRows, error: cErr } = await db
+        .from('clients')
+        .select(
+          'id, profile_id, first_name, last_name, email, phone, avatar_color, ' +
+          'portal_status, portal_last_login_at, portal_reminder_sent_at, ' +
+          'created_at, is_active, clinic:clinics(name)'
+        )
+        .not('profile_id', 'is', null)
+        .order('created_at', { ascending: false });
+
+      if (cErr) {
+        console.error('[PortalsPage] failed to fetch clients:', cErr);
+        setUsers([]);
+        return;
+      }
+
+      const rows = (clientRows || []) as any[];
+      const clientIds  = rows.map(r => r.id);
+      const profileIds = rows.map(r => r.profile_id).filter(Boolean) as string[];
+
+      // 2. Pull pet names for those clients in a single query.
+      const petsByClient: Record<string, string[]> = {};
+      if (clientIds.length > 0) {
+        const { data: petRows } = await db
+          .from('pets')
+          .select('client_id, name')
+          .in('client_id', clientIds);
+        for (const p of (petRows || []) as any[]) {
+          if (!petsByClient[p.client_id]) petsByClient[p.client_id] = [];
+          if (p.name) petsByClient[p.client_id].push(p.name);
+        }
+      }
+
+      // 3. Pull most-recent user_sessions activity per linked profile (presence
+      //    heartbeat = best proxy for "last login" when portal_last_login_at is null).
+      //    user_sessions has no organization_id, so use raw supabase.
+      const lastActiveByProfile: Record<string, string> = {};
+      if (profileIds.length > 0) {
+        const { data: sessRows } = await supabase
+          .from('user_sessions')
+          .select('user_id, last_active_at')
+          .in('user_id', profileIds);
+        for (const s of (sessRows || []) as any[]) {
+          const cur = lastActiveByProfile[s.user_id];
+          if (!cur || (s.last_active_at && s.last_active_at > cur)) {
+            lastActiveByProfile[s.user_id] = s.last_active_at;
+          }
+        }
+      }
+
+      // 4. Map → PortalUser
+      const mapped: PortalUser[] = rows.map(r => {
+        const lastLogin =
+          toDateOnly(r.portal_last_login_at) ||
+          toDateOnly(lastActiveByProfile[r.profile_id]) ||
+          null;
+        const clinicName = (r.clinic && (r.clinic as any).name) || '—';
+        const fullName = `${r.first_name || ''} ${r.last_name || ''}`.trim() || 'Unknown';
+        return {
+          id: r.id,
+          profileId: r.profile_id,
+          name: fullName,
+          email: r.email || '',
+          phone: r.phone || '',
+          initials: initialsOf(r.first_name, r.last_name),
+          avatarColor: r.avatar_color || avatarColorFor(r.id),
+          pets: petsByClient[r.id] || [],
+          clinic: clinicName,
+          accountCreated: toDateOnly(r.created_at) || '',
+          lastLogin,
+          status: normalizeStatus(r.portal_status, !!r.is_active),
+          reminderSentAt: toDateOnly(r.portal_reminder_sent_at) || undefined,
+        };
+      });
+
+      setUsers(mapped);
+
+      // Build the unique clinic-name dropdown options from what's actually in the data.
+      const uniqueClinics = Array.from(new Set(mapped.map(u => u.clinic).filter(c => c && c !== '—'))).sort();
+      setClinicOptions(['All Clinics', ...uniqueClinics]);
+    } catch (e) {
+      console.error('[PortalsPage] fetchPortalUsers crashed:', e);
+      setUsers([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [db]);
+
+  useEffect(() => {
+    setLoading(true);
+    fetchPortalUsers();
+  }, [fetchPortalUsers]);
+
   // ── Inactive = last login > 1 year ago AND status still Inactive
   const inactiveUsers = useMemo(
-    () => users.filter(u => u.status === 'Inactive' && u.lastLogin < ONE_YEAR_AGO),
+    () => users.filter(u => u.status === 'Inactive' && (u.lastLogin === null || u.lastLogin < ONE_YEAR_AGO)),
     [users]
   );
 
@@ -355,19 +488,40 @@ export default function SuperAdminPatientPortalsPage() {
   const totalSuspended = users.filter(u => u.status === 'Suspended').length;
 
   // ── Handlers
-  const handleSendReminder = (id: string) => {
+  const handleSendReminder = async (id: string) => {
     const user = users.find(u => u.id === id);
     if (!user) return;
+    const nowIso = new Date().toISOString();
+    // Optimistic UI update
     setUsers(prev => prev.map(u =>
-      u.id === id ? { ...u, status: 'Warned', reminderSentAt: '2026-03-15' } : u
+      u.id === id ? { ...u, status: 'Warned', reminderSentAt: nowIso.slice(0, 10) } : u
     ));
     setToast({ name: user.name });
     setTimeout(() => setToast(null), 5000);
+    // Persist to Supabase
+    const { error } = await db
+      .from('clients')
+      .update({ portal_status: 'Warned', portal_reminder_sent_at: nowIso })
+      .eq('id', id);
+    if (error) {
+      console.error('[PortalsPage] failed to persist Warned status:', error);
+    }
   };
 
-  const handleRemoveAccount = (id: string) => {
+  const handleRemoveAccount = async (id: string) => {
+    // Optimistic UI removal
     setUsers(prev => prev.filter(u => u.id !== id));
     setConfirmDeleteId(null);
+    // Soft-delete: deactivate the portal account (NOT a hard delete).
+    const { error } = await db
+      .from('clients')
+      .update({ is_active: false, portal_status: 'Suspended' })
+      .eq('id', id);
+    if (error) {
+      console.error('[PortalsPage] failed to deactivate client:', error);
+      // Roll back the optimistic removal so the user knows it failed.
+      fetchPortalUsers();
+    }
   };
 
   const STATS = [
@@ -449,7 +603,7 @@ export default function SuperAdminPatientPortalsPage() {
             </div>
             <Select value={clinicFilter} onValueChange={setClinicFilter}>
               <SelectTrigger style={{ width: 210, height: 38 }}><SelectValue /></SelectTrigger>
-              <SelectContent>{CLINICS.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+              <SelectContent>{clinicOptions.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
             </Select>
           </div>
 
@@ -496,16 +650,27 @@ export default function SuperAdminPatientPortalsPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.length === 0 && (
+                {loading && (
                   <tr>
                     <td colSpan={7} style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: 14 }}>
-                      No portal accounts match your filters.
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <Loader2 style={{ width: 16, height: 16, animation: 'spin 1s linear infinite' }} />
+                        Loading portal accounts…
+                      </span>
                     </td>
                   </tr>
                 )}
-                {filtered.map((u, i) => {
-                  const isOld = u.lastLogin < ONE_YEAR_AGO;
-                  const dAgo  = daysSince(u.lastLogin);
+                {!loading && filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={7} style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: 14 }}>
+                      {users.length === 0
+                        ? 'No portal accounts yet. They\'ll appear here once a pet owner creates a portal account.'
+                        : 'No portal accounts match your filters.'}
+                    </td>
+                  </tr>
+                )}
+                {!loading && filtered.map((u, i) => {
+                  const isOld = u.lastLogin !== null && u.lastLogin < ONE_YEAR_AGO;
                   return (
                     <tr
                       key={u.id}

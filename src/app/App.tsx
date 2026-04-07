@@ -65,6 +65,7 @@ const SuperAdminAppointmentsPage = lazy(() => import('./pages/superadmin/SuperAd
 const SuperAdminPatientPortalsPage = lazy(() => import('./pages/superadmin/SuperAdminPatientPortalsPage'));
 const SuperAdminShiftsPage = lazy(() => import('./pages/superadmin/SuperAdminShiftsPage'));
 const SuperAdminClientsPage = lazy(() => import('./pages/superadmin/SuperAdminClientsPage'));
+const SuperAdminClinicsPage = lazy(() => import('./pages/superadmin/SuperAdminClinicsPage'));
 // System admin
 const SystemAdminPage = lazy(() => import('./pages/sysadmin/SystemAdminPage'));
 import { AppointmentStatusProvider } from './context/AppointmentStatusContext';
@@ -421,7 +422,7 @@ function SuperAdminApp() {
             <Route path="/staff" element={<SuperAdminStaffPage />} />
             <Route path="/shifts" element={<SuperAdminShiftsPage />} />
             <Route path="/analytics" element={<SuperAdminAnalyticsPage />} />
-            <Route path="/clinics" element={<SuperAdminDashboardPage />} />
+            <Route path="/clinics" element={<SuperAdminClinicsPage />} />
             <Route path="/appointments" element={<SuperAdminAppointmentsPage />} />
             <Route path="/portals" element={<SuperAdminPatientPortalsPage />} />
             <Route path="/clients" element={<SuperAdminClientsPage />} />

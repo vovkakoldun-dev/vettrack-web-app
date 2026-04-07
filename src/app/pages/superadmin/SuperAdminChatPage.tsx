@@ -16,10 +16,12 @@ import {
   FileText,
   Download,
   Image as ImageIcon,
+  Forward,
 } from 'lucide-react';
 import { Input } from '../../components/ui/input';
 import { supabase } from '../../../lib/supabase';
 import { useTenantDb } from '../../context/TenantContext';
+import { ForwardMessageDialog, type ForwardableMessage } from '../../components/ForwardMessageDialog';
 // ─── Emoji picker data ────────────────────────────────────────────────────────
 
 const EMOJI_GROUPS = [
@@ -42,6 +44,7 @@ type DisplayMessage = {
   fileUrl?: string;
   fileName?: string;
   fileSize?: number;
+  forwardedFromName?: string;
 };
 
 type Reaction = {
@@ -162,21 +165,30 @@ function DateSeparator({ label }: { label: string }) {
 export default function SuperAdminChatPage() {
   const db = useTenantDb();
   const [saProfileId, setSaProfileId] = useState<string | null>(null);
+  const [saFullName, setSaFullName] = useState<string>('Super Administrator');
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Forward message
+  const [forwardOpen, setForwardOpen] = useState(false);
+  const [forwardMsg, setForwardMsg] = useState<ForwardableMessage | null>(null);
+
   // Resolve the superadmin profile ID (not the auth user)
   useEffect(() => {
     (async () => {
       const { data } = await db
         .from('profiles')
-        .select('id')
+        .select('id, first_name, last_name')
         .eq('role', 'superadmin')
         .single();
-      if (data) setSaProfileId(data.id);
+      if (data) {
+        setSaProfileId(data.id);
+        const full = `${data.first_name || ''} ${data.last_name || ''}`.trim();
+        if (full) setSaFullName(full);
+      }
     })();
   }, []);
   const [loadingConvs, setLoadingConvs] = useState(true);
@@ -445,7 +457,7 @@ export default function SuperAdminChatPage() {
     setLoadingMsgs(true);
     const { data } = await db
       .from('messages')
-      .select('id, content, sender_id, image_url, file_url, file_name, file_size, created_at')
+      .select('id, content, sender_id, image_url, file_url, file_name, file_size, forwarded_from_name, created_at')
       .eq('organization_id', organizationId)
       .eq('conversation_id', convId)
       .order('created_at', { ascending: true });
@@ -460,6 +472,7 @@ export default function SuperAdminChatPage() {
         fileUrl: m.file_url || undefined,
         fileName: m.file_name || undefined,
         fileSize: m.file_size || undefined,
+        forwardedFromName: m.forwarded_from_name || undefined,
       })));
     }
     if (data && data.length > 0) {
@@ -638,6 +651,62 @@ export default function SuperAdminChatPage() {
 
   // ── Send message ────────────────────────────────────────────────────────────
 
+  // ── Forward message ──────────────────────────────────────────────────────────
+  // Insert one new message per target conversation, copying the original
+  // text/image/file. The new messages are sent by the current user with the
+  // current timestamp, so they slot naturally into each conversation timeline.
+  async function handleForward(targetIds: string[], message: ForwardableMessage) {
+    if (!saProfileId || targetIds.length === 0) return;
+    const { organizationId } = await getOrgContext();
+    const nowIso = new Date().toISOString();
+    // Preserve the original author chain: if the source was already forwarded,
+    // keep that name; otherwise label the forward with the original sender.
+    const forwardedFromName = message.forwardedFromName || null;
+    const rows = targetIds.map(convId => ({
+      organization_id: organizationId,
+      conversation_id: convId,
+      sender_id: saProfileId,
+      content: message.text || (message.imageUrl ? '📷 Image' : message.fileName ? `📎 ${message.fileName}` : ''),
+      image_url: message.imageUrl || null,
+      file_url: message.fileUrl || null,
+      file_name: message.fileName || null,
+      file_size: message.fileSize ?? null,
+      forwarded_from_name: forwardedFromName,
+      created_at: nowIso,
+    }));
+    const { data, error } = await db.from('messages').insert(rows).select('id, conversation_id');
+    if (error) {
+      console.error('[handleForward] insert failed:', error.message);
+      throw error;
+    }
+
+    // If forwarding to the currently-open conversation, append locally
+    if (selectedId && data) {
+      const inserted = data.find(r => r.conversation_id === selectedId);
+      if (inserted) {
+        setMessages(prev => [...prev, {
+          id: inserted.id,
+          from: 'me',
+          text: message.text || (message.imageUrl ? '📷 Image' : message.fileName ? `📎 ${message.fileName}` : ''),
+          timestamp: new Date(nowIso),
+          imageUrl: message.imageUrl,
+          fileUrl: message.fileUrl,
+          fileName: message.fileName,
+          fileSize: message.fileSize,
+          forwardedFromName: forwardedFromName || undefined,
+        }]);
+      }
+    }
+
+    const previewLabel = message.text || (message.imageUrl ? '📷 Image' : message.fileName ? `📎 ${message.fileName}` : '');
+    setConversations(prev => prev.map(c =>
+      targetIds.includes(c.id)
+        ? { ...c, lastMessage: previewLabel, lastMessageTime: new Date(nowIso), lastMessageIsMe: true }
+        : c
+    ));
+    fetchConversations();
+  }
+
   async function handleSend() {
     if ((!inputValue.trim() && !imageFile && !attachedFile) || !selectedId || !saProfileId) return;
     const content = inputValue.trim();
@@ -773,6 +842,7 @@ export default function SuperAdminChatPage() {
             fileUrl: msg.file_url || undefined,
             fileName: msg.file_name || undefined,
             fileSize: msg.file_size || undefined,
+            forwardedFromName: msg.forwarded_from_name || undefined,
           }]);
           // Auto mark as read since we're viewing
           const now = new Date().toISOString();
@@ -1122,6 +1192,40 @@ export default function SuperAdminChatPage() {
                                     >{emoji}</button>
                                   );
                                 })}
+                                {/* Divider + Forward */}
+                                <div style={{ width: '1px', backgroundColor: 'var(--border-color)', margin: '4px 2px' }} />
+                                <button
+                                  title="Forward"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    // Preserve the original author when re-forwarding an already-forwarded message.
+                                    // Otherwise resolve by whether the current user or the other party wrote it.
+                                    const originalAuthor =
+                                      msg.forwardedFromName
+                                      || (msg.from === 'me' ? saFullName : (selectedConv?.otherName || 'Unknown'));
+                                    setForwardMsg({
+                                      id: msg.id,
+                                      text: msg.text,
+                                      imageUrl: msg.imageUrl,
+                                      fileUrl: msg.fileUrl,
+                                      fileName: msg.fileName,
+                                      fileSize: msg.fileSize,
+                                      forwardedFromName: originalAuthor,
+                                    });
+                                    setForwardOpen(true);
+                                  }}
+                                  style={{
+                                    width: '28px', height: '28px', borderRadius: '50%', border: 'none',
+                                    backgroundColor: 'transparent',
+                                    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    color: 'var(--text-secondary)',
+                                    transition: 'transform 0.15s, background-color 0.15s, color 0.15s',
+                                  }}
+                                  onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.15)'; e.currentTarget.style.backgroundColor = 'var(--surface-elevated)'; e.currentTarget.style.color = '#C2671A'; }}
+                                  onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+                                >
+                                  <Forward style={{ width: '15px', height: '15px' }} />
+                                </button>
                               </div>
                             )}
                             <div style={{
@@ -1132,6 +1236,22 @@ export default function SuperAdminChatPage() {
                               fontSize: '14px', lineHeight: 1.5, wordBreak: 'break-word',
                               overflow: 'hidden',
                             }}>
+                              {msg.forwardedFromName && (
+                                <div style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  fontStyle: 'italic',
+                                  opacity: 0.85,
+                                  padding: (msg.imageUrl || msg.fileUrl) ? '6px 10px 0' : '0 0 4px',
+                                  color: isMe ? '#fff' : '#C2671A',
+                                }}>
+                                  <Forward style={{ width: '11px', height: '11px' }} />
+                                  Forwarded from {msg.forwardedFromName}
+                                </div>
+                              )}
                               {msg.imageUrl && (
                                 <img src={msg.imageUrl} alt="Attachment" style={{ maxWidth: '240px', maxHeight: '200px', borderRadius: msg.text && msg.text !== '📷 Image' ? '12px 12px 0 0' : '12px', display: 'block', objectFit: 'cover' }} />
                               )}
@@ -1417,6 +1537,22 @@ export default function SuperAdminChatPage() {
           </div>
         </div>
       )}
+
+      {/* ── Forward message dialog ─────────────────────────────────────────── */}
+      <ForwardMessageDialog
+        open={forwardOpen}
+        onOpenChange={setForwardOpen}
+        message={forwardMsg}
+        conversations={conversations.map(c => ({
+          id: c.id,
+          isGroup: c.isGroup,
+          otherName: c.isGroup ? c.groupTitle : c.otherName,
+          otherProfileId: c.otherProfileId,
+          otherAvatarUrl: c.otherAvatarUrl,
+        }))}
+        excludeIds={selectedId ? [selectedId] : []}
+        onForward={handleForward}
+      />
 
       {/* ── Delete confirmation dialog ─────────────────────────────────────── */}
       {deleteConfirmId && (
