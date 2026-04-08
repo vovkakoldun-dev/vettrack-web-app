@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import {
   Plus, Search, Clock, User, Calendar as CalendarIcon,
@@ -7,6 +7,7 @@ import {
   Pencil, Trash2, Bell, Stethoscope, UserCheck,
   Smartphone, ChevronDown, ChevronUp, Phone, MessageCircle, X,
   CreditCard, Receipt, DollarSign, Banknote, DoorOpen,
+  Scissors, Microscope, Bed, Briefcase, Bath, Coffee, Sparkles, Building2, Loader2, Camera, Star,
 } from 'lucide-react';
 import { useAppointments } from '../../hooks/useAppointments';
 import { Button } from '../../components/ui/button';
@@ -24,6 +25,8 @@ import { useTenantDb } from '../../context/TenantContext';
 import { getOrgContext } from '../../hooks/useOrgContext';
 import { useClients } from '../../hooks/useClients';
 import { usePets } from '../../hooks/usePets';
+import { WeightPicker, US_STATES, CA_PROVINCES } from '../../components/AddClientDialog';
+import { supabase } from '../../../lib/supabase';
 
 // ─── Status Styles ───────────────────────────────────────────
 
@@ -56,6 +59,43 @@ const serviceColors: Record<string, string> = {
   'Emergency Triage & Stabilization': '#d4183d',
   Other: 'var(--text-secondary)',
 };
+
+// ─── Floor-plan Rooms (mirrors SuperAdminClinicsPage) ───────
+type RoomTypeKey =
+  | 'exam' | 'surgery' | 'reception' | 'lab' | 'kennel'
+  | 'office' | 'restroom' | 'lobby' | 'storage' | 'other';
+
+interface RoomTypeConfig {
+  label: string;
+  icon: React.ElementType;
+  color: string;
+  bg: string;
+}
+
+const ROOM_TYPES: Record<RoomTypeKey, RoomTypeConfig> = {
+  exam:      { label: 'Exam Room',  icon: Stethoscope, color: 'var(--brand-green-text)', bg: 'color-mix(in srgb, var(--brand-green-text) 18%, transparent)' },
+  surgery:   { label: 'Surgery',    icon: Scissors,    color: '#EC4899',                  bg: 'color-mix(in srgb, #EC4899 18%, transparent)' },
+  reception: { label: 'Reception',  icon: DoorOpen,    color: '#F4A261',                  bg: 'color-mix(in srgb, #F4A261 18%, transparent)' },
+  lab:       { label: 'Lab',        icon: Microscope,  color: '#8B5CF6',                  bg: 'color-mix(in srgb, #8B5CF6 18%, transparent)' },
+  kennel:    { label: 'Kennel',     icon: Bed,         color: '#06B6D4',                  bg: 'color-mix(in srgb, #06B6D4 18%, transparent)' },
+  office:    { label: 'Office',     icon: Briefcase,   color: '#3B82F6',                  bg: 'color-mix(in srgb, #3B82F6 18%, transparent)' },
+  restroom:  { label: 'Restroom',   icon: Bath,        color: '#6B7280',                  bg: 'color-mix(in srgb, #6B7280 22%, transparent)' },
+  lobby:     { label: 'Lobby',      icon: Coffee,      color: '#F59E0B',                  bg: 'color-mix(in srgb, #F59E0B 18%, transparent)' },
+  storage:   { label: 'Storage',    icon: Sparkles,    color: '#94A3B8',                  bg: 'color-mix(in srgb, #94A3B8 22%, transparent)' },
+  other:     { label: 'Other',      icon: Building2,   color: '#64748B',                  bg: 'color-mix(in srgb, #64748B 22%, transparent)' },
+};
+
+interface ClinicRoom {
+  id: string;
+  clinic_id: string;
+  name: string;
+  type: RoomTypeKey;
+  pos_x: number;
+  pos_y: number;
+  width: number;
+  height: number;
+  color: string | null;
+}
 
 // ─── Portal Requests ─────────────────────────────────────────
 interface PortalRequest {
@@ -141,6 +181,16 @@ const SCHEDULE_SLOTS = Array.from({ length: 20 }, (_, i) => {
   return `${h12}:${m.toString().padStart(2, '0')} ${ampm}`;
 });
 
+// Extended slots: 6 AM – 9:30 PM (32 slots) for the New Appointment dialog "Show more hours" toggle
+const EXTENDED_SCHEDULE_SLOTS = Array.from({ length: 32 }, (_, i) => {
+  const totalMin = 6 * 60 + i * 30;
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  return `${h12}:${m.toString().padStart(2, '0')} ${ampm}`;
+});
+
 // ─── Filter Tabs ─────────────────────────────────────────────
 
 const FILTER_TABS = ['All', 'Upcoming', 'Completed', 'Cancelled'] as const;
@@ -164,28 +214,30 @@ export default function AdminBookingsPage() {
   const [showAllDates, setShowAllDates] = useState(false);
   const [visibleCount, setVisibleCount] = useState(10);
   const [monthViewDate, setMonthViewDate] = useState<Date>(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
-  const [newApptTime, setNewApptTime] = useState('09:00');
+  const [newApptTime, setNewApptTime] = useState('');
   const [newApptDate, setNewApptDate] = useState(() => {
     const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   });
 
-  // Map Supabase AppointmentRow[] → the shape expected by existing UI
+  // Map Supabase AppointmentRow[] → the shape expected by existing UI.
+  // scheduled_at is a real UTC instant (saved with the user's local tz offset),
+  // so use LOCAL methods to read it back — that returns the same wall-clock
+  // date/time the user originally picked, regardless of how Postgres stored it.
   const mappedAppointments = useMemo(() =>
     supaAppts.map((a) => {
       const dt = new Date(a.scheduled_at);
-      // Use UTC methods — scheduled_at is stored as UTC and represents clinic local time
-      const yyyy = dt.getUTCFullYear();
-      const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
-      const dd = String(dt.getUTCDate()).padStart(2, '0');
-      const startH = dt.getUTCHours();
-      const startM = dt.getUTCMinutes();
+      const yyyy = dt.getFullYear();
+      const mm = String(dt.getMonth() + 1).padStart(2, '0');
+      const dd = String(dt.getDate()).padStart(2, '0');
+      const startH = dt.getHours();
+      const startM = dt.getMinutes();
       const ampm = startH >= 12 ? 'PM' : 'AM';
       const h12 = startH > 12 ? startH - 12 : startH === 0 ? 12 : startH;
       const timeStart = `${h12}:${String(startM).padStart(2, '0')} ${ampm}`;
       const dur = a.duration_minutes ?? 30;
       const endDt = new Date(dt.getTime() + dur * 60000);
-      const endH = endDt.getUTCHours();
-      const endM = endDt.getUTCMinutes();
+      const endH = endDt.getHours();
+      const endM = endDt.getMinutes();
       const endAmpm = endH >= 12 ? 'PM' : 'AM';
       const endH12 = endH > 12 ? endH - 12 : endH === 0 ? 12 : endH;
       const timeEnd = `${endH12}:${String(endM).padStart(2, '0')} ${endAmpm}`;
@@ -206,7 +258,8 @@ export default function AdminBookingsPage() {
         status: a.status as string,
         notes: a.notes ?? '',
         durationMinutes: dur,
-        room: a.room ?? null,
+        room: a.clinic_rooms?.name ?? a.room ?? null,
+        roomId: a.room_id ?? null,
       };
     }),
     [supaAppts],
@@ -269,18 +322,93 @@ export default function AdminBookingsPage() {
   const [dayPopupVet, setDayPopupVet] = useState('all');
 
   // ── Room selection dialog ─────────────────────────────────────
-  const CLINIC_ROOMS = ['Room 1', 'Room 2', 'Room 3', 'Room 4', 'Room 5'];
+  // Real rooms come from `clinic_rooms` (created in SuperAdmin → Clinics → Floor Plan).
+  const [clinicRooms, setClinicRooms] = useState<ClinicRoom[]>([]);
+  const [roomsLoading, setRoomsLoading] = useState(false);
   const [roomSelectOpen, setRoomSelectOpen] = useState(false);
   const [roomSelectAppt, setRoomSelectAppt] = useState<any>(null);
-  const occupiedRooms = useMemo(() => {
-    const map = new Map<string, { petName: string; ownerName: string }>();
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        setRoomsLoading(true);
+        const { organizationId, clinicId } = await getOrgContext();
+        let q = db
+          .from('clinic_rooms')
+          .select('id, clinic_id, name, type, pos_x, pos_y, width, height, color')
+          .eq('organization_id', organizationId);
+        if (clinicId) q = q.eq('clinic_id', clinicId);
+        const { data, error } = await q.order('sort_order', { ascending: true });
+        if (!alive) return;
+        if (error) {
+          console.error('[bookings] clinic_rooms load failed:', error.message);
+          setClinicRooms([]);
+        } else {
+          setClinicRooms((data ?? []) as ClinicRoom[]);
+        }
+      } catch (e) {
+        if (alive) setClinicRooms([]);
+      } finally {
+        if (alive) setRoomsLoading(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, [db]);
+
+  // For each room, find an appointment that is currently using it.
+  // A room is busy when:
+  //   (a) An "In Progress" appointment is in it (patient is physically there now), OR
+  //   (b) A Confirmed/Pending appointment with that room is scheduled at a time
+  //       that overlaps the appointment we're about to assign.
+  // Map key = clinic_rooms.id (so duplicate names don't collide).
+  const busyRoomMap = useMemo(() => {
+    const map = new Map<string, { petName: string; ownerName: string; timeStart: string; timeEnd: string; reason: 'in_progress' | 'overlap' }>();
+    if (!roomSelectAppt) return map;
+
+    const toMin = (t: string) => {
+      const [tp, ap] = t.split(' ');
+      let [h, m] = tp.split(':').map(Number);
+      if (ap === 'PM' && h !== 12) h += 12;
+      if (ap === 'AM' && h === 12) h = 0;
+      return h * 60 + m;
+    };
+
+    const targetStart = toMin(roomSelectAppt.timeStart);
+    const targetEnd = toMin(roomSelectAppt.timeEnd);
+
     appointments.forEach((a) => {
-      if (a.status === 'In Progress' && a.room) {
-        map.set(a.room, { petName: a.petName, ownerName: a.ownerName });
+      if (!a.roomId) return;
+      if (a.id === roomSelectAppt.id) return;
+      // (a) An "In Progress" appointment always holds its room.
+      if (a.status === 'In Progress') {
+        map.set(a.roomId, {
+          petName: a.petName,
+          ownerName: a.ownerName,
+          timeStart: a.timeStart,
+          timeEnd: a.timeEnd,
+          reason: 'in_progress',
+        });
+        return;
+      }
+      // (b) Confirmed/Pending: only mark busy if time windows overlap on the same date.
+      if (a.status !== 'Confirmed' && a.status !== 'Pending') return;
+      if (a.date !== roomSelectAppt.date) return;
+      const aStart = toMin(a.timeStart);
+      const aEnd = toMin(a.timeEnd);
+      const overlaps = aStart < targetEnd && aEnd > targetStart;
+      if (overlaps && !map.has(a.roomId)) {
+        map.set(a.roomId, {
+          petName: a.petName,
+          ownerName: a.ownerName,
+          timeStart: a.timeStart,
+          timeEnd: a.timeEnd,
+          reason: 'overlap',
+        });
       }
     });
     return map;
-  }, [appointments]);
+  }, [appointments, roomSelectAppt]);
 
   // ── Doctor filter ──────────────────────────────────────────
   const [selectedVetFilter, setSelectedVetFilter] = useState('all');
@@ -308,6 +436,8 @@ export default function AdminBookingsPage() {
   const [newApptService, setNewApptService] = useState('');
   const [newApptVetName, setNewApptVetName] = useState('Dr. Chen');
   const [newApptDuration, setNewApptDuration] = useState('30 min');
+  const [newApptShowAllHours, setNewApptShowAllHours] = useState(false);
+  const [hoveredSlotKey, setHoveredSlotKey] = useState<string | null>(null);
   const [newApptNotes, setNewApptNotes] = useState('');
   const [newApptStatus, setNewApptStatus] = useState('Confirmed');
   const [newApptPriority, setNewApptPriority] = useState('Normal');
@@ -324,9 +454,17 @@ export default function AdminBookingsPage() {
   const [npDob, setNpDob] = useState('');
   const [npWeight, setNpWeight] = useState('');
   const [npSex, setNpSex] = useState('');
+  const [npPhotoFile, setNpPhotoFile] = useState<File | null>(null);
+  const [npPhotoPreview, setNpPhotoPreview] = useState<string | null>(null);
+  const npPhotoInputRef = useRef<HTMLInputElement>(null);
   const [npOwnerName, setNpOwnerName] = useState('');
   const [npOwnerEmail, setNpOwnerEmail] = useState('');
   const [npOwnerPhone, setNpOwnerPhone] = useState('');
+  const [npAddress, setNpAddress] = useState('');
+  const [npCity, setNpCity] = useState('');
+  const [npState, setNpState] = useState('');
+  const [npZip, setNpZip] = useState('');
+  const [npCountry, setNpCountry] = useState('US');
   const [newApptClientId, setNewApptClientId] = useState('');
   const [newApptPetId, setNewApptPetId] = useState('');
   const [ownerSearch, setOwnerSearch] = useState('');
@@ -477,7 +615,7 @@ export default function AdminBookingsPage() {
     const m = (selectedDate.getMonth() + 1).toString().padStart(2, '0');
     const d = selectedDate.getDate().toString().padStart(2, '0');
     setNewApptDate(prefillDate || `${y}-${m}-${d}`);
-    setNewApptTime('09:00');
+    setNewApptTime('');
     setNewApptClientId('');
     setNewApptPetId('');
     setNewApptPet('');
@@ -545,27 +683,25 @@ export default function AdminBookingsPage() {
     setRoomSelectOpen(true);
   };
 
-  const handleRoomConfirm = async (room: string) => {
+  const handleRoomConfirm = async (room: { id: string; name: string }) => {
     if (!roomSelectAppt) return;
     setRoomSelectOpen(false);
 
-    // Move appointment time to NOW (patient arrived — could be early)
-    const now = new Date();
-    const dur = roomSelectAppt.durationMinutes || 30;
-    const end = new Date(now.getTime() + dur * 60000);
-    const fmt12 = (d: Date) => {
-      let h = d.getUTCHours(); const m = d.getUTCMinutes();
-      const ap = h >= 12 ? 'PM' : 'AM';
-      if (h > 12) h -= 12; if (h === 0) h = 12;
-      return `${h}:${m.toString().padStart(2, '0')} ${ap}`;
-    };
-    const nowISO = now.toISOString();
-
+    // Update local override — keep the original scheduled time intact.
+    // The appointment was booked for X o'clock; the patient arriving doesn't
+    // rewrite the schedule, it just moves the status to "In Progress".
     setAppointments((prev) =>
-      prev.map((a) => (a.id === roomSelectAppt.id ? { ...a, status: 'In Progress' as const, room, timeStart: fmt12(now), timeEnd: fmt12(end) } : a)),
+      prev.map((a) =>
+        a.id === roomSelectAppt.id
+          ? { ...a, status: 'In Progress' as const, room: room.name, roomId: room.id }
+          : a,
+      ),
     );
-    await updateStatusWithRoom(roomSelectAppt.id, 'In Progress', room, nowISO);
-    setArrivedToast(`${roomSelectAppt.petName} (${roomSelectAppt.ownerName}) has arrived → assigned to ${room}. ${roomSelectAppt.vet || 'Vet'} has been notified.`);
+    // Persist: we pass the room name (for legacy display callers) AND room.id
+    // so the busy lookup can disambiguate rooms that share the same name.
+    // We do NOT pass scheduledAt — the time stays as scheduled.
+    await updateStatusWithRoom(roomSelectAppt.id, 'In Progress', room.name, undefined, room.id);
+    setArrivedToast(`${roomSelectAppt.petName} (${roomSelectAppt.ownerName}) has arrived → assigned to ${room.name}. ${roomSelectAppt.vet || 'Vet'} has been notified.`);
     setTimeout(() => setArrivedToast(null), 5000);
     setRoomSelectAppt(null);
   };
@@ -603,17 +739,27 @@ export default function AdminBookingsPage() {
     setDetailOpen(false);
   };
 
-  const getSlotAvailability = (dateStr: string, excludeId?: number) => {
-    const dateAppts = appointments.filter(
-      (a) => a.date === dateStr && a.status !== 'Cancelled' && (excludeId == null || a.id !== excludeId),
-    );
+  const getSlotAvailability = (dateStr: string, excludeId?: string, vetId?: string, slotsList: readonly string[] = SCHEDULE_SLOTS) => {
+    // A slot is only "booked" if the SAME vet already has an appointment there.
+    // Two different vets can hold the same time slot independently.
+    // If no vet is selected, we can't detect conflicts yet — show all slots as available.
+    const hasVet = vetId != null && vetId !== '';
+    const dateAppts = hasVet
+      ? appointments.filter(
+          (a) =>
+            a.date === dateStr &&
+            a.status !== 'Cancelled' &&
+            (excludeId == null || a.id !== excludeId) &&
+            a.vetId === vetId,
+        )
+      : [];
     const bookedTimes = new Map<string, typeof appointments[0]>();
     dateAppts.forEach((a) => {
       const t24 = to24Hour(a.timeStart);
       const [sh, sm] = t24.split(':').map(Number);
       const startMin = sh * 60 + sm;
       const dur = getDurationMin(a.timeStart, a.timeEnd);
-      SCHEDULE_SLOTS.forEach((slot) => {
+      slotsList.forEach((slot) => {
         const s24 = to24Hour(slot);
         const [slh, slm] = s24.split(':').map(Number);
         const slotMin = slh * 60 + slm;
@@ -630,7 +776,7 @@ export default function AdminBookingsPage() {
         .forEach(b => {
           const bStartMin = (() => { const [h, m] = b.time_start.split(':').map(Number); return h * 60 + m; })();
           const bEndMin = (() => { const [h, m] = b.time_end.split(':').map(Number); return h * 60 + m; })();
-          SCHEDULE_SLOTS.forEach(slot => {
+          slotsList.forEach(slot => {
             const s24 = to24Hour(slot);
             const [slh, slm] = s24.split(':').map(Number);
             const slotMin = slh * 60 + slm;
@@ -638,7 +784,7 @@ export default function AdminBookingsPage() {
           });
         });
     }
-    return SCHEDULE_SLOTS.map((slot) => ({
+    return slotsList.map((slot) => ({
       time: slot,
       time24: to24Hour(slot),
       booked: bookedTimes.get(slot) || null,
@@ -1705,22 +1851,41 @@ export default function AdminBookingsPage() {
               Vets on Duty
             </h3>
             <div className="space-y-3">
-              {['Dr. Chen', 'Dr. Patel', 'Dr. Garcia'].map((vet) => {
-                const count = dayAppointments.filter((a) => a.vet === vet && a.status !== 'Cancelled').length;
-                return (
-                  <div key={vet} className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 bg-[color-mix(in_srgb,var(--brand-green-text)_8%,transparent)] flex items-center justify-center" style={{ borderRadius: '9999px' }}>
-                        <User className="w-3.5 h-3.5 text-[var(--brand-green-text)]" />
+              {staffList.length === 0 ? (
+                <p className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>
+                  No vets configured yet.
+                </p>
+              ) : (
+                staffList.map((vet) => {
+                  const count = dayAppointments.filter(
+                    (a) => (a as any).vetId === vet.id && a.status !== 'Cancelled',
+                  ).length;
+                  return (
+                    <div key={vet.id} className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div
+                          className="w-7 h-7 bg-[color-mix(in_srgb,var(--brand-green-text)_12%,transparent)] flex items-center justify-center flex-shrink-0"
+                          style={{ borderRadius: '9999px', fontSize: '11px', fontWeight: 700, color: 'var(--brand-green-text)' }}
+                        >
+                          {vet.initials || <User className="w-3.5 h-3.5" />}
+                        </div>
+                        <span
+                          className="text-[var(--text-primary)] truncate"
+                          style={{ fontSize: '14px', fontWeight: 500 }}
+                        >
+                          {vet.name}
+                        </span>
                       </div>
-                      <span className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 500 }}>{vet}</span>
+                      <span
+                        className="text-[var(--text-secondary)] flex-shrink-0 ml-2"
+                        style={{ fontSize: '13px' }}
+                      >
+                        {count} appt{count !== 1 ? 's' : ''}
+                      </span>
                     </div>
-                    <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>
-                      {count} appt{count !== 1 ? 's' : ''}
-                    </span>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
           </div>
         </div>
@@ -2333,65 +2498,294 @@ export default function AdminBookingsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ─── Room Selection Dialog ─────────────────── */}
+      {/* ─── Room Selection Dialog (Floor Plan) ────── */}
       <Dialog open={roomSelectOpen} onOpenChange={(v) => { if (!v) { setRoomSelectOpen(false); setRoomSelectAppt(null); } }}>
-        <DialogContent style={{ maxWidth: 420 }}>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <DoorOpen className="w-5 h-5" style={{ color: 'var(--brand-green-text)' }} />
-              Assign Room
-            </DialogTitle>
-          </DialogHeader>
-          {roomSelectAppt && (
-            <div className="space-y-4">
-              {/* Patient info */}
-              <div className="flex items-center gap-3 p-3 bg-[var(--surface-elevated)]" style={{ borderRadius: 10 }}>
-                <Avatar className="w-10 h-10">
-                  <AvatarImage src={roomSelectAppt.petImage} alt={roomSelectAppt.petName} className="object-cover" />
-                  <AvatarFallback>{(roomSelectAppt.petName || '').slice(0, 2)}</AvatarFallback>
-                </Avatar>
-                <div>
-                  <p className="text-[var(--text-primary)]" style={{ fontSize: 15, fontWeight: 600 }}>{roomSelectAppt.petName}</p>
-                  <p className="text-[var(--text-secondary)]" style={{ fontSize: 12 }}>{roomSelectAppt.ownerName} · {roomSelectAppt.service}</p>
-                </div>
-              </div>
+        <DialogContent
+          className="p-0 overflow-hidden gap-0 [&>button]:top-[14px] [&>button]:right-[14px] [&>button]:w-8 [&>button]:h-8 [&>button]:flex [&>button]:items-center [&>button]:justify-center [&>button]:rounded-[8px] [&>button]:!bg-[var(--surface-white)] [&>button]:!text-[var(--text-secondary)] [&>button]:!opacity-100 [&>button]:hover:!bg-[var(--surface-elevated)] [&>button]:!border [&>button]:!border-[var(--border-color)] [&>button]:transition-colors [&>button>svg]:w-4 [&>button>svg]:h-4"
+          style={{
+            maxWidth: 720,
+            width: '95vw',
+            maxHeight: '92vh',
+            display: 'flex',
+            flexDirection: 'column',
+            boxShadow: '0 0 0 1px color-mix(in srgb, var(--brand-green-text) 15%, transparent), 0 8px 32px rgba(0,0,0,0.22)',
+          }}
+        >
+          {roomSelectAppt && (() => {
+            // Compute the bounding box of all rooms so the canvas auto-fits
+            const cols = clinicRooms.reduce((mx, r) => Math.max(mx, r.pos_x + r.width), 0);
+            const rowsCount = clinicRooms.reduce((mx, r) => Math.max(mx, r.pos_y + r.height), 0);
+            // Cell size is computed to fit ~640px wide canvas comfortably.
+            const CANVAS_W = 640;
+            const cellPx = cols > 0 ? Math.max(14, Math.min(28, Math.floor(CANVAS_W / Math.max(cols, 12)))) : 22;
+            const canvasW = (cols || 12) * cellPx;
+            const canvasH = (rowsCount || 8) * cellPx;
+            const availableCount = clinicRooms.filter((r) => !busyRoomMap.has(r.id)).length;
 
-              {/* Room grid */}
-              <div>
-                <p className="text-[var(--text-secondary)] mb-2" style={{ fontSize: 13, fontWeight: 600 }}>Select a room</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {CLINIC_ROOMS.map((room) => {
-                    const occupied = occupiedRooms.get(room);
-                    const isBusy = !!occupied;
-                    return (
-                      <button
-                        key={room}
-                        disabled={isBusy}
-                        onClick={() => handleRoomConfirm(room)}
-                        className="flex flex-col items-center gap-1 py-4 transition-all"
-                        style={{
-                          borderRadius: 10,
-                          border: isBusy ? '1px solid var(--border-color)' : '1.5px solid var(--brand-green-text)',
-                          background: isBusy ? 'var(--surface-elevated)' : 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)',
-                          cursor: isBusy ? 'not-allowed' : 'pointer',
-                          opacity: isBusy ? 0.5 : 1,
-                        }}
-                      >
-                        <DoorOpen style={{ width: 22, height: 22, color: isBusy ? 'var(--text-secondary)' : 'var(--brand-green-text)' }} />
-                        <span style={{ fontSize: 14, fontWeight: 600, color: isBusy ? 'var(--text-secondary)' : 'var(--brand-green-text)' }}>{room}</span>
-                        {isBusy && (
-                          <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{occupied.petName}</span>
-                        )}
-                        {!isBusy && (
-                          <span style={{ fontSize: 10, color: 'var(--brand-green-text)' }}>Available</span>
-                        )}
-                      </button>
-                    );
-                  })}
+            return (
+              <>
+                {/* Header */}
+                <div
+                  style={{
+                    padding: '16px 22px',
+                    borderBottom: '1px solid var(--border-color)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 14,
+                    background: 'linear-gradient(135deg, color-mix(in srgb, var(--brand-green-text) 10%, transparent), transparent 60%)',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 38, height: 38, borderRadius: 10,
+                      backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 14%, transparent)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                    }}
+                  >
+                    <Building2 style={{ width: 18, height: 18, color: 'var(--brand-green-text)' }} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
+                      Assign a Room
+                    </p>
+                    <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '2px 0 0' }}>
+                      Pick any free room — it will be occupied for the visit duration.
+                    </p>
+                  </div>
                 </div>
-              </div>
-            </div>
-          )}
+
+                {/* Patient strip */}
+                <div
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    padding: '14px 22px',
+                    backgroundColor: 'var(--surface-elevated)',
+                    borderBottom: '1px solid var(--border-color)',
+                  }}
+                >
+                  <Avatar className="w-11 h-11">
+                    <AvatarImage src={roomSelectAppt.petImage} alt={roomSelectAppt.petName} className="object-cover" />
+                    <AvatarFallback>{(roomSelectAppt.petName || '').slice(0, 2)}</AvatarFallback>
+                  </Avatar>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
+                      {roomSelectAppt.petName}
+                    </p>
+                    <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '2px 0 0' }}>
+                      {roomSelectAppt.ownerName} &middot; {roomSelectAppt.service}
+                    </p>
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      padding: '5px 11px',
+                      borderRadius: 9999,
+                      backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)',
+                      border: '1px solid color-mix(in srgb, var(--brand-green-text) 30%, transparent)',
+                    }}
+                  >
+                    <Clock style={{ width: 12, height: 12, color: 'var(--brand-green-text)' }} />
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand-green-text)' }}>
+                      {roomSelectAppt.timeStart} – {roomSelectAppt.timeEnd}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Body */}
+                <div style={{ padding: '18px 22px 8px', overflowY: 'auto' }}>
+                  {/* Legend */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                    <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>
+                      Floor Plan
+                    </p>
+                    <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-secondary)' }}>
+                        <span style={{ width: 9, height: 9, borderRadius: 2, backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 30%, transparent)', border: '1px solid var(--brand-green-text)' }} />
+                        Available
+                      </span>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-secondary)' }}>
+                        <span style={{ width: 9, height: 9, borderRadius: 2, backgroundColor: 'color-mix(in srgb, #d4183d 22%, transparent)', border: '1px solid #d4183d' }} />
+                        Busy
+                      </span>
+                    </div>
+                  </div>
+
+                  {roomsLoading ? (
+                    <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                      <Loader2 className="animate-spin" style={{ width: 18, height: 18, margin: '0 auto 8px' }} />
+                      <p style={{ fontSize: 12, margin: 0 }}>Loading rooms…</p>
+                    </div>
+                  ) : clinicRooms.length === 0 ? (
+                    <div style={{
+                      padding: '32px 16px', textAlign: 'center', color: 'var(--text-secondary)',
+                      border: '1.5px dashed var(--border-color)', borderRadius: 12,
+                    }}>
+                      <Building2 style={{ width: 32, height: 32, opacity: 0.4, margin: '0 auto 8px' }} />
+                      <p style={{ fontSize: 13, fontWeight: 600, margin: 0 }}>No rooms configured yet</p>
+                      <p style={{ fontSize: 11, margin: '4px 0 0' }}>
+                        Ask a SuperAdmin to set up the floor plan in <b>Clinics → Floor Plan Builder</b>.
+                      </p>
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        position: 'relative',
+                        width: canvasW,
+                        height: canvasH,
+                        margin: '0 auto',
+                        backgroundColor: 'var(--surface-white)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: 10,
+                        backgroundImage: `
+                          linear-gradient(to right, color-mix(in srgb, var(--border-color) 50%, transparent) 1px, transparent 1px),
+                          linear-gradient(to bottom, color-mix(in srgb, var(--border-color) 50%, transparent) 1px, transparent 1px)
+                        `,
+                        backgroundSize: `${cellPx}px ${cellPx}px`,
+                      }}
+                    >
+                      {clinicRooms.map((room) => {
+                        const cfg = ROOM_TYPES[room.type] ?? ROOM_TYPES.other;
+                        const Icon = cfg.icon;
+                        const busy = busyRoomMap.get(room.id);
+                        const isBusy = !!busy;
+                        // Service rooms (restroom / storage / lobby) can't host appointments
+                        const isAssignable = !['restroom', 'storage', 'lobby', 'office', 'reception'].includes(room.type);
+                        const disabled = isBusy || !isAssignable;
+                        const baseColor = disabled ? '#94A3B8' : cfg.color;
+                        const baseBg = isBusy
+                          ? 'color-mix(in srgb, #d4183d 12%, transparent)'
+                          : disabled
+                            ? 'color-mix(in srgb, #94A3B8 12%, transparent)'
+                            : (room.color || cfg.bg);
+                        const borderColor = isBusy
+                          ? '#d4183d'
+                          : disabled
+                            ? 'color-mix(in srgb, #94A3B8 50%, transparent)'
+                            : 'color-mix(in srgb, ' + cfg.color + ' 65%, transparent)';
+
+                        return (
+                          <button
+                            key={room.id}
+                            type="button"
+                            disabled={disabled}
+                            onClick={() => handleRoomConfirm({ id: room.id, name: room.name })}
+                            title={
+                              isBusy
+                                ? busy?.reason === 'in_progress'
+                                  ? `In Progress: ${busy?.petName} (${busy?.timeStart} – ${busy?.timeEnd})`
+                                  : `Busy: ${busy?.petName} (${busy?.timeStart} – ${busy?.timeEnd})`
+                                : !isAssignable
+                                  ? `${cfg.label} — not bookable`
+                                  : `Assign ${room.name}`
+                            }
+                            style={{
+                              position: 'absolute',
+                              left: room.pos_x * cellPx,
+                              top: room.pos_y * cellPx,
+                              width: room.width * cellPx,
+                              height: room.height * cellPx,
+                              backgroundColor: baseBg,
+                              border: `2px solid ${borderColor}`,
+                              borderRadius: 6,
+                              cursor: disabled ? 'not-allowed' : 'pointer',
+                              padding: '4px 6px',
+                              display: 'flex', flexDirection: 'column',
+                              alignItems: 'flex-start', justifyContent: 'space-between',
+                              overflow: 'hidden',
+                              transition: 'transform 0.12s, box-shadow 0.12s',
+                              boxShadow: 'none',
+                              opacity: disabled && !isBusy ? 0.55 : 1,
+                            }}
+                            onMouseEnter={(e) => {
+                              if (disabled) return;
+                              e.currentTarget.style.boxShadow = `0 0 0 3px color-mix(in srgb, ${cfg.color} 25%, transparent)`;
+                              e.currentTarget.style.transform = 'translateY(-1px)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.boxShadow = 'none';
+                              e.currentTarget.style.transform = 'none';
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, width: '100%' }}>
+                              <Icon style={{ width: 11, height: 11, color: baseColor, flexShrink: 0 }} />
+                              <span
+                                style={{
+                                  fontSize: 10,
+                                  fontWeight: 700,
+                                  color: 'var(--text-primary)',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                  lineHeight: 1.1,
+                                }}
+                              >
+                                {room.name}
+                              </span>
+                            </div>
+                            {isBusy ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 1, width: '100%' }}>
+                                <span style={{ fontSize: 9, fontWeight: 700, color: '#d4183d', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: 1.1 }}>
+                                  {busy?.reason === 'in_progress' ? 'In Use' : 'Busy'}
+                                </span>
+                                <span style={{ fontSize: 9, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.1 }}>
+                                  {busy?.petName}
+                                </span>
+                              </div>
+                            ) : isAssignable ? (
+                              <span style={{ fontSize: 9, fontWeight: 700, color: cfg.color, textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: 1.1 }}>
+                                Free
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em', lineHeight: 1.1 }}>
+                                {cfg.label}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Footer */}
+                <div
+                  style={{
+                    padding: '12px 22px 16px',
+                    borderTop: '1px solid var(--border-color)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    flexWrap: 'wrap',
+                    backgroundColor: 'var(--surface-elevated)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--text-secondary)' }}>
+                    <CheckCircle2 style={{ width: 13, height: 13, color: 'var(--brand-green-text)' }} />
+                    <span>
+                      <b style={{ color: 'var(--text-primary)' }}>{availableCount}</b> of <b style={{ color: 'var(--text-primary)' }}>{clinicRooms.length}</b> rooms available
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setRoomSelectOpen(false); setRoomSelectAppt(null); }}
+                    style={{
+                      padding: '8px 16px',
+                      borderRadius: 8,
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'var(--surface-white)',
+                      color: 'var(--text-primary)',
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 
@@ -2435,7 +2829,6 @@ export default function AdminBookingsPage() {
             maxHeight: '92vh',
             display: 'flex',
             flexDirection: 'column',
-            boxShadow: '0 0 0 1px color-mix(in srgb, var(--brand-green-text) 15%, transparent), 0 8px 32px rgba(0,0,0,0.22), 0 0 60px color-mix(in srgb, var(--brand-green-text) 18%, transparent)',
           }}
         >
           {selectedAppt && (() => {
@@ -2448,17 +2841,42 @@ export default function AdminBookingsPage() {
 
             return (
               <>
-                {/* ── Coloured header strip (always shown) ── */}
-                <div className="pl-6 pr-16 py-4 flex items-center gap-4 flex-shrink-0" style={{ background: 'var(--brand-green-text)' }}>
-                  <Avatar className="w-12 h-12 border-2 border-white/20 flex-shrink-0">
+                {/* ── Header strip (matches New Appointment pattern) ── */}
+                <div
+                  className="flex items-center gap-4 flex-shrink-0"
+                  style={{
+                    background: 'var(--surface-elevated)',
+                    padding: '18px 64px 18px 24px',
+                    borderBottom: '1px solid var(--border-color)',
+                    borderLeft: '4px solid var(--brand-green-text)',
+                  }}
+                >
+                  <Avatar
+                    className="w-11 h-11 flex-shrink-0"
+                    style={{ border: '1px solid var(--border-color)' }}
+                  >
                     <AvatarImage src={selectedAppt.petImage} alt={selectedAppt.petName} className="object-cover" />
                     <AvatarFallback className="text-base font-bold">{selectedAppt.petName.slice(0, 2)}</AvatarFallback>
                   </Avatar>
                   <div className="flex-1 min-w-0">
-                    <p className="text-white font-bold" style={{ fontSize: '17px' }}>{selectedAppt.petName}</p>
-                    <p className="text-white/70" style={{ fontSize: '12px' }}>{selectedAppt.ownerName} · {selectedAppt.species} · {selectedAppt.timeStart}</p>
+                    <p style={{ fontSize: '17px', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.2, margin: 0 }}>
+                      {selectedAppt.petName}
+                    </p>
+                    <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                      {selectedAppt.ownerName} · {selectedAppt.species} · {selectedAppt.timeStart}
+                    </p>
                   </div>
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1" style={{ backgroundColor: 'rgba(255,255,255,0.15)', color: 'white', borderRadius: '9999px', fontSize: '11px', fontWeight: 600 }}>
+                  <span
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1"
+                    style={{
+                      backgroundColor: s.bg,
+                      color: s.text,
+                      borderRadius: '9999px',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      border: `1px solid color-mix(in srgb, ${s.text} 25%, transparent)`,
+                    }}
+                  >
                     <StatusIcon className="w-3 h-3" />
                     {selectedAppt.status}
                   </span>
@@ -2528,7 +2946,7 @@ export default function AdminBookingsPage() {
                           <Select value={editTime} onValueChange={setEditTime}>
                             <SelectTrigger><SelectValue /></SelectTrigger>
                             <SelectContent className="max-h-64">
-                              {getSlotAvailability(editDate, selectedAppt?.id).map((slot) => (
+                              {getSlotAvailability(editDate, selectedAppt?.id, selectedAppt?.vetId).map((slot) => (
                                 <SelectItem key={slot.time24} value={slot.time24} disabled={!!slot.booked}>
                                   <span className="flex items-center gap-2">
                                     <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: slot.booked ? '#d4183d' : 'var(--brand-green-text)' }} />
@@ -2717,7 +3135,54 @@ export default function AdminBookingsPage() {
               {/* Patient — New (first visit) */}
               {visitType === 'new' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {/* ── Pet Information ── */}
                   <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Pet Information</p>
+
+                  {/* Pet Photo */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div
+                      className="relative group cursor-pointer"
+                      onClick={() => npPhotoInputRef.current?.click()}
+                      style={{ width: '56px', height: '56px', borderRadius: '9999px', overflow: 'hidden', flexShrink: 0, backgroundColor: 'var(--surface-elevated)', border: '2px dashed var(--border-color)' }}
+                    >
+                      {npPhotoPreview ? (
+                        <img src={npPhotoPreview} alt="Pet" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      ) : (
+                        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <Camera style={{ width: '20px', height: '20px', color: 'var(--text-secondary)' }} />
+                        </div>
+                      )}
+                      {npPhotoPreview && (
+                        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" style={{ backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: '9999px' }}>
+                          <Camera style={{ width: '18px', height: '18px', color: '#fff' }} />
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => npPhotoInputRef.current?.click()}
+                        style={{ fontSize: '13px', fontWeight: 600, color: 'var(--brand-green-text)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                      >
+                        {npPhotoPreview ? 'Change photo' : 'Add pet photo'}
+                      </button>
+                      <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>JPG, PNG up to 5MB</p>
+                    </div>
+                    <input
+                      ref={npPhotoInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          setNpPhotoFile(file);
+                          setNpPhotoPreview(URL.createObjectURL(file));
+                        }
+                      }}
+                    />
+                  </div>
+
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                     <div>
                       <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Pet Name *</p>
@@ -2756,11 +3221,29 @@ export default function AdminBookingsPage() {
                       <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Date of Birth</p>
                       <Input type="date" value={npDob} onChange={e => setNpDob(e.target.value)} />
                     </div>
+                    <WeightPicker value={npWeight} onChange={setNpWeight} />
                     <div>
-                      <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Weight</p>
-                      <Input placeholder="e.g. 12.5 kg" value={npWeight} onChange={e => setNpWeight(e.target.value)} />
+                      <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Assigned Doctor</p>
+                      <Select
+                        value={newApptVetId}
+                        onValueChange={(id) => {
+                          const vet = staffList.find(v => v.id === id);
+                          setNewApptVetId(id);
+                          setNewApptVetName(vet?.name || '');
+                          if (id) fetchVetTimeBlocks(id);
+                        }}
+                      >
+                        <SelectTrigger><SelectValue placeholder="Select doctor..." /></SelectTrigger>
+                        <SelectContent>
+                          {staffList.map(v => (
+                            <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
+
+                  {/* ── Owner Information ── */}
                   <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '12px' }}>
                     <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '12px' }}>Owner Information</p>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -2776,6 +3259,43 @@ export default function AdminBookingsPage() {
                         <div>
                           <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Phone</p>
                           <Input type="tel" placeholder="(555) 000-0000" value={npOwnerPhone} onChange={e => setNpOwnerPhone(e.target.value)} />
+                        </div>
+                      </div>
+                      <div>
+                        <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Street Address</p>
+                        <Input placeholder="123 Main St, Apt 4B" value={npAddress} onChange={e => setNpAddress(e.target.value)} />
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                        <div>
+                          <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>City</p>
+                          <Input placeholder="Springfield" value={npCity} onChange={e => setNpCity(e.target.value)} />
+                        </div>
+                        <div>
+                          <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>{npCountry === 'CA' ? 'Province' : 'State'}</p>
+                          <Select value={npState} onValueChange={setNpState}>
+                            <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
+                            <SelectContent>
+                              {(npCountry === 'CA' ? CA_PROVINCES : US_STATES).map(s => (
+                                <SelectItem key={s} value={s}>{s}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                        <div>
+                          <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>{npCountry === 'CA' ? 'Postal Code' : 'ZIP Code'}</p>
+                          <Input placeholder={npCountry === 'CA' ? 'A1A 1A1' : '12345'} value={npZip} onChange={e => setNpZip(e.target.value)} />
+                        </div>
+                        <div>
+                          <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Country</p>
+                          <Select value={npCountry} onValueChange={(v) => { setNpCountry(v); setNpState(''); }}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="US">United States</SelectItem>
+                              <SelectItem value="CA">Canada</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </div>
                       </div>
                     </div>
@@ -2826,65 +3346,260 @@ export default function AdminBookingsPage() {
                 <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Veterinarian</p>
                 <div className="flex gap-2 flex-wrap">
                   {staffList.length === 0 && <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>No vets found</span>}
-                  {staffList.map((v, i) => {
-                    const colors = ['var(--brand-green-text)', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261'];
-                    const color = colors[i % colors.length];
-                    const active = newApptVetId === v.id;
-                    return (
-                      <button key={v.id} onClick={() => { setNewApptVetId(v.id); setNewApptVetName(v.name); fetchVetTimeBlocks(v.id); }} style={{
-                        padding: '7px 14px', borderRadius: '8px', fontSize: '13px',
-                        fontWeight: active ? 700 : 500,
-                        border: `1.5px solid ${active ? color : 'var(--border-color)'}`,
-                        backgroundColor: active ? `${color}18` : 'transparent',
-                        color: active ? color : 'var(--text-secondary)',
-                        cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '7px',
-                        transition: 'all 0.15s',
-                      }}>
-                        <span style={{ width: '22px', height: '22px', borderRadius: '50%', backgroundColor: `${color}20`, color: color, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', fontWeight: 700, flexShrink: 0 }}>
-                          {v.initials}
-                        </span>
-                        {v.name}
-                      </button>
-                    );
-                  })}
+                  {(() => {
+                    // Determine the assigned vet for the currently-selected pet (if any)
+                    const selectedPet = newApptPetId ? allPets.find(p => p.id === newApptPetId) : null;
+                    const assignedVetId = selectedPet?.assigned_vet_id || null;
+                    return staffList.map((v, i) => {
+                      const colors = ['var(--brand-green-text)', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261'];
+                      const color = colors[i % colors.length];
+                      const active = newApptVetId === v.id;
+                      const isAssigned = assignedVetId === v.id;
+                      return (
+                        <button
+                          key={v.id}
+                          onClick={() => { setNewApptVetId(v.id); setNewApptVetName(v.name); fetchVetTimeBlocks(v.id); }}
+                          title={isAssigned ? `${v.name} is the assigned doctor for this patient` : undefined}
+                          style={{
+                            position: 'relative',
+                            padding: '7px 14px', borderRadius: '8px', fontSize: '13px',
+                            fontWeight: active || isAssigned ? 700 : 500,
+                            border: `1.5px solid ${active ? color : isAssigned ? `color-mix(in srgb, ${color} 55%, transparent)` : 'var(--border-color)'}`,
+                            backgroundColor: active ? `${color}18` : isAssigned ? `${color}10` : 'transparent',
+                            color: active ? color : isAssigned ? color : 'var(--text-secondary)',
+                            cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '7px',
+                            transition: 'all 0.15s',
+                          }}
+                        >
+                          <span style={{ width: '22px', height: '22px', borderRadius: '50%', backgroundColor: `${color}20`, color: color, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', fontWeight: 700, flexShrink: 0 }}>
+                            {v.initials}
+                          </span>
+                          {v.name}
+                          {isAssigned && (
+                            <span
+                              className="assigned-vet-star"
+                              style={{ color, marginLeft: '2px' }}
+                              aria-label="Assigned doctor"
+                            >
+                              <Star style={{ width: '13px', height: '13px', fill: 'currentColor' }} />
+                            </span>
+                          )}
+                        </button>
+                      );
+                    });
+                  })()}
                 </div>
+                {(() => {
+                  const selectedPet = newApptPetId ? allPets.find(p => p.id === newApptPetId) : null;
+                  if (!selectedPet?.assigned_vet_id) return null;
+                  const assignedStaff = staffList.find(s => s.id === selectedPet.assigned_vet_id);
+                  if (!assignedStaff) return null;
+                  return (
+                    <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <Star style={{ width: '10px', height: '10px', fill: 'currentColor' }} />
+                      <span>{assignedStaff.name} is this patient's assigned doctor</span>
+                    </p>
+                  );
+                })()}
               </div>
 
               {/* Date */}
               <div>
                 <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Date</p>
-                <Input type="date" value={newApptDate} onChange={e => setNewApptDate(e.target.value)} />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const d = new Date((newApptDate || new Date().toISOString().slice(0,10)) + 'T12:00:00');
+                      d.setDate(d.getDate() - 1);
+                      const y = d.getFullYear();
+                      const m = String(d.getMonth() + 1).padStart(2, '0');
+                      const day = String(d.getDate()).padStart(2, '0');
+                      setNewApptDate(`${y}-${m}-${day}`);
+                    }}
+                    aria-label="Previous day"
+                    style={{
+                      flexShrink: 0,
+                      width: '36px',
+                      height: '36px',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'transparent',
+                      color: 'var(--text-secondary)',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--surface-elevated)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--brand-green-text)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--brand-green-text)'; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-secondary)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border-color)'; }}
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <Input type="date" value={newApptDate} onChange={e => setNewApptDate(e.target.value)} />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const d = new Date((newApptDate || new Date().toISOString().slice(0,10)) + 'T12:00:00');
+                      d.setDate(d.getDate() + 1);
+                      const y = d.getFullYear();
+                      const m = String(d.getMonth() + 1).padStart(2, '0');
+                      const day = String(d.getDate()).padStart(2, '0');
+                      setNewApptDate(`${y}-${m}-${day}`);
+                    }}
+                    aria-label="Next day"
+                    style={{
+                      flexShrink: 0,
+                      width: '36px',
+                      height: '36px',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'transparent',
+                      color: 'var(--text-secondary)',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--surface-elevated)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--brand-green-text)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--brand-green-text)'; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-secondary)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border-color)'; }}
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
 
               {/* Time slot grid */}
               <div>
                 <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Time</p>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
-                  {getSlotAvailability(newApptDate).map(slot => {
+                  {getSlotAvailability(newApptDate, undefined, newApptVetId, newApptShowAllHours ? EXTENDED_SCHEDULE_SLOTS : SCHEDULE_SLOTS).map(slot => {
                     const isActive = newApptTime === slot.time24;
                     const isUnavailable = !!slot.booked || !!slot.blocked;
+                    const isHovered = hoveredSlotKey === slot.time24;
+                    const bookedAppt = slot.booked as any;
                     return (
-                      <button
+                      <div
                         key={slot.time24}
-                        disabled={isUnavailable}
-                        onClick={() => setNewApptTime(slot.time24)}
-                        style={{
-                          padding: '8px 4px', borderRadius: '8px', fontSize: '12px', fontWeight: isActive ? 700 : 500,
-                          border: `1.5px solid ${isActive ? 'var(--brand-green-text)' : 'var(--border-color)'}`,
-                          backgroundColor: isActive ? 'var(--brand-green-text)' : isUnavailable ? 'var(--surface-elevated)' : 'transparent',
-                          color: isActive ? 'var(--on-brand-green)' : isUnavailable ? 'var(--text-secondary)' : 'var(--text-primary)',
-                          cursor: isUnavailable ? 'not-allowed' : 'pointer',
-                          opacity: isUnavailable ? 0.5 : 1,
-                          transition: 'all 0.15s',
-                          textDecoration: isUnavailable ? 'line-through' : 'none',
-                        }}
-                        title={slot.booked ? `Booked: ${(slot.booked as any).petName}` : slot.blocked ? `Blocked: ${slot.blocked}` : slot.time}
+                        style={{ position: 'relative' }}
+                        onMouseEnter={() => setHoveredSlotKey(slot.time24)}
+                        onMouseLeave={() => setHoveredSlotKey(prev => prev === slot.time24 ? null : prev)}
                       >
-                        {slot.time}
-                      </button>
+                        <button
+                          disabled={isUnavailable}
+                          onClick={() => setNewApptTime(slot.time24)}
+                          style={{
+                            width: '100%',
+                            padding: '8px 4px', borderRadius: '8px', fontSize: '12px', fontWeight: isActive ? 700 : 500,
+                            border: `1.5px solid ${isActive ? 'var(--brand-green-text)' : 'var(--border-color)'}`,
+                            backgroundColor: isActive ? 'var(--brand-green-text)' : isUnavailable ? 'var(--surface-elevated)' : 'transparent',
+                            color: isActive ? 'var(--on-brand-green)' : isUnavailable ? 'var(--text-secondary)' : 'var(--text-primary)',
+                            cursor: isUnavailable ? 'not-allowed' : 'pointer',
+                            opacity: isUnavailable ? 0.5 : 1,
+                            transition: 'all 0.15s',
+                            textDecoration: isUnavailable ? 'line-through' : 'none',
+                          }}
+                        >
+                          {slot.time}
+                        </button>
+                        {isHovered && isUnavailable && (
+                          <div
+                            style={{
+                              position: 'absolute',
+                              bottom: 'calc(100% + 8px)',
+                              left: '50%',
+                              transform: 'translateX(-50%)',
+                              minWidth: '180px',
+                              maxWidth: '240px',
+                              padding: '10px 12px',
+                              borderRadius: '8px',
+                              backgroundColor: 'var(--text-primary)',
+                              color: 'var(--surface-white)',
+                              fontSize: '11px',
+                              lineHeight: 1.4,
+                              boxShadow: '0 6px 20px rgba(0,0,0,0.25)',
+                              zIndex: 100,
+                              pointerEvents: 'none',
+                              whiteSpace: 'normal',
+                              textAlign: 'left',
+                            }}
+                          >
+                            {bookedAppt ? (
+                              <>
+                                <div style={{ fontSize: '10px', fontWeight: 700, opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>Booked</div>
+                                <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '2px' }}>{bookedAppt.petName}</div>
+                                <div style={{ opacity: 0.85 }}>{bookedAppt.ownerName}</div>
+                                {bookedAppt.service && bookedAppt.service !== '—' && (
+                                  <div style={{ opacity: 0.85, marginTop: '2px' }}>{bookedAppt.service}</div>
+                                )}
+                                <div style={{ opacity: 0.7, marginTop: '4px', fontSize: '10px' }}>
+                                  {bookedAppt.timeStart}{bookedAppt.timeEnd ? ` – ${bookedAppt.timeEnd}` : ''}
+                                  {bookedAppt.vet && bookedAppt.vet !== '—' ? ` · ${bookedAppt.vet}` : ''}
+                                </div>
+                              </>
+                            ) : slot.blocked ? (
+                              <>
+                                <div style={{ fontSize: '10px', fontWeight: 700, opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>Unavailable</div>
+                                <div style={{ fontWeight: 600 }}>{slot.blocked}</div>
+                              </>
+                            ) : null}
+                            {/* Arrow */}
+                            <div
+                              style={{
+                                position: 'absolute',
+                                top: '100%',
+                                left: '50%',
+                                transform: 'translateX(-50%)',
+                                width: 0,
+                                height: 0,
+                                borderLeft: '6px solid transparent',
+                                borderRight: '6px solid transparent',
+                                borderTop: '6px solid var(--text-primary)',
+                              }}
+                            />
+                          </div>
+                        )}
+                      </div>
                     );
                   })}
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setNewApptShowAllHours(v => !v)}
+                  style={{
+                    marginTop: '8px',
+                    width: '100%',
+                    padding: '8px',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    border: '1px dashed var(--border-color)',
+                    backgroundColor: 'transparent',
+                    color: 'var(--brand-green-text)',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                  }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--brand-green-text)'; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border-color)'; }}
+                >
+                  {newApptShowAllHours ? (
+                    <>
+                      <ChevronUp className="w-3.5 h-3.5" />
+                      Show fewer hours
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="w-3.5 h-3.5" />
+                      Show more hours (6 AM – 9:30 PM)
+                    </>
+                  )}
+                </button>
               </div>
 
               {/* Duration */}
@@ -3031,6 +3746,7 @@ export default function AdminBookingsPage() {
               disabled={savingAppt}
               onClick={async () => {
                 if (savingAppt) return;
+                if (!newApptDate || !newApptTime) { alert('Please select a date and time.'); return; }
                 setSavingAppt(true);
                 try {
                   const tzOffset = (() => { const off = new Date().getTimezoneOffset(); const sign = off <= 0 ? '+' : '-'; const h = String(Math.floor(Math.abs(off) / 60)).padStart(2, '0'); const m = String(Math.abs(off) % 60).padStart(2, '0'); return `${sign}${h}:${m}`; })();
@@ -3052,12 +3768,33 @@ export default function AdminBookingsPage() {
                         last_name: nameParts.slice(1).join(' ') || '',
                         email: npOwnerEmail || undefined,
                         phone: npOwnerPhone || undefined,
+                        address: npAddress || undefined,
+                        city: npCity || undefined,
+                        state: npState || undefined,
+                        zip: npZip || undefined,
+                        country: npCountry || 'US',
                         health_status: newApptPetHealth,
                       }])
                       .select('id')
                       .single();
                     if (cErr || !newClient) { alert('Failed to create client: ' + (cErr?.message || 'Unknown error')); setSavingAppt(false); return; }
                     finalClientId = newClient.id;
+
+                    // Upload pet photo if one was selected
+                    let photoUrl: string | null = null;
+                    if (npPhotoFile) {
+                      try {
+                        const ext = npPhotoFile.name.split('.').pop() || 'jpg';
+                        const path = `${finalClientId}/${Date.now()}.${ext}`;
+                        const { error: uploadErr } = await supabase.storage.from('pet-images').upload(path, npPhotoFile, { upsert: true, contentType: npPhotoFile.type });
+                        if (!uploadErr) {
+                          const { data: urlData } = supabase.storage.from('pet-images').getPublicUrl(path);
+                          photoUrl = urlData.publicUrl + '?t=' + Date.now();
+                        }
+                      } catch (photoErr) {
+                        console.warn('[AdminBookings] pet photo upload failed:', photoErr);
+                      }
+                    }
 
                     const weightKg = npWeight ? parseFloat(npWeight) : undefined;
                     const { data: newPet, error: pErr } = await db
@@ -3071,6 +3808,7 @@ export default function AdminBookingsPage() {
                         sex: npSex || undefined,
                         weight_kg: weightKg && !isNaN(weightKg) ? weightKg : undefined,
                         assigned_vet_id: newApptVetId || undefined,
+                        photo_url: photoUrl,
                         is_active: true,
                       }])
                       .select('id')
@@ -3122,6 +3860,14 @@ export default function AdminBookingsPage() {
                       window.dispatchEvent(new Event('notifCountChanged'));
                     } catch {}
                   }
+
+                  // Reset new-patient fields so the form starts fresh next time
+                  setNpPetName(''); setNpSpecies(''); setNpBreed(''); setNpSex('');
+                  setNpDob(''); setNpWeight('');
+                  setNpOwnerName(''); setNpOwnerEmail(''); setNpOwnerPhone('');
+                  setNpAddress(''); setNpCity(''); setNpState(''); setNpZip(''); setNpCountry('US');
+                  if (npPhotoPreview) URL.revokeObjectURL(npPhotoPreview);
+                  setNpPhotoFile(null); setNpPhotoPreview(null);
 
                   setDialogOpen(false);
                 } finally {

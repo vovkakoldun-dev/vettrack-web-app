@@ -144,8 +144,8 @@ export default function CheckoutPage() {
         const start = new Date(data.scheduled_at);
         const end = new Date(start.getTime() + (data.duration_minutes ?? 30) * 60000);
         const fmt = (d: Date) => {
-          let h = d.getUTCHours();
-          const m = d.getUTCMinutes();
+          let h = d.getHours();
+          const m = d.getMinutes();
           const ampm = h >= 12 ? 'PM' : 'AM';
           if (h > 12) h -= 12;
           if (h === 0) h = 12;

@@ -632,6 +632,8 @@ export default function MyPortalPage() {
 
   // Real clients from Supabase
   const [realPatients, setRealPatients] = useState<any[]>([]);
+  const PATIENTS_PAGE_SIZE = 20;
+  const [patientsShown, setPatientsShown] = useState(PATIENTS_PAGE_SIZE);
   const [addClientOpen, setAddClientOpen] = useState(false);
   const { addClient, refetch: refetchClients } = useClients();
 
@@ -716,8 +718,8 @@ export default function MyPortalPage() {
             const start = new Date(a.scheduled_at);
             const end = new Date(start.getTime() + (a.duration_minutes ?? 30) * 60000);
             const fmtLocal = (d: Date) => {
-              let h = d.getUTCHours();
-              const m = d.getUTCMinutes();
+              let h = d.getHours();
+              const m = d.getMinutes();
               const ampm = h >= 12 ? 'PM' : 'AM';
               if (h > 12) h -= 12;
               if (h === 0) h = 12;
@@ -1338,7 +1340,7 @@ export default function MyPortalPage() {
           <div className="flex-1">
             <h1 className="text-[var(--text-primary)]" style={{ fontSize: '26px', fontWeight: 700 }}>{vetProfile.name}</h1>
             <p className="text-[var(--brand-green-text)]" style={{ fontSize: '15px', fontWeight: 600 }}>{vetProfile.role} · {vetProfile.specialization}</p>
-            <div className="flex items-center gap-3 mt-1">
+            <div className="flex items-center gap-3 flex-wrap mt-1">
               <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{vetProfile.email}</span>
               <span className="text-[var(--border-color)]">|</span>
               <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{vetProfile.phone}</span>
@@ -1350,14 +1352,14 @@ export default function MyPortalPage() {
       </div>
 
       {/* ─── Section 2: Performance Stats ─────────────── */}
-      <div className="grid grid-cols-4 gap-5 mb-8">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
         {glowCards.map((card) => (
           <GlowStatCard key={card.title} {...card} />
         ))}
       </div>
 
       {/* ─── Section 3: My Schedule ───────────────────── */}
-      <div className="grid gap-6 mb-8" style={{ gridTemplateColumns: '1fr 340px', alignItems: 'start' }}>
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-6 mb-8" style={{ alignItems: 'start' }}>
         {/* Left: Day Schedule */}
         <div>
           {/* Date Nav */}
@@ -1473,7 +1475,7 @@ export default function MyPortalPage() {
                             {appt.petImage ? (
                               <img src={appt.petImage} alt={appt.petName} className="w-9 h-9 object-cover" style={{ borderRadius: '9999px' }} />
                             ) : (
-                              <div className="w-9 h-9 flex items-center justify-center text-white font-semibold" style={{ borderRadius: '9999px', backgroundColor: 'var(--brand-green-text)', fontSize: '12px' }}>{appt.petName.slice(0, 2).toUpperCase()}</div>
+                              <div className="w-9 h-9 flex items-center justify-center font-semibold" style={{ borderRadius: '9999px', backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)', fontSize: '12px' }}>{appt.petName.slice(0, 2).toUpperCase()}</div>
                             )}
                             <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-white" style={{ borderRadius: '9999px' }} />
                           </div>
@@ -1516,7 +1518,7 @@ export default function MyPortalPage() {
                           className="w-full flex items-center justify-center gap-2 py-2 transition-all hover:opacity-90 active:scale-[0.98]"
                           style={{
                             backgroundColor: 'var(--brand-green-text)',
-                            color: '#ffffff',
+                            color: 'var(--on-brand-green)',
                             borderRadius: '8px',
                             fontSize: '13px',
                             fontWeight: 600,
@@ -1524,7 +1526,7 @@ export default function MyPortalPage() {
                             cursor: 'pointer',
                           }}
                         >
-                          <Play className="w-3.5 h-3.5 fill-white" />
+                          <Play className="w-3.5 h-3.5" style={{ fill: 'var(--on-brand-green)' }} />
                           Start Appointment
                         </button>
                       </div>
@@ -1537,7 +1539,7 @@ export default function MyPortalPage() {
                         {appt.petImage ? (
                           <img src={appt.petImage} alt={appt.petName} className="w-8 h-8 object-cover flex-shrink-0" style={{ borderRadius: '9999px' }} />
                         ) : (
-                          <div className="w-8 h-8 flex-shrink-0 flex items-center justify-center text-white font-semibold" style={{ borderRadius: '9999px', backgroundColor: 'var(--brand-green-text)', fontSize: '12px' }}>{appt.petName.slice(0, 2).toUpperCase()}</div>
+                          <div className="w-8 h-8 flex-shrink-0 flex items-center justify-center font-semibold" style={{ borderRadius: '9999px', backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)', fontSize: '12px' }}>{appt.petName.slice(0, 2).toUpperCase()}</div>
                         )}
                         <div className="flex-1 min-w-0">
                           <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{appt.petName}</p>
@@ -1554,7 +1556,7 @@ export default function MyPortalPage() {
                       {busyAppt.petImage ? (
                         <img src={busyAppt.petImage} alt={busyAppt.petName} className="w-7 h-7 object-cover flex-shrink-0" style={{ borderRadius: '9999px' }} />
                       ) : (
-                        <div className="w-7 h-7 flex-shrink-0 flex items-center justify-center text-white font-semibold" style={{ borderRadius: '9999px', backgroundColor: 'var(--brand-green-text)', fontSize: '11px' }}>{busyAppt.petName.slice(0, 2).toUpperCase()}</div>
+                        <div className="w-7 h-7 flex-shrink-0 flex items-center justify-center font-semibold" style={{ borderRadius: '9999px', backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)', fontSize: '11px' }}>{busyAppt.petName.slice(0, 2).toUpperCase()}</div>
                       )}
                       <div className="flex-1 min-w-0">
                         <p style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-secondary)' }}>{busyAppt.petName} · {busyAppt.service} (cont.)</p>
@@ -1663,7 +1665,7 @@ export default function MyPortalPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {realPatients.map((p, idx) => {
+                  {realPatients.slice(0, patientsShown).map((p, idx) => {
                     const s = patientStatusStyles[p.status] || patientStatusStyles.Healthy;
                     return (
                       <tr
@@ -1702,6 +1704,27 @@ export default function MyPortalPage() {
                 </tbody>
               </table>
             </div>
+            {realPatients.length > patientsShown && (
+              <div className="p-4 border-t border-[var(--border-color)] flex items-center justify-between gap-3">
+                <span className="text-[var(--text-secondary)]" style={{ fontSize: '12px' }}>
+                  Showing {patientsShown} of {realPatients.length}
+                </span>
+                <button
+                  onClick={() => setPatientsShown(n => Math.min(n + PATIENTS_PAGE_SIZE, realPatients.length))}
+                  className="px-4 py-2 hover:opacity-90 transition-opacity"
+                  style={{
+                    background: 'var(--surface-elevated)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '8px',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                  }}
+                >
+                  Load more
+                </button>
+              </div>
+            )}
           </div>
         </div>
 

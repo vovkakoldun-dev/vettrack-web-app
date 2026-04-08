@@ -433,7 +433,7 @@ export default function AdminMyPortalPage() {
         setTodayCheckins(checkinsRes.data.map((a: any) => {
           const dt = new Date(a.scheduled_at);
           return {
-            time: dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'UTC' }),
+            time: dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
             pet: a.pets?.name || 'Unknown',
             owner: `${a.pets?.clients?.first_name || ''} ${a.pets?.clients?.last_name || ''}`.trim() || 'Unknown',
             service: a.services?.name || a.reason || 'Appointment',
@@ -459,8 +459,8 @@ export default function AdminMyPortalPage() {
         for (const a of apptsRes.data as any[]) {
           const petName = a.pets?.name || '';
           const dt = new Date(a.scheduled_at);
-          const timeStr = dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'UTC' });
-          const dateStr = dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+          const timeStr = dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+          const dateStr = dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
           if (a.status === 'Cancelled') {
             activities.push({ icon: CalendarCheck, color: '#06B6D4', text: 'Cancellation processed', sub: `${petName} · ${dateStr}`, time: formatActivityTime(dt), link: '/admin/bookings' });
           } else {

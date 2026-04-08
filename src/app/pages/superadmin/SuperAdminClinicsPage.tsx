@@ -348,25 +348,72 @@ export default function SuperAdminClinicsPage() {
 
   // Logo upload (PNG / SVG) → goes to a separate bucket. Same draft pattern:
   // returns the public URL, the editor stores it locally, the Save button persists.
+  // After uploading, every other file in this clinic's logo folder is removed so
+  // each clinic always has exactly one logo file (no orphans accumulate).
   const uploadClinicLogo = useCallback(async (file: File): Promise<string | null> => {
     if (!selectedClinicId) return null;
     setLogoUploading(true);
     try {
       const ext = file.name.split('.').pop()?.toLowerCase() || 'png';
-      const path = `${selectedClinicId}/logo-${Date.now()}.${ext}`;
+      const newPath = `${selectedClinicId}/logo-${Date.now()}.${ext}`;
       const { error: upErr } = await supabase.storage
         .from('clinic-logos')
-        .upload(path, file, { cacheControl: '3600', upsert: true, contentType: file.type });
+        .upload(newPath, file, { cacheControl: '3600', upsert: true, contentType: file.type });
       if (upErr) {
         console.error('[clinics] logo upload failed:', upErr.message);
         return null;
       }
-      const { data: urlData } = supabase.storage.from('clinic-logos').getPublicUrl(path);
+
+      // Cleanup: remove every other file in this clinic's folder.
+      // We keep ONLY the file we just uploaded.
+      try {
+        const { data: listed } = await supabase.storage
+          .from('clinic-logos')
+          .list(selectedClinicId, { limit: 100 });
+        if (listed && listed.length > 0) {
+          const stalePaths = listed
+            .map(f => `${selectedClinicId}/${f.name}`)
+            .filter(p => p !== newPath);
+          if (stalePaths.length > 0) {
+            const { error: delErr } = await supabase.storage
+              .from('clinic-logos')
+              .remove(stalePaths);
+            if (delErr) {
+              console.warn('[clinics] failed to remove stale logos:', delErr.message);
+            }
+          }
+        }
+      } catch (cleanupErr) {
+        console.warn('[clinics] cleanup pass crashed:', cleanupErr);
+      }
+
+      const { data: urlData } = supabase.storage.from('clinic-logos').getPublicUrl(newPath);
       return urlData.publicUrl;
     } finally {
       setLogoUploading(false);
     }
   }, [selectedClinicId]);
+
+  // Delete every file in the given clinic's logo folder. Used when the user
+  // clicks the X (clear) button to remove their logo entirely.
+  const deleteAllClinicLogos = useCallback(async (clinicId: string): Promise<void> => {
+    try {
+      const { data: listed } = await supabase.storage
+        .from('clinic-logos')
+        .list(clinicId, { limit: 100 });
+      if (listed && listed.length > 0) {
+        const paths = listed.map(f => `${clinicId}/${f.name}`);
+        const { error: delErr } = await supabase.storage
+          .from('clinic-logos')
+          .remove(paths);
+        if (delErr) {
+          console.warn('[clinics] failed to clear clinic logo folder:', delErr.message);
+        }
+      }
+    } catch (e) {
+      console.warn('[clinics] deleteAllClinicLogos crashed:', e);
+    }
+  }, []);
 
   // ── Pointer-based move + resize ────────────────────────────
   function startMove(e: React.PointerEvent, room: Room) {
@@ -528,6 +575,7 @@ export default function SuperAdminClinicsPage() {
           onSave={(draft) => saveBannerDraft(selectedClinic.id, draft)}
           onUpload={uploadBannerImage}
           onUploadLogo={uploadClinicLogo}
+          onDeleteLogo={() => deleteAllClinicLogos(selectedClinic.id)}
         />
       )}
 
@@ -971,6 +1019,7 @@ interface BannerEditorSectionProps {
   onSave: (draft: BannerDraft) => Promise<void>;
   onUpload: (file: File) => Promise<string | null>;
   onUploadLogo: (file: File) => Promise<string | null>;
+  onDeleteLogo: () => Promise<void>;
 }
 
 function bannerDraftFrom(clinic: Clinic): BannerDraft {
@@ -984,7 +1033,7 @@ function bannerDraftFrom(clinic: Clinic): BannerDraft {
 
 function BannerEditorSection({
   clinic, saving, uploading, logoUploading, fileInputRef, logoFileInputRef,
-  onSave, onUpload, onUploadLogo,
+  onSave, onUpload, onUploadLogo, onDeleteLogo,
 }: BannerEditorSectionProps) {
   // Local draft — only the Save button writes to the database.
   const [draft, setDraft] = useState<BannerDraft>(() => bannerDraftFrom(clinic));
@@ -1033,8 +1082,10 @@ function BannerEditorSection({
     patch({ banner_image_url: null });
   }
 
-  function handleClearLogo() {
+  async function handleClearLogo() {
     patch({ logo_image_url: null });
+    // Also wipe every file in the clinic's storage folder so we don't leave orphans.
+    await onDeleteLogo();
   }
 
   function handleDiscard() {
@@ -1102,19 +1153,16 @@ function BannerEditorSection({
                 pointerEvents: 'none',
               }}>
                 {logoUrl && (
-                  <div style={{
-                    width: 72, height: 72, borderRadius: '14px',
-                    backgroundColor: 'rgba(255,255,255,0.92)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    boxShadow: '0 4px 14px rgba(0,0,0,0.18)',
-                    padding: 8,
-                  }}>
-                    <img
-                      src={logoUrl}
-                      alt="Clinic logo"
-                      style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
-                    />
-                  </div>
+                  <img
+                    src={logoUrl}
+                    alt="Clinic logo"
+                    style={{
+                      maxWidth: 96,
+                      maxHeight: 96,
+                      objectFit: 'contain',
+                      filter: 'drop-shadow(0 4px 14px rgba(0,0,0,0.35))',
+                    }}
+                  />
                 )}
                 {text && (
                   <p style={{

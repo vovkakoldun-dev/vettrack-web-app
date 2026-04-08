@@ -1,13 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router';
 import { useActiveVisit } from '../context/ActiveVisitContext';
 import { useAppointmentStatus } from '../context/AppointmentStatusContext';
+import { useAuth } from '../context/AuthContext';
 import {
   Plus, Search, Clock, User, Calendar as CalendarIcon,
   CheckCircle2, AlertCircle, XCircle, Filter,
-  ChevronLeft, ChevronRight, LayoutList, LayoutGrid, CalendarDays,
-  Pencil, Trash2, Bell, LogIn, Stethoscope,
-  ClipboardList, DoorOpen,
+  ChevronLeft, ChevronRight, ChevronUp, ChevronDown, LayoutList, LayoutGrid, CalendarDays,
+  Pencil, Trash2, Bell, LogIn, Stethoscope, Play,
+  ClipboardList, DoorOpen, Camera, Star,
 } from 'lucide-react';
 import { useAppointments } from '../hooks/useAppointments';
 import type { AppointmentRow } from '../hooks/useAppointments';
@@ -15,12 +16,14 @@ import { useClients } from '../hooks/useClients';
 import { usePets } from '../hooks/usePets';
 import { useTenantDb } from '../context/TenantContext';
 import { getOrgContext } from '../hooks/useOrgContext';
+import { WeightPicker, US_STATES, CA_PROVINCES } from '../components/AddClientDialog';
+import { supabase } from '../../lib/supabase';
 
 // ─── Adapter: Supabase row → legacy display shape ─────────────
 
 type DisplayAppt = {
   id: string; petName: string; ownerName: string; petImage: string;
-  service: string; vet: string; date: string; timeStart: string; timeEnd: string;
+  service: string; vet: string; vetId: string; date: string; timeStart: string; timeEnd: string;
   status: 'Confirmed' | 'Pending' | 'Completed' | 'Cancelled' | 'In Progress';
   petHealth: 'Healthy' | 'Follow-up' | 'Critical'; duration: string;
   priority: string; room: string; confirmMethod: string; reminderMethod: string;
@@ -30,19 +33,19 @@ type DisplayAppt = {
 function adaptAppt(a: AppointmentRow): DisplayAppt {
   const start = new Date(a.scheduled_at);
   const end = new Date(start.getTime() + (a.duration_minutes ?? 30) * 60000);
-  // Use UTC methods — scheduled_at is stored as UTC and represents clinic local time
+  // Use local time methods — scheduled_at is stored with tz offset, display in user's local time
   const fmtLocal = (d: Date) => {
-    let h = d.getUTCHours();
-    const m = d.getUTCMinutes();
+    let h = d.getHours();
+    const m = d.getMinutes();
     const ampm = h >= 12 ? 'PM' : 'AM';
     if (h > 12) h -= 12;
     if (h === 0) h = 12;
     return `${h}:${m.toString().padStart(2, '0')} ${ampm}`;
   };
   const validStatuses = ['Confirmed', 'Pending', 'Completed', 'Cancelled', 'In Progress'];
-  const y = start.getUTCFullYear();
-  const mo = (start.getUTCMonth() + 1).toString().padStart(2, '0');
-  const da = start.getUTCDate().toString().padStart(2, '0');
+  const y = start.getFullYear();
+  const mo = (start.getMonth() + 1).toString().padStart(2, '0');
+  const da = start.getDate().toString().padStart(2, '0');
   return {
     id: a.id,
     petName: a.pets?.name ?? '—',
@@ -50,6 +53,7 @@ function adaptAppt(a: AppointmentRow): DisplayAppt {
     petImage: a.pets?.photo_url ?? '',
     service: a.services?.name ?? a.reason ?? '—',
     vet: a.staff?.profiles ? `Dr. ${a.staff.profiles.last_name}` : 'TBD',
+    vetId: a.staff?.id ?? '',
     date: `${y}-${mo}-${da}`,
     timeStart: fmtLocal(start),
     timeEnd: fmtLocal(end),
@@ -172,6 +176,16 @@ const SCHEDULE_SLOTS = Array.from({ length: 20 }, (_, i) => {
   return `${h12}:${m.toString().padStart(2, '0')} ${ampm}`;
 });
 
+// Extended slots: 6 AM – 9:30 PM (32 slots) for the New Appointment dialog "Show more hours" toggle
+const EXTENDED_SCHEDULE_SLOTS = Array.from({ length: 32 }, (_, i) => {
+  const totalMin = 6 * 60 + i * 30;
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  return `${h12}:${m.toString().padStart(2, '0')} ${ampm}`;
+});
+
 // ─── Filter Tabs ─────────────────────────────────────────────
 
 const FILTER_TABS = ['All', 'Upcoming', 'Completed', 'Cancelled'] as const;
@@ -185,6 +199,8 @@ export default function AppointmentsPage() {
   const location = useLocation();
   const { startVisit } = useActiveVisit();
   const { setApptStatus } = useAppointmentStatus();
+  const { user } = useAuth();
+  const currentUserId = user?.id ?? '';
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [activeFilter, setActiveFilter] = useState<FilterTab>('All');
   const [searchQuery, setSearchQuery] = useState('');
@@ -194,7 +210,7 @@ export default function AppointmentsPage() {
   const [visibleCount, setVisibleCount] = useState(5);
   const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
   const [monthViewDate, setMonthViewDate] = useState<Date>(new Date());
-  const [newApptTime, setNewApptTime] = useState('09:00');
+  const [newApptTime, setNewApptTime] = useState('');
   const today = new Date().toISOString().split('T')[0];
   const [newApptDate, setNewApptDate] = useState(today);
   const { appointments: dbAppts, loading: apptLoading, updateStatus: updateApptStatus, addAppointment, deleteAppointment } = useAppointments();
@@ -213,6 +229,9 @@ export default function AppointmentsPage() {
   const [editNotes, setEditNotes] = useState('');
   const [roomInfoOpen, setRoomInfoOpen] = useState(false);
   const [roomInfoAppt, setRoomInfoAppt] = useState<DisplayAppt | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // ── New Appointment form state ──────────────────────────────
   const [newApptClientId, setNewApptClientId] = useState('');
@@ -224,6 +243,8 @@ export default function AppointmentsPage() {
   const [newApptVetId, setNewApptVetId] = useState('');
   const [newApptVetName, setNewApptVetName] = useState('');
   const [newApptDuration, setNewApptDuration] = useState('30 min');
+  const [newApptShowAllHours, setNewApptShowAllHours] = useState(false);
+  const [hoveredSlotKey, setHoveredSlotKey] = useState<string | null>(null);
   const [newApptNotes, setNewApptNotes] = useState('');
   const [newApptStatus, setNewApptStatus] = useState('Confirmed');
   const [newApptPriority, setNewApptPriority] = useState('Normal');
@@ -242,9 +263,17 @@ export default function AppointmentsPage() {
   const [npDob, setNpDob] = useState('');
   const [npWeight, setNpWeight] = useState('');
   const [npSex, setNpSex] = useState('');
+  const [npPhotoFile, setNpPhotoFile] = useState<File | null>(null);
+  const [npPhotoPreview, setNpPhotoPreview] = useState<string | null>(null);
+  const npPhotoInputRef = useRef<HTMLInputElement>(null);
   const [npOwnerName, setNpOwnerName] = useState('');
   const [npOwnerEmail, setNpOwnerEmail] = useState('');
   const [npOwnerPhone, setNpOwnerPhone] = useState('');
+  const [npAddress, setNpAddress] = useState('');
+  const [npCity, setNpCity] = useState('');
+  const [npState, setNpState] = useState('');
+  const [npZip, setNpZip] = useState('');
+  const [npCountry, setNpCountry] = useState('US');
 
   // ── Fetch staff/vets from database ──
   const [staffList, setStaffList] = useState<{ id: string; name: string; initials: string }[]>([]);
@@ -409,7 +438,7 @@ export default function AppointmentsPage() {
     const m = (selectedDate.getMonth() + 1).toString().padStart(2, '0');
     const d = selectedDate.getDate().toString().padStart(2, '0');
     setNewApptDate(`${y}-${m}-${d}`);
-    setNewApptTime('09:00');
+    setNewApptTime('');
     setNewApptClientId('');
     setNewApptPetId('');
     setNewApptPet('');
@@ -480,6 +509,31 @@ export default function AppointmentsPage() {
     navigate(`/appointments/${appt.id}/visit`);
   };
 
+  // Called directly from the appointment card's "Start Visit" button —
+  // stops card's onClick propagation and either opens room info or goes to visit.
+  const handleStartVisitFromCard = (appt: DisplayAppt, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (appt.status === 'In Progress') {
+      // Already in progress — jump straight to the visit page without changing status
+      startVisit({
+        apptId: appt.id,
+        petName: appt.petName,
+        petImage: appt.petImage,
+        ownerName: appt.ownerName,
+        service: appt.service,
+        durationMinutes: parseInt(appt.duration) || 30,
+      });
+      navigate(`/appointments/${appt.id}/visit`);
+      return;
+    }
+    if (appt.room) {
+      setRoomInfoAppt(appt);
+      setRoomInfoOpen(true);
+      return;
+    }
+    proceedToVisit(appt);
+  };
+
   const handleSaveChanges = () => {
     if (!selectedAppt) return;
     // Save notes update to Supabase (status only for now — full edit requires more form wiring)
@@ -493,11 +547,31 @@ export default function AppointmentsPage() {
     setDetailOpen(false);
   };
 
-  const handleDeleteAppt = async () => {
+  const handleDeleteAppt = () => {
     if (!selectedAppt) return;
-    if (!confirm('Are you sure you want to permanently delete this appointment? This cannot be undone.')) return;
-    await deleteAppointment(selectedAppt.id);
-    setDetailOpen(false);
+    setDeleteError(null);
+    setDeleteConfirmOpen(true);
+  };
+
+  const performDeleteAppt = async () => {
+    if (!selectedAppt) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const { error } = await deleteAppointment(selectedAppt.id);
+      if (error) {
+        console.error('[AppointmentsPage] deleteAppointment failed:', error);
+        setDeleteError(error.message || 'Failed to delete appointment. Please try again.');
+        return;
+      }
+      setDeleteConfirmOpen(false);
+      setDetailOpen(false);
+    } catch (e: any) {
+      console.error('[AppointmentsPage] deleteAppointment threw:', e);
+      setDeleteError(e?.message || 'Unexpected error while deleting.');
+    } finally {
+      setDeleting(false);
+    }
   };
 
   // Fetch vet time blocks when vet is selected
@@ -510,16 +584,25 @@ export default function AppointmentsPage() {
     setVetTimeBlocks(data || []);
   };
 
-  const getSlotAvailability = (dateStr: string, excludeId?: string) => {
-    const dateAppts = appointments.filter(
-      (a) => a.date === dateStr && a.status !== 'Cancelled' && (excludeId == null || a.id !== excludeId),
-    );
+  const getSlotAvailability = (dateStr: string, excludeId?: string, vetId?: string, slotsList: readonly string[] = SCHEDULE_SLOTS) => {
+    // A slot is only "booked" if the SAME vet already has an appointment there.
+    // If no vet is selected, no conflicts are detected — show all slots as available.
+    const hasVet = vetId != null && vetId !== '';
+    const dateAppts = hasVet
+      ? appointments.filter(
+          (a) =>
+            a.date === dateStr &&
+            a.status !== 'Cancelled' &&
+            (excludeId == null || a.id !== excludeId) &&
+            a.vetId === vetId,
+        )
+      : [];
     // Mark all slots that overlap with any appointment's full duration
     const bookedTimes = new Map<string, DisplayAppt>();
     dateAppts.forEach((a) => {
       const startMin = (() => { const [tp, ap] = a.timeStart.split(' '); let [h, m] = tp.split(':').map(Number); if (ap === 'PM' && h !== 12) h += 12; if (ap === 'AM' && h === 12) h = 0; return h * 60 + m; })();
       const dur = getDurationMin(a.timeStart, a.timeEnd);
-      SCHEDULE_SLOTS.forEach((slot) => {
+      slotsList.forEach((slot) => {
         const slotMin = (() => { const [tp, ap] = slot.split(' '); let [h, m] = tp.split(':').map(Number); if (ap === 'PM' && h !== 12) h += 12; if (ap === 'AM' && h === 12) h = 0; return h * 60 + m; })();
         // Slot overlaps if it starts within the appointment's time range
         if (slotMin >= startMin && slotMin < startMin + dur) {
@@ -537,7 +620,7 @@ export default function AppointmentsPage() {
       const [beH, beM] = b.time_end.split(':').map(Number);
       const bStartMin = bsH * 60 + bsM;
       const bEndMin = beH * 60 + beM;
-      SCHEDULE_SLOTS.forEach((slot) => {
+      slotsList.forEach((slot) => {
         const t24 = to24Hour(slot);
         const [sh, sm] = t24.split(':').map(Number);
         const slotMin = sh * 60 + sm;
@@ -548,7 +631,7 @@ export default function AppointmentsPage() {
       });
     });
 
-    return SCHEDULE_SLOTS.map((slot) => ({
+    return slotsList.map((slot) => ({
       time: slot,
       time24: to24Hour(slot),
       booked: bookedTimes.get(slot) || null,
@@ -848,6 +931,25 @@ export default function AppointmentsPage() {
                                 <StatusIcon className="w-3 h-3" />
                                 {appt.status}
                               </span>
+                              {currentUserId && appt.vetId === currentUserId && appt.status !== 'Completed' && appt.status !== 'Cancelled' && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleStartVisitFromCard(appt, e)}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 flex-shrink-0 transition-opacity hover:opacity-90"
+                                  style={{
+                                    background: 'var(--brand-green-text)',
+                                    color: 'var(--on-brand-green)',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    fontSize: '12px',
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  <Play className="w-3 h-3" style={{ fill: 'currentColor' }} />
+                                  {appt.status === 'In Progress' ? 'Resume Visit' : 'Start Visit'}
+                                </button>
+                              )}
                             </div>
                             {appt.notes && (
                               <p className="text-[var(--text-secondary)] mt-2 sm:ml-32 ml-0 pl-4" style={{ fontSize: '13px', borderLeft: '2px solid var(--border-color)' }}>
@@ -1242,18 +1344,18 @@ export default function AppointmentsPage() {
       {/* ─── New Appointment Dialog ────────────────────── */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent
-          className="p-0 gap-0 overflow-hidden [&>button]:top-[14px] [&>button]:right-[14px] [&>button]:w-8 [&>button]:h-8 [&>button]:flex [&>button]:items-center [&>button]:justify-center [&>button]:rounded-[8px] [&>button]:!bg-white/15 [&>button]:!text-white [&>button]:!opacity-100 [&>button]:hover:!bg-white/25 [&>button]:transition-colors [&>button>svg]:w-4 [&>button>svg]:h-4"
+          className="p-0 gap-0 overflow-hidden [&>button]:top-[14px] [&>button]:right-[14px] [&>button]:w-8 [&>button]:h-8 [&>button]:flex [&>button]:items-center [&>button]:justify-center [&>button]:rounded-[8px] [&>button]:!bg-[var(--surface-white)] [&>button]:!text-[var(--text-secondary)] [&>button]:!opacity-100 [&>button]:hover:!bg-[var(--surface-elevated)] [&>button]:!border [&>button]:!border-[var(--border-color)] [&>button]:transition-colors [&>button>svg]:w-4 [&>button>svg]:h-4"
           style={{ maxWidth: '780px', width: '95vw', maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}
         >
           {/* ── Header ── */}
-          <div style={{ background: 'var(--brand-green-text)', padding: '18px 24px', flexShrink: 0 }}>
+          <div style={{ background: 'var(--surface-elevated)', padding: '18px 24px', flexShrink: 0, borderBottom: '1px solid var(--border-color)', borderLeft: '4px solid var(--brand-green-text)' }}>
             <div className="flex items-center gap-3">
-              <div style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: 'rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <CalendarIcon style={{ width: '18px', height: '18px', color: '#fff' }} />
+              <div style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <CalendarIcon style={{ width: '18px', height: '18px', color: 'var(--brand-green-text)' }} />
               </div>
               <div>
-                <h2 style={{ fontSize: '17px', fontWeight: 700, color: '#fff', lineHeight: 1.2 }}>New Appointment</h2>
-                <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginTop: '1px' }}>Schedule a visit for a patient</p>
+                <h2 style={{ fontSize: '17px', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.2 }}>New Appointment</h2>
+                <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '1px' }}>Schedule a visit for a patient</p>
               </div>
             </div>
           </div>
@@ -1382,8 +1484,54 @@ export default function AppointmentsPage() {
               {/* Patient — New (first visit) */}
               {visitType === 'new' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {/* Pet info */}
+                  {/* ── Pet Information ── */}
                   <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Pet Information</p>
+
+                  {/* Pet Photo */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div
+                      className="relative group cursor-pointer"
+                      onClick={() => npPhotoInputRef.current?.click()}
+                      style={{ width: '56px', height: '56px', borderRadius: '9999px', overflow: 'hidden', flexShrink: 0, backgroundColor: 'var(--surface-elevated)', border: '2px dashed var(--border-color)' }}
+                    >
+                      {npPhotoPreview ? (
+                        <img src={npPhotoPreview} alt="Pet" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      ) : (
+                        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <Camera style={{ width: '20px', height: '20px', color: 'var(--text-secondary)' }} />
+                        </div>
+                      )}
+                      {npPhotoPreview && (
+                        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" style={{ backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: '9999px' }}>
+                          <Camera style={{ width: '18px', height: '18px', color: '#fff' }} />
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => npPhotoInputRef.current?.click()}
+                        style={{ fontSize: '13px', fontWeight: 600, color: 'var(--brand-green-text)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                      >
+                        {npPhotoPreview ? 'Change photo' : 'Add pet photo'}
+                      </button>
+                      <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>JPG, PNG up to 5MB</p>
+                    </div>
+                    <input
+                      ref={npPhotoInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          setNpPhotoFile(file);
+                          setNpPhotoPreview(URL.createObjectURL(file));
+                        }
+                      }}
+                    />
+                  </div>
+
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                     <div>
                       <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Pet Name *</p>
@@ -1422,13 +1570,29 @@ export default function AppointmentsPage() {
                       <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Date of Birth</p>
                       <Input type="date" value={npDob} onChange={e => setNpDob(e.target.value)} />
                     </div>
+                    <WeightPicker value={npWeight} onChange={setNpWeight} />
                     <div>
-                      <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Weight</p>
-                      <Input placeholder="e.g. 12.5 kg" value={npWeight} onChange={e => setNpWeight(e.target.value)} />
+                      <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Assigned Doctor</p>
+                      <Select
+                        value={newApptVetId}
+                        onValueChange={(id) => {
+                          const vet = staffList.find(v => v.id === id);
+                          setNewApptVetId(id);
+                          setNewApptVetName(vet?.name || '');
+                          if (id) fetchVetTimeBlocks(id);
+                        }}
+                      >
+                        <SelectTrigger><SelectValue placeholder="Select doctor..." /></SelectTrigger>
+                        <SelectContent>
+                          {staffList.map(v => (
+                            <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
 
-                  {/* Divider */}
+                  {/* ── Owner Information ── */}
                   <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '12px' }}>
                     <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '12px' }}>Owner Information</p>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -1444,6 +1608,43 @@ export default function AppointmentsPage() {
                         <div>
                           <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Phone</p>
                           <Input type="tel" placeholder="(555) 000-0000" value={npOwnerPhone} onChange={e => setNpOwnerPhone(e.target.value)} />
+                        </div>
+                      </div>
+                      <div>
+                        <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Street Address</p>
+                        <Input placeholder="123 Main St, Apt 4B" value={npAddress} onChange={e => setNpAddress(e.target.value)} />
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                        <div>
+                          <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>City</p>
+                          <Input placeholder="Springfield" value={npCity} onChange={e => setNpCity(e.target.value)} />
+                        </div>
+                        <div>
+                          <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>{npCountry === 'CA' ? 'Province' : 'State'}</p>
+                          <Select value={npState} onValueChange={setNpState}>
+                            <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
+                            <SelectContent>
+                              {(npCountry === 'CA' ? CA_PROVINCES : US_STATES).map(s => (
+                                <SelectItem key={s} value={s}>{s}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                        <div>
+                          <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>{npCountry === 'CA' ? 'Postal Code' : 'ZIP Code'}</p>
+                          <Input placeholder={npCountry === 'CA' ? 'A1A 1A1' : '12345'} value={npZip} onChange={e => setNpZip(e.target.value)} />
+                        </div>
+                        <div>
+                          <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Country</p>
+                          <Select value={npCountry} onValueChange={(v) => { setNpCountry(v); setNpState(''); }}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="US">United States</SelectItem>
+                              <SelectItem value="CA">Canada</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </div>
                       </div>
                     </div>
@@ -1499,66 +1700,260 @@ export default function AppointmentsPage() {
                 <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Veterinarian</p>
                 <div className="flex gap-2 flex-wrap">
                   {staffList.length === 0 && <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>No vets found</span>}
-                  {staffList.map((v, i) => {
-                    const colors = ['var(--brand-green-text)', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261'];
-                    const color = colors[i % colors.length];
-                    const active = newApptVetId === v.id;
-                    return (
-                      <button key={v.id} onClick={() => { setNewApptVetId(v.id); setNewApptVetName(v.name); fetchVetTimeBlocks(v.id); }} style={{
-                        padding: '7px 14px', borderRadius: '8px', fontSize: '13px',
-                        fontWeight: active ? 700 : 500,
-                        border: `1.5px solid ${active ? color : 'var(--border-color)'}`,
-                        backgroundColor: active ? `${color}18` : 'transparent',
-                        color: active ? color : 'var(--text-secondary)',
-                        cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '7px',
-                        transition: 'all 0.15s',
-                      }}>
-                        <span style={{ width: '22px', height: '22px', borderRadius: '50%', backgroundColor: `${color}20`, color: color, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', fontWeight: 700, flexShrink: 0 }}>
-                          {v.initials}
-                        </span>
-                        {v.name}
-                      </button>
-                    );
-                  })}
+                  {(() => {
+                    // Determine the assigned vet for the currently-selected pet (if any)
+                    const selectedPet = newApptPetId ? allPets.find(p => p.id === newApptPetId) : null;
+                    const assignedVetId = selectedPet?.assigned_vet_id || null;
+                    return staffList.map((v, i) => {
+                      const colors = ['var(--brand-green-text)', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261'];
+                      const color = colors[i % colors.length];
+                      const active = newApptVetId === v.id;
+                      const isAssigned = assignedVetId === v.id;
+                      return (
+                        <button
+                          key={v.id}
+                          onClick={() => { setNewApptVetId(v.id); setNewApptVetName(v.name); fetchVetTimeBlocks(v.id); }}
+                          title={isAssigned ? `${v.name} is the assigned doctor for this patient` : undefined}
+                          style={{
+                            position: 'relative',
+                            padding: '7px 14px', borderRadius: '8px', fontSize: '13px',
+                            fontWeight: active || isAssigned ? 700 : 500,
+                            border: `1.5px solid ${active ? color : isAssigned ? `color-mix(in srgb, ${color} 55%, transparent)` : 'var(--border-color)'}`,
+                            backgroundColor: active ? `${color}18` : isAssigned ? `${color}10` : 'transparent',
+                            color: active ? color : isAssigned ? color : 'var(--text-secondary)',
+                            cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '7px',
+                            transition: 'all 0.15s',
+                          }}
+                        >
+                          <span style={{ width: '22px', height: '22px', borderRadius: '50%', backgroundColor: `${color}20`, color: color, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', fontWeight: 700, flexShrink: 0 }}>
+                            {v.initials}
+                          </span>
+                          {v.name}
+                          {isAssigned && (
+                            <span
+                              className="assigned-vet-star"
+                              style={{ color, marginLeft: '2px' }}
+                              aria-label="Assigned doctor"
+                            >
+                              <Star style={{ width: '13px', height: '13px', fill: 'currentColor' }} />
+                            </span>
+                          )}
+                        </button>
+                      );
+                    });
+                  })()}
                 </div>
+                {(() => {
+                  const selectedPet = newApptPetId ? allPets.find(p => p.id === newApptPetId) : null;
+                  if (!selectedPet?.assigned_vet_id) return null;
+                  const assignedStaff = staffList.find(s => s.id === selectedPet.assigned_vet_id);
+                  if (!assignedStaff) return null;
+                  return (
+                    <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <Star style={{ width: '10px', height: '10px', fill: 'currentColor' }} />
+                      <span>{assignedStaff.name} is this patient's assigned doctor</span>
+                    </p>
+                  );
+                })()}
               </div>
 
               {/* Date */}
               <div>
                 <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Date</p>
-                <Input type="date" value={newApptDate} onChange={e => setNewApptDate(e.target.value)} />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const d = new Date((newApptDate || new Date().toISOString().slice(0,10)) + 'T12:00:00');
+                      d.setDate(d.getDate() - 1);
+                      const y = d.getFullYear();
+                      const m = String(d.getMonth() + 1).padStart(2, '0');
+                      const day = String(d.getDate()).padStart(2, '0');
+                      setNewApptDate(`${y}-${m}-${day}`);
+                    }}
+                    aria-label="Previous day"
+                    style={{
+                      flexShrink: 0,
+                      width: '36px',
+                      height: '36px',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'transparent',
+                      color: 'var(--text-secondary)',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--surface-elevated)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--brand-green-text)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--brand-green-text)'; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-secondary)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border-color)'; }}
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <Input type="date" value={newApptDate} onChange={e => setNewApptDate(e.target.value)} />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const d = new Date((newApptDate || new Date().toISOString().slice(0,10)) + 'T12:00:00');
+                      d.setDate(d.getDate() + 1);
+                      const y = d.getFullYear();
+                      const m = String(d.getMonth() + 1).padStart(2, '0');
+                      const day = String(d.getDate()).padStart(2, '0');
+                      setNewApptDate(`${y}-${m}-${day}`);
+                    }}
+                    aria-label="Next day"
+                    style={{
+                      flexShrink: 0,
+                      width: '36px',
+                      height: '36px',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'transparent',
+                      color: 'var(--text-secondary)',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--surface-elevated)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--brand-green-text)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--brand-green-text)'; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-secondary)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border-color)'; }}
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
 
               {/* Time — visual slot grid */}
               <div>
                 <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Time</p>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
-                  {getSlotAvailability(newApptDate).map(slot => {
+                  {getSlotAvailability(newApptDate, undefined, newApptVetId, newApptShowAllHours ? EXTENDED_SCHEDULE_SLOTS : SCHEDULE_SLOTS).map(slot => {
                     const isActive = newApptTime === slot.time24;
                     const isUnavailable = !!slot.booked || !!slot.blocked;
+                    const isHovered = hoveredSlotKey === slot.time24;
+                    const bookedAppt = slot.booked;
                     return (
-                      <button
+                      <div
                         key={slot.time24}
-                        disabled={isUnavailable}
-                        onClick={() => setNewApptTime(slot.time24)}
-                        style={{
-                          padding: '8px 4px', borderRadius: '8px', fontSize: '12px', fontWeight: isActive ? 700 : 500,
-                          border: `1.5px solid ${isActive ? 'var(--brand-green-text)' : isUnavailable ? 'var(--border-color)' : 'var(--border-color)'}`,
-                          backgroundColor: isActive ? 'var(--brand-green-text)' : isUnavailable ? 'var(--surface-elevated)' : 'transparent',
-                          color: isActive ? '#fff' : isUnavailable ? 'var(--text-secondary)' : 'var(--text-primary)',
-                          cursor: isUnavailable ? 'not-allowed' : 'pointer',
-                          opacity: isUnavailable ? 0.5 : 1,
-                          transition: 'all 0.15s',
-                          textDecoration: isUnavailable ? 'line-through' : 'none',
-                          position: 'relative',
-                        }}
-                        title={slot.booked ? `Booked: ${slot.booked.petName}` : slot.blocked ? `Blocked: ${slot.blocked}` : slot.time}
+                        style={{ position: 'relative' }}
+                        onMouseEnter={() => setHoveredSlotKey(slot.time24)}
+                        onMouseLeave={() => setHoveredSlotKey(prev => prev === slot.time24 ? null : prev)}
                       >
-                        {slot.time}
-                      </button>
+                        <button
+                          disabled={isUnavailable}
+                          onClick={() => setNewApptTime(slot.time24)}
+                          style={{
+                            width: '100%',
+                            padding: '8px 4px', borderRadius: '8px', fontSize: '12px', fontWeight: isActive ? 700 : 500,
+                            border: `1.5px solid ${isActive ? 'var(--brand-green-text)' : isUnavailable ? 'var(--border-color)' : 'var(--border-color)'}`,
+                            backgroundColor: isActive ? 'var(--brand-green-text)' : isUnavailable ? 'var(--surface-elevated)' : 'transparent',
+                            color: isActive ? '#fff' : isUnavailable ? 'var(--text-secondary)' : 'var(--text-primary)',
+                            cursor: isUnavailable ? 'not-allowed' : 'pointer',
+                            opacity: isUnavailable ? 0.5 : 1,
+                            transition: 'all 0.15s',
+                            textDecoration: isUnavailable ? 'line-through' : 'none',
+                          }}
+                        >
+                          {slot.time}
+                        </button>
+                        {isHovered && isUnavailable && (
+                          <div
+                            style={{
+                              position: 'absolute',
+                              bottom: 'calc(100% + 8px)',
+                              left: '50%',
+                              transform: 'translateX(-50%)',
+                              minWidth: '180px',
+                              maxWidth: '240px',
+                              padding: '10px 12px',
+                              borderRadius: '8px',
+                              backgroundColor: 'var(--text-primary)',
+                              color: 'var(--surface-white)',
+                              fontSize: '11px',
+                              lineHeight: 1.4,
+                              boxShadow: '0 6px 20px rgba(0,0,0,0.25)',
+                              zIndex: 100,
+                              pointerEvents: 'none',
+                              whiteSpace: 'normal',
+                              textAlign: 'left',
+                            }}
+                          >
+                            {bookedAppt ? (
+                              <>
+                                <div style={{ fontSize: '10px', fontWeight: 700, opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>Booked</div>
+                                <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '2px' }}>{bookedAppt.petName}</div>
+                                <div style={{ opacity: 0.85 }}>{bookedAppt.ownerName}</div>
+                                {bookedAppt.service && bookedAppt.service !== '—' && (
+                                  <div style={{ opacity: 0.85, marginTop: '2px' }}>{bookedAppt.service}</div>
+                                )}
+                                <div style={{ opacity: 0.7, marginTop: '4px', fontSize: '10px' }}>
+                                  {bookedAppt.timeStart}{bookedAppt.timeEnd ? ` – ${bookedAppt.timeEnd}` : ''}
+                                  {bookedAppt.vet && bookedAppt.vet !== '—' ? ` · ${bookedAppt.vet}` : ''}
+                                </div>
+                              </>
+                            ) : slot.blocked ? (
+                              <>
+                                <div style={{ fontSize: '10px', fontWeight: 700, opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>Unavailable</div>
+                                <div style={{ fontWeight: 600 }}>{slot.blocked}</div>
+                              </>
+                            ) : null}
+                            {/* Arrow */}
+                            <div
+                              style={{
+                                position: 'absolute',
+                                top: '100%',
+                                left: '50%',
+                                transform: 'translateX(-50%)',
+                                width: 0,
+                                height: 0,
+                                borderLeft: '6px solid transparent',
+                                borderRight: '6px solid transparent',
+                                borderTop: '6px solid var(--text-primary)',
+                              }}
+                            />
+                          </div>
+                        )}
+                      </div>
                     );
                   })}
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setNewApptShowAllHours(v => !v)}
+                  style={{
+                    marginTop: '8px',
+                    width: '100%',
+                    padding: '8px',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    border: '1px dashed var(--border-color)',
+                    backgroundColor: 'transparent',
+                    color: 'var(--brand-green-text)',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                  }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--brand-green-text)'; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border-color)'; }}
+                >
+                  {newApptShowAllHours ? (
+                    <>
+                      <ChevronUp className="w-3.5 h-3.5" />
+                      Show fewer hours
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="w-3.5 h-3.5" />
+                      Show more hours (6 AM – 9:30 PM)
+                    </>
+                  )}
+                </button>
               </div>
 
               {/* Duration */}
@@ -1716,6 +2111,7 @@ export default function AppointmentsPage() {
               disabled={savingAppt}
               onClick={async () => {
                 if (savingAppt) return;
+                if (!newApptDate || !newApptTime) { alert('Please select a date and time.'); return; }
                 setSavingAppt(true);
                 try {
                   const tzOffset = (() => { const off = new Date().getTimezoneOffset(); const sign = off <= 0 ? '+' : '-'; const h = String(Math.floor(Math.abs(off) / 60)).padStart(2, '0'); const m = String(Math.abs(off) % 60).padStart(2, '0'); return `${sign}${h}:${m}`; })();
@@ -1738,12 +2134,33 @@ export default function AppointmentsPage() {
                         last_name: nameParts.slice(1).join(' ') || '',
                         email: npOwnerEmail || undefined,
                         phone: npOwnerPhone || undefined,
+                        address: npAddress || undefined,
+                        city: npCity || undefined,
+                        state: npState || undefined,
+                        zip: npZip || undefined,
+                        country: npCountry || 'US',
                         health_status: newApptPetHealth,
                       }])
                       .select('id')
                       .single();
                     if (cErr || !newClient) { alert('Failed to create client: ' + (cErr?.message || 'Unknown error')); setSavingAppt(false); return; }
                     finalClientId = newClient.id;
+
+                    // Upload pet photo if provided
+                    let photoUrl: string | undefined;
+                    if (npPhotoFile) {
+                      try {
+                        const fileExt = npPhotoFile.name.split('.').pop() || 'jpg';
+                        const fileName = `${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`;
+                        const { error: uploadErr } = await supabase.storage
+                          .from('pet-images')
+                          .upload(fileName, npPhotoFile, { cacheControl: '3600', upsert: false });
+                        if (!uploadErr) {
+                          const { data: urlData } = supabase.storage.from('pet-images').getPublicUrl(fileName);
+                          photoUrl = urlData.publicUrl;
+                        }
+                      } catch {}
+                    }
 
                     const weightKg = npWeight ? parseFloat(npWeight) : undefined;
                     const { data: newPet, error: pErr } = await db
@@ -1756,6 +2173,7 @@ export default function AppointmentsPage() {
                         date_of_birth: npDob || undefined,
                         sex: npSex || undefined,
                         weight_kg: weightKg && !isNaN(weightKg) ? weightKg : undefined,
+                        photo_url: photoUrl,
                         assigned_vet_id: newApptVetId || undefined,
                         is_active: true,
                       }])
@@ -1809,6 +2227,14 @@ export default function AppointmentsPage() {
                       window.dispatchEvent(new Event('notifCountChanged'));
                     } catch {}
                   }
+
+                  // Reset new patient form fields
+                  setNpPetName(''); setNpSpecies(''); setNpBreed(''); setNpSex('');
+                  setNpDob(''); setNpWeight('');
+                  setNpOwnerName(''); setNpOwnerEmail(''); setNpOwnerPhone('');
+                  setNpAddress(''); setNpCity(''); setNpState(''); setNpZip(''); setNpCountry('US');
+                  if (npPhotoPreview) URL.revokeObjectURL(npPhotoPreview);
+                  setNpPhotoFile(null); setNpPhotoPreview(null);
 
                   setDialogOpen(false);
                 } finally {
@@ -1914,7 +2340,7 @@ export default function AppointmentsPage() {
       {/* ─── Appointment Detail / Edit Dialog ─────────── */}
       <Dialog open={detailOpen} onOpenChange={(open) => { setDetailOpen(open); if (!open) setDetailMode('view'); }}>
         <DialogContent
-          className="p-0 overflow-hidden gap-0 [&>button]:top-[14px] [&>button]:right-[14px] [&>button]:w-8 [&>button]:h-8 [&>button]:flex [&>button]:items-center [&>button]:justify-center [&>button]:rounded-[8px] [&>button]:!bg-white/15 [&>button]:!text-white [&>button]:!opacity-100 [&>button]:hover:!bg-white/25 [&>button]:transition-colors [&>button>svg]:w-4 [&>button>svg]:h-4"
+          className="p-0 overflow-hidden gap-0 [&>button]:top-[14px] [&>button]:right-[14px] [&>button]:w-8 [&>button]:h-8 [&>button]:flex [&>button]:items-center [&>button]:justify-center [&>button]:rounded-[8px] [&>button]:!bg-[var(--surface-white)] [&>button]:!text-[var(--text-secondary)] [&>button]:!opacity-100 [&>button]:hover:!bg-[var(--surface-elevated)] [&>button]:!border [&>button]:!border-[var(--border-color)] [&>button]:transition-colors [&>button>svg]:w-4 [&>button>svg]:h-4"
           style={{
             maxWidth: '512px',
             width: '95vw',
@@ -1935,17 +2361,42 @@ export default function AppointmentsPage() {
 
             return (
               <>
-                {/* ── Coloured header strip (always shown) ── */}
-                <div className="pl-6 pr-16 py-4 flex items-center gap-4 flex-shrink-0" style={{ background: 'var(--brand-green-text)' }}>
-                  <Avatar className="w-12 h-12 border-2 border-white/20 flex-shrink-0">
+                {/* ── Header strip (matches New Appointment pattern) ── */}
+                <div
+                  className="flex items-center gap-4 flex-shrink-0"
+                  style={{
+                    background: 'var(--surface-elevated)',
+                    padding: '18px 64px 18px 24px',
+                    borderBottom: '1px solid var(--border-color)',
+                    borderLeft: '4px solid var(--brand-green-text)',
+                  }}
+                >
+                  <Avatar
+                    className="w-11 h-11 flex-shrink-0"
+                    style={{ border: '1px solid var(--border-color)' }}
+                  >
                     <AvatarImage src={selectedAppt.petImage} alt={selectedAppt.petName} className="object-cover" />
                     <AvatarFallback className="text-base font-bold">{selectedAppt.petName.slice(0, 2)}</AvatarFallback>
                   </Avatar>
                   <div className="flex-1 min-w-0">
-                    <p className="text-white font-bold" style={{ fontSize: '17px' }}>{selectedAppt.petName}</p>
-                    <p className="text-white/70" style={{ fontSize: '12px' }}>{selectedAppt.ownerName} · {selectedAppt.species} · {selectedAppt.timeStart}</p>
+                    <p style={{ fontSize: '17px', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.2, margin: 0 }}>
+                      {selectedAppt.petName}
+                    </p>
+                    <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                      {selectedAppt.ownerName} · {selectedAppt.timeStart}
+                    </p>
                   </div>
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1" style={{ backgroundColor: 'rgba(255,255,255,0.15)', color: 'white', borderRadius: '9999px', fontSize: '11px', fontWeight: 600 }}>
+                  <span
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1"
+                    style={{
+                      backgroundColor: s.bg,
+                      color: s.text,
+                      borderRadius: '9999px',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      border: `1px solid color-mix(in srgb, ${s.text} 25%, transparent)`,
+                    }}
+                  >
                     <StatusIcon className="w-3 h-3" />
                     {selectedAppt.status}
                   </span>
@@ -2031,7 +2482,7 @@ export default function AppointmentsPage() {
                           <Select value={editTime} onValueChange={setEditTime}>
                             <SelectTrigger><SelectValue /></SelectTrigger>
                             <SelectContent className="max-h-64">
-                              {getSlotAvailability(editDate, selectedAppt?.id).map((slot) => (
+                              {getSlotAvailability(editDate, selectedAppt?.id, selectedAppt?.vetId).map((slot) => (
                                 <SelectItem key={slot.time24} value={slot.time24} disabled={!!slot.booked}>
                                   <span className="flex items-center gap-2">
                                     <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: slot.booked ? '#d4183d' : 'var(--brand-green-text)' }} />
@@ -2120,6 +2571,73 @@ export default function AppointmentsPage() {
               </Button>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Delete Confirmation Dialog ─────────── */}
+      <Dialog open={deleteConfirmOpen} onOpenChange={(open) => { if (deleting) return; setDeleteConfirmOpen(open); if (!open) setDeleteError(null); }}>
+        <DialogContent
+          className="p-0 overflow-hidden gap-0 [&>button]:top-[14px] [&>button]:right-[14px] [&>button]:w-8 [&>button]:h-8 [&>button]:flex [&>button]:items-center [&>button]:justify-center [&>button]:rounded-[8px] [&>button]:!bg-[var(--surface-white)] [&>button]:!text-[var(--text-secondary)] [&>button]:!opacity-100 [&>button]:hover:!bg-[var(--surface-elevated)] [&>button]:!border [&>button]:!border-[var(--border-color)] [&>button]:transition-colors [&>button>svg]:w-4 [&>button>svg]:h-4"
+          style={{
+            maxWidth: '440px',
+            width: '95vw',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          <div style={{ background: 'var(--surface-elevated)', padding: '18px 24px', borderBottom: '1px solid var(--border-color)', borderLeft: '4px solid #d4183d' }}>
+            <DialogHeader className="p-0 space-y-1">
+              <DialogTitle className="text-[var(--text-primary)]" style={{ fontSize: 16, fontWeight: 600 }}>
+                Delete appointment?
+              </DialogTitle>
+              <p className="text-[var(--text-secondary)]" style={{ fontSize: 13 }}>
+                This permanently removes the appointment and any related visit records. This cannot be undone.
+              </p>
+            </DialogHeader>
+          </div>
+
+          <div className="px-6 py-5 space-y-3">
+            {selectedAppt && (
+              <div className="p-3 rounded-[10px]" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-color)' }}>
+                <div className="flex items-center gap-3">
+                  <Avatar className="w-10 h-10">
+                    <AvatarImage src={selectedAppt.petImage} alt={selectedAppt.petName} />
+                    <AvatarFallback>{selectedAppt.petName?.[0] ?? '?'}</AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0">
+                    <p className="text-[var(--text-primary)] truncate" style={{ fontSize: 14, fontWeight: 600 }}>
+                      {selectedAppt.petName} · {selectedAppt.service}
+                    </p>
+                    <p className="text-[var(--text-secondary)] truncate" style={{ fontSize: 12 }}>
+                      {selectedAppt.date} · {selectedAppt.timeStart} – {selectedAppt.timeEnd} · {selectedAppt.vet}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+            {deleteError && (
+              <div className="p-3 rounded-[10px] flex items-start gap-2" style={{ background: '#d4183d12', border: '1px solid #d4183d40' }}>
+                <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: '#d4183d' }} />
+                <p style={{ fontSize: 12, color: '#d4183d', lineHeight: 1.4 }}>{deleteError}</p>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="px-6 py-4 border-t border-[var(--border-color)] flex-shrink-0 sm:justify-end gap-2">
+            <Button variant="outline" size="sm" disabled={deleting} onClick={() => setDeleteConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={deleting}
+              onClick={performDeleteAppt}
+              style={{ background: '#d4183d', color: '#ffffff', border: 'none' }}
+              className="hover:opacity-90"
+            >
+              <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+              {deleting ? 'Deleting…' : 'Delete'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

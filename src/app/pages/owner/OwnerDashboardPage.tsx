@@ -205,8 +205,8 @@ export default function OwnerDashboardPage() {
           const dt = new Date(a.scheduled_at);
           return {
             id: i + 1,
-            time: dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' }),
-            date: dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }),
+            time: dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
+            date: dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
             reason: a.reason ?? a.services?.name ?? 'Checkup',
           };
         });
@@ -216,7 +216,7 @@ export default function OwnerDashboardPage() {
         .sort((a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime())
         .map((a, i) => ({
           id: i + 1,
-          date: new Date(a.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }),
+          date: new Date(a.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
           reason: a.reason ?? a.services?.name ?? 'Visit',
           vet: a.staff?.profiles ? `Dr. ${a.staff.profiles.last_name}` : '—',
           summary: a.notes ?? 'Visit completed.',

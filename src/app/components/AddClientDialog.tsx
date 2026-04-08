@@ -20,12 +20,12 @@ interface AddClientDialogProps {
 }
 
 // Generate weight options: 0.5, 1.0, 1.5, ... up to 100 kg
-const WEIGHT_OPTIONS = Array.from({ length: 200 }, (_, i) => {
+export const WEIGHT_OPTIONS = Array.from({ length: 200 }, (_, i) => {
   const val = (i + 1) * 0.5;
   return { value: val.toString(), label: `${val} kg` };
 });
 
-function WeightPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+export function WeightPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -138,12 +138,12 @@ function WeightPicker({ value, onChange }: { value: string; onChange: (v: string
   );
 }
 
-const US_STATES = [
+export const US_STATES = [
   'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD',
   'MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC',
   'SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','DC',
 ];
-const CA_PROVINCES = [
+export const CA_PROVINCES = [
   'AB','BC','MB','NB','NL','NS','NT','NU','ON','PE','QC','SK','YT',
 ];
 

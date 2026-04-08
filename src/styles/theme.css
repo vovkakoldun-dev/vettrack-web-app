@@ -882,3 +882,23 @@
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* ─── Assigned-vet star indicator (New Appointment dialog) ── */
+@keyframes assigned-vet-star-pulse {
+  0%, 100% {
+    transform: scale(1) rotate(0deg);
+    filter: drop-shadow(0 0 0 currentColor);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.25) rotate(15deg);
+    filter: drop-shadow(0 0 6px currentColor);
+    opacity: 0.85;
+  }
+}
+.assigned-vet-star {
+  animation: assigned-vet-star-pulse 1.6s ease-in-out infinite;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}

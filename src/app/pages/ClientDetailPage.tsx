@@ -301,7 +301,7 @@ export default function ClientDetailPage() {
         upcomingAppointments: petAppointments.filter((a: any) => a.pet_id === p.id).map((a: any, ai: number) => {
           const d = new Date(a.scheduled_at);
           const fmtTime = (dt: Date) => {
-            let h = dt.getUTCHours(); const m = dt.getUTCMinutes();
+            let h = dt.getHours(); const m = dt.getMinutes();
             const ampm = h >= 12 ? 'PM' : 'AM';
             if (h > 12) h -= 12; if (h === 0) h = 12;
             return `${h}:${m.toString().padStart(2, '0')} ${ampm}`;
@@ -309,7 +309,7 @@ export default function ClientDetailPage() {
           return {
             id: ai + 1,
             time: fmtTime(d),
-            date: d.toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' }),
+            date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
             reason: a.reason || a.status || 'Appointment',
           };
         }),
@@ -504,8 +504,8 @@ export default function ClientDetailPage() {
             visits: [] as any[], vetNotes: '', clientNotes: '',
             upcomingAppointments: petAppts2.filter((a: any) => a.pet_id === p.id).map((a: any, ai: number) => {
               const d = new Date(a.scheduled_at);
-              const fmtTime = (dt: Date) => { let h = dt.getUTCHours(); const m = dt.getUTCMinutes(); const ampm = h >= 12 ? 'PM' : 'AM'; if (h > 12) h -= 12; if (h === 0) h = 12; return `${h}:${m.toString().padStart(2, '0')} ${ampm}`; };
-              return { id: ai + 1, time: fmtTime(d), date: d.toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' }), reason: a.reason || a.status || 'Appointment' };
+              const fmtTime = (dt: Date) => { let h = dt.getHours(); const m = dt.getMinutes(); const ampm = h >= 12 ? 'PM' : 'AM'; if (h > 12) h -= 12; if (h === 0) h = 12; return `${h}:${m.toString().padStart(2, '0')} ${ampm}`; };
+              return { id: ai + 1, time: fmtTime(d), date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }), reason: a.reason || a.status || 'Appointment' };
             }),
             vaccinations: [] as any[],
           }));

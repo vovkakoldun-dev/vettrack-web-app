@@ -769,7 +769,7 @@ export default function DashboardPage() {
                         </div>
                         <div className="flex items-center gap-1.5 flex-shrink-0" style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>
                           <Clock className="w-3 h-3" />
-                          {new Date(a.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}
+                          {new Date(a.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                         </div>
                         <span
                           className="flex-shrink-0 px-2 py-0.5"
@@ -870,7 +870,7 @@ export default function DashboardPage() {
             ) : upcomingAppointments.map((appt) => (
               <AppointmentCard
                 key={appt.id}
-                time={new Date(appt.scheduled_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' })}
+                time={new Date(appt.scheduled_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
                 petName={appt.pets?.name ?? '—'}
                 ownerName={appt.clients ? `${appt.clients.first_name} ${appt.clients.last_name}` : '—'}
                 service={appt.services?.name ?? appt.reason ?? '—'}

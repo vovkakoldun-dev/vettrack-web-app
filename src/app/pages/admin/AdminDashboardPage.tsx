@@ -525,9 +525,9 @@ export default function AdminDashboardPage() {
   const TODAY_SCHEDULE = useMemo(() =>
     supaApptsToday.map((a, idx) => {
       const dt = new Date(a.scheduled_at);
-      // Use UTC — scheduled_at stored as UTC represents clinic local time
-      const h = dt.getUTCHours();
-      const m = dt.getUTCMinutes();
+      // Use local time — scheduled_at is stored with tz offset
+      const h = dt.getHours();
+      const m = dt.getMinutes();
       const ampm = h >= 12 ? 'PM' : 'AM';
       const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
       const time = `${h12}:${String(m).padStart(2, '0')} ${ampm}`;

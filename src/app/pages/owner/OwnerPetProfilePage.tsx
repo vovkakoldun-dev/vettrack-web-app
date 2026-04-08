@@ -102,8 +102,8 @@ export default function OwnerPetProfilePage() {
         const dt = new Date(a.scheduled_at);
         return {
           id: a.id,
-          time: dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' }),
-          date: fmtDate(a.scheduled_at),
+          time: dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
+          date: dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
           reason: a.reason ?? a.services?.name ?? 'Checkup',
         };
       });
@@ -113,7 +113,7 @@ export default function OwnerPetProfilePage() {
       .sort((a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime())
       .map((a, i) => ({
         id: i + 1,
-        date: fmtDate(a.scheduled_at),
+        date: new Date(a.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
         reason: a.reason ?? a.services?.name ?? 'Visit',
         vet: a.staff?.profiles ? `Dr. ${a.staff.profiles.last_name}` : '—',
         summary: a.notes ?? 'Visit completed.',
@@ -228,19 +228,16 @@ export default function OwnerPetProfilePage() {
                 pointerEvents: 'none',
               }}>
                 {clinicLogoUrl && (
-                  <div style={{
-                    width: 60, height: 60, borderRadius: '12px',
-                    backgroundColor: 'rgba(255,255,255,0.92)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    boxShadow: '0 4px 14px rgba(0,0,0,0.18)',
-                    padding: 6,
-                  }}>
-                    <img
-                      src={clinicLogoUrl}
-                      alt="Clinic logo"
-                      style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
-                    />
-                  </div>
+                  <img
+                    src={clinicLogoUrl}
+                    alt="Clinic logo"
+                    style={{
+                      maxWidth: 80,
+                      maxHeight: 80,
+                      objectFit: 'contain',
+                      filter: 'drop-shadow(0 4px 14px rgba(0,0,0,0.35))',
+                    }}
+                  />
                 )}
                 {bannerText && (
                   <p style={{

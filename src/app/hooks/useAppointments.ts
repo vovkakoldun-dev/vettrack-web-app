@@ -10,11 +10,13 @@ export interface AppointmentRow {
   reason: string | null
   notes: string | null
   room: string | null
+  room_id: string | null
   created_at: string
   pets: { id: string; name: string; species: string; breed: string | null; photo_url: string | null } | null
   clients: { id: string; first_name: string; last_name: string; phone: string | null } | null
   staff: { id: string; profiles: { first_name: string; last_name: string } | null } | null
   services: { id: string; name: string; price: number | null } | null
+  clinic_rooms: { id: string; name: string } | null
 }
 
 export interface AddAppointmentValues {
@@ -42,7 +44,7 @@ export function useAppointments(dateFilter?: string) {
       const { organizationId } = await getOrgContext()
       let query = db
         .from('appointments')
-        .select('id, scheduled_at, duration_minutes, status, reason, notes, room, created_at, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name, phone), staff!appointments_vet_org_fkey(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name)), services(id, name, price)')
+        .select('id, scheduled_at, duration_minutes, status, reason, notes, room, room_id, created_at, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name, phone), staff!appointments_vet_org_fkey(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name)), services(id, name, price), clinic_rooms(id, name)')
         .eq('organization_id', organizationId)
         .order('scheduled_at', { ascending: true })
 
@@ -94,7 +96,7 @@ export function useAppointments(dateFilter?: string) {
         status: 'Scheduled',
         ...values,
       }])
-      .select('id, scheduled_at, duration_minutes, status, reason, notes, room, created_at, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name, phone), staff!appointments_vet_org_fkey(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name)), services(id, name, price)')
+      .select('id, scheduled_at, duration_minutes, status, reason, notes, room, room_id, created_at, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name, phone), staff!appointments_vet_org_fkey(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name)), services(id, name, price), clinic_rooms(id, name)')
       .single()
     if (!err) {
       await fetchAppointments()
@@ -120,21 +122,25 @@ export function useAppointments(dateFilter?: string) {
     return { error: err }
   }, [fetchAppointments])
 
-  const updateStatusWithRoom = useCallback(async (id: string, status: string, room: string, scheduledAt?: string) => {
-    const { organizationId } = await getOrgContext()
-    const updatePayload: Record<string, unknown> = { status, room }
-    if (scheduledAt) updatePayload.scheduled_at = scheduledAt
-    const { error: err } = await db
-      .from('appointments')
-      .update(updatePayload)
-      .eq('id', id)
-      .eq('organization_id', organizationId)
-    if (!err) {
-      await fetchAppointments()
-      window.dispatchEvent(new CustomEvent('appointmentDataChanged'))
-    }
-    return { error: err }
-  }, [fetchAppointments])
+  const updateStatusWithRoom = useCallback(
+    async (id: string, status: string, room: string, scheduledAt?: string, roomId?: string) => {
+      const { organizationId } = await getOrgContext()
+      const updatePayload: Record<string, unknown> = { status, room }
+      if (roomId !== undefined) updatePayload.room_id = roomId || null
+      if (scheduledAt) updatePayload.scheduled_at = scheduledAt
+      const { error: err } = await db
+        .from('appointments')
+        .update(updatePayload)
+        .eq('id', id)
+        .eq('organization_id', organizationId)
+      if (!err) {
+        await fetchAppointments()
+        window.dispatchEvent(new CustomEvent('appointmentDataChanged'))
+      }
+      return { error: err }
+    },
+    [fetchAppointments],
+  )
 
   const deleteAppointment = useCallback(async (id: string) => {
     // Optimistic delete — remove from UI immediately
