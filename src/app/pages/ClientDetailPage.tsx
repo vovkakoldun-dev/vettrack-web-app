@@ -4309,7 +4309,7 @@ const problemSeverityColor = (s: string) =>
     ? { bg: '#F4A26115', text: '#F4A261', ring: '#F4A261' }
     : { bg: '#74C69D15', text: 'var(--brand-green-text)', ring: 'var(--brand-green-text)' };
 
-function ProblemsSection({
+export function ProblemsSection({
   petName,
   petDbId,
   onChanged,
@@ -7097,7 +7097,7 @@ function formatBytes(bytes: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function PetReportsTab({
+export function PetReportsTab({
   petName,
   petDbId,
 }: {

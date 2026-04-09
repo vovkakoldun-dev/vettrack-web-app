@@ -1,9 +1,12 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import {
   ArrowLeft, Calendar, Syringe, FileText,
   AlertCircle, CheckCircle2, ChevronRight, PawPrint,
   Heart, Scale, Dna, Palette, Clock, MessageCircle, Camera,
+  Activity, ScanLine, Scissors, Target, Utensils,
+  FlaskConical, Image as ImageIcon, TrendingUp, Download, Eye,
+  Loader2,
 } from 'lucide-react';
 import { Avatar, AvatarImage, AvatarFallback } from '../../components/ui/avatar';
 import { Badge } from '../../components/ui/badge';
@@ -12,10 +15,23 @@ import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
 } from '../../components/ui/table';
 import { Separator } from '../../components/ui/separator';
+import {
+  Accordion, AccordionItem, AccordionTrigger, AccordionContent,
+} from '../../components/ui/accordion';
 import { usePets } from '../../hooks/usePets';
 import { useAppointments } from '../../hooks/useAppointments';
 import { useOwnerClient } from '../../hooks/useOwnerClient';
 import { supabase } from '../../../lib/supabase';
+import {
+  InjectionsTab,
+  XRayTab,
+  SurgeryTab,
+  PlanTab,
+  DietTab,
+  PhotosTab,
+  PetReportsTab,
+  ProblemsSection,
+} from '../ClientDetailPage';
 
 // ─── Brand ───────────────────────────────────────────────────
 const BRAND = 'var(--brand-green-text)';
@@ -93,6 +109,139 @@ export default function OwnerPetProfilePage() {
       });
   }, [supaPet?.id]);
 
+  // ── Additional data fetches for new tabs ────────────────────
+  const [allergies, setAllergies] = useState<string[]>([]);
+  const [treatments, setTreatments] = useState<any[]>([]);
+  const [visitReports, setVisitReports] = useState<any[]>([]);
+  const [labFiles, setLabFiles] = useState<any[]>([]);
+  const [labLoading, setLabLoading] = useState(true);
+  const [noteHistory, setNoteHistory] = useState<any[]>([]);
+
+  // Fetch allergies + treatments
+  useEffect(() => {
+    if (!supaPet?.id) return;
+    supabase.from('pet_allergies').select('allergen').eq('pet_id', supaPet.id).then(({ data }) => {
+      if (data) setAllergies(data.map((a: any) => a.allergen));
+    });
+    supabase
+      .from('treatments')
+      .select('id, name, treatment_date, notes, created_at, staff:staff!treatments_vet_org_fkey(profiles:profiles!staff_profile_org_fkey(first_name, last_name))')
+      .eq('pet_id', supaPet.id)
+      .order('created_at', { ascending: false })
+      .then(({ data }) => {
+        if (!data) { setTreatments([]); return; }
+        setTreatments(data.map((t: any) => ({
+          id: t.id,
+          name: t.name,
+          date: fmtDate(t.treatment_date),
+          createdAt: t.created_at,
+          vet: t.staff?.profiles ? `Dr. ${t.staff.profiles.first_name} ${t.staff.profiles.last_name}` : '—',
+          notes: t.notes || '',
+        })));
+      });
+  }, [supaPet?.id]);
+
+  // Fetch visit reports
+  const fetchVisitReports = useCallback(async (petDbId: string) => {
+    if (!petDbId) return;
+    const { data } = await supabase
+      .from('appointments')
+      .select('id, scheduled_at, duration_minutes, status, type, reason, notes, staff:staff!appointments_vet_org_fkey(profiles:profiles!staff_profile_org_fkey(first_name, last_name)), services:services!appointments_service_org_fkey(name)')
+      .eq('pet_id', petDbId)
+      .eq('status', 'Completed')
+      .order('scheduled_at', { ascending: false });
+
+    const { data: mrData } = await supabase
+      .from('medical_records')
+      .select('id, record_number, appointment_id, record_type, status, visit_date, reason, clinical_notes, chief_complaint, exam_notes, primary_diagnosis, secondary_diagnosis, vitals_json, medications_json, procedures_text, owner_instructions, follow_up_date, follow_up_notes')
+      .eq('pet_id', petDbId)
+      .order('visit_date', { ascending: false });
+
+    const mrByAppt = new Map<string, any>();
+    if (mrData) mrData.forEach((mr: any) => { if (mr.appointment_id) mrByAppt.set(mr.appointment_id, mr); });
+
+    if (data) {
+      const mapped = data.map((apt: any) => {
+        const profile = apt.staff?.profiles;
+        const mr = mrByAppt.get(apt.id);
+        return {
+          id: apt.id,
+          visit_date: apt.scheduled_at?.split('T')[0] || '',
+          visit_time: apt.scheduled_at ? new Date(apt.scheduled_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '',
+          reason: apt.reason || apt.services?.name || apt.type || 'Appointment',
+          status: apt.status || 'Scheduled',
+          type: apt.type,
+          notes: apt.notes,
+          duration_minutes: apt.duration_minutes,
+          service_name: apt.services?.name || null,
+          vet_name: profile ? `Dr. ${profile.first_name} ${profile.last_name}` : '—',
+          record_number: mr?.record_number || null,
+          chief_complaint: mr?.chief_complaint || null,
+          exam_notes: mr?.exam_notes || null,
+          primary_diagnosis: mr?.primary_diagnosis || null,
+          secondary_diagnosis: mr?.secondary_diagnosis || null,
+          clinical_notes: mr?.clinical_notes || null,
+          vitals_json: mr?.vitals_json || null,
+          medications_json: mr?.medications_json || null,
+          procedures_text: mr?.procedures_text || null,
+          owner_instructions: mr?.owner_instructions || null,
+          follow_up_date: mr?.follow_up_date || null,
+          follow_up_notes: mr?.follow_up_notes || null,
+        };
+      });
+      setVisitReports(mapped);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (supaPet?.id) fetchVisitReports(supaPet.id);
+  }, [supaPet?.id, fetchVisitReports]);
+
+  // Fetch lab files
+  useEffect(() => {
+    if (!supaPet?.id) { setLabLoading(false); return; }
+    setLabLoading(true);
+    supabase
+      .from('lab_results')
+      .select(`
+        id, file_name, file_url, file_type, test_panel, notes,
+        review_status, reviewed_at, created_at,
+        uploader:profiles!lab_results_uploaded_by_org_fkey(first_name, last_name),
+        reviewer:profiles!lab_results_reviewed_by_org_fkey(first_name, last_name)
+      `)
+      .eq('pet_id', supaPet.id)
+      .not('file_url', 'is', null)
+      .order('created_at', { ascending: false })
+      .then(({ data }) => {
+        if (data) setLabFiles(data);
+        setLabLoading(false);
+      });
+  }, [supaPet?.id]);
+
+  // Fetch notes history (owner only sees client notes)
+  useEffect(() => {
+    if (!supaPet?.id) return;
+    supabase
+      .from('pet_notes')
+      .select('id, type, content, created_at, author:staff!pet_notes_author_org_fkey(role, profiles:profiles!staff_profile_org_fkey(first_name, last_name))')
+      .eq('pet_id', supaPet.id)
+      .eq('type', 'client')
+      .order('created_at', { ascending: false })
+      .then(({ data }) => {
+        if (data) {
+          setNoteHistory(data.map((n: any) => ({
+            id: n.id,
+            type: n.type,
+            content: n.content,
+            created_at: n.created_at,
+            author: n.author?.profiles
+              ? { first_name: n.author.profiles.first_name, last_name: n.author.profiles.last_name, role: n.author.role || '' }
+              : { first_name: 'Unknown', last_name: '', role: '' },
+          })));
+        }
+      });
+  }, [supaPet?.id]);
+
   // Build pet object from real data
   const pet = useMemo(() => {
     if (!supaPet) return null;
@@ -151,8 +300,6 @@ export default function OwnerPetProfilePage() {
 
   const statusColor = STATUS_COLORS[pet?.status ?? 'Healthy'] ?? STATUS_COLORS.Healthy;
 
-  const [expandedVisit, setExpandedVisit] = useState<number | null>(null);
-
   // ── Clinic banner / branding (set centrally by super admin) ─
   const [clinicBranding, setClinicBranding] = useState<ClinicBranding | null>(null);
   useEffect(() => {
@@ -185,7 +332,7 @@ export default function OwnerPetProfilePage() {
 
   return (
     <div className="p-4 md:p-8" style={{ minHeight: '100vh', backgroundColor: 'var(--bg-base)' }}>
-      <div style={{ maxWidth: '1100px', margin: '0 auto' }}>
+      <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
 
         {/* ── Back ── */}
         <button
@@ -197,7 +344,9 @@ export default function OwnerPetProfilePage() {
           Back to Dashboard
         </button>
 
-        {/* ── Header card ── */}
+        {/* ══════════════════════════════════════════════════
+             TOP BANNER / HEADER SECTION (unchanged)
+             ══════════════════════════════════════════════════ */}
         <div
           style={{
             backgroundColor: 'var(--surface-white)',
@@ -366,24 +515,52 @@ export default function OwnerPetProfilePage() {
           </div>
         </div>
 
-        {/* ── Tabs ── */}
+        {/* ══════════════════════════════════════════════════
+             TABS — mirroring doctor portal's pet profile
+             ══════════════════════════════════════════════════ */}
         <Tabs defaultValue="overview">
-          <TabsList className="mb-6">
-            <TabsTrigger value="overview">
-              <PawPrint style={{ width: '14px', height: '14px', marginRight: '6px' }} /> Overview
-            </TabsTrigger>
-            <TabsTrigger value="records">
-              <FileText style={{ width: '14px', height: '14px', marginRight: '6px' }} /> Visit Records
-            </TabsTrigger>
-            <TabsTrigger value="vaccinations">
-              <Syringe style={{ width: '14px', height: '14px', marginRight: '6px' }} /> Vaccinations
-            </TabsTrigger>
-            <TabsTrigger value="appointments">
-              <Calendar style={{ width: '14px', height: '14px', marginRight: '6px' }} /> Appointments
-            </TabsTrigger>
-          </TabsList>
+          <div className="overflow-x-auto mb-6" style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
+            <TabsList className="w-auto inline-flex">
+              <TabsTrigger value="overview">
+                <PawPrint style={{ width: '14px', height: '14px', marginRight: '6px' }} /> Overview
+              </TabsTrigger>
+              <TabsTrigger value="medical-overview">
+                <Activity style={{ width: '14px', height: '14px', marginRight: '6px' }} /> Medical Overview
+              </TabsTrigger>
+              <TabsTrigger value="visits">
+                <FileText style={{ width: '14px', height: '14px', marginRight: '6px' }} /> Visits
+              </TabsTrigger>
+              <TabsTrigger value="injections">
+                <Syringe style={{ width: '14px', height: '14px', marginRight: '6px' }} /> Injections
+              </TabsTrigger>
+              <TabsTrigger value="xray">
+                <ScanLine style={{ width: '14px', height: '14px', marginRight: '6px' }} /> X-Ray
+              </TabsTrigger>
+              <TabsTrigger value="surgery">
+                <Scissors style={{ width: '14px', height: '14px', marginRight: '6px' }} /> Surgery
+              </TabsTrigger>
+              <TabsTrigger value="plan">
+                <Target style={{ width: '14px', height: '14px', marginRight: '6px' }} /> Plan
+              </TabsTrigger>
+              <TabsTrigger value="diet">
+                <Utensils style={{ width: '14px', height: '14px', marginRight: '6px' }} /> Diet
+              </TabsTrigger>
+              <TabsTrigger value="lab">
+                <FlaskConical style={{ width: '14px', height: '14px', marginRight: '6px' }} /> Lab
+              </TabsTrigger>
+              <TabsTrigger value="notes">
+                <MessageCircle style={{ width: '14px', height: '14px', marginRight: '6px' }} /> Notes
+              </TabsTrigger>
+              <TabsTrigger value="photos">
+                <ImageIcon style={{ width: '14px', height: '14px', marginRight: '6px' }} /> Photos
+              </TabsTrigger>
+              <TabsTrigger value="reports">
+                <TrendingUp style={{ width: '14px', height: '14px', marginRight: '6px' }} /> Reports
+              </TabsTrigger>
+            </TabsList>
+          </div>
 
-          {/* ── OVERVIEW TAB ── */}
+          {/* ══════════ OVERVIEW TAB (existing owner layout, preserved) ══════════ */}
           <TabsContent value="overview">
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-6 items-start">
 
@@ -568,176 +745,535 @@ export default function OwnerPetProfilePage() {
             </div>
           </TabsContent>
 
-          {/* ── VISIT RECORDS TAB ── */}
-          <TabsContent value="records">
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {pet.visits.map((visit) => (
-                <div
-                  key={visit.id}
-                  style={{ backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)', borderRadius: '12px', overflow: 'hidden' }}
-                >
-                  {/* Summary row */}
-                  <button
-                    onClick={() => setExpandedVisit(expandedVisit === visit.id ? null : visit.id)}
-                    style={{
-                      width: '100%', display: 'flex', alignItems: 'center', gap: '16px',
-                      padding: '16px 20px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left',
-                    }}
-                  >
-                    <div style={{ width: '40px', height: '40px', borderRadius: '10px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                      <FileText style={{ width: '18px', height: '18px', color: BRAND_TEXT }} />
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px', flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>{visit.reason}</span>
-                        <Badge variant="secondary" style={{ fontSize: '11px', backgroundColor: '#74C69D20', color: BRAND_TEXT, border: 'none' }}>
-                          {visit.status}
-                        </Badge>
-                      </div>
-                      <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0 }}>
-                        {visit.date} · {visit.vet}
-                      </p>
-                    </div>
-                    <ChevronRight
-                      style={{
-                        width: '16px', height: '16px', color: 'var(--text-secondary)',
-                        transform: expandedVisit === visit.id ? 'rotate(90deg)' : 'rotate(0)',
-                        transition: 'transform 0.15s', flexShrink: 0,
-                      }}
-                    />
-                  </button>
+          {/* ══════════ MEDICAL OVERVIEW TAB ══════════ */}
+          <TabsContent value="medical-overview">
+            {/* Problems (VeNom-coded) */}
+            <ProblemsSection
+              petName={pet.name}
+              petDbId={pet.id}
+            />
 
-                  {/* Expanded detail */}
-                  {expandedVisit === visit.id && (
-                    <div style={{ padding: '0 20px 20px', borderTop: '1px solid var(--border-color)' }}>
-                      <div style={{ paddingTop: '16px' }}>
-                        <p style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '6px' }}>Summary</p>
-                        <p style={{ fontSize: '14px', color: 'var(--text-primary)', lineHeight: 1.6, marginBottom: '16px' }}>{visit.summary}</p>
-                        <Separator style={{ marginBottom: '16px' }} />
-                        <p style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '6px' }}>Clinical Notes</p>
-                        <p style={{ fontSize: '14px', color: 'var(--text-primary)', lineHeight: 1.6 }}>{visit.notes}</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </TabsContent>
-
-          {/* ── VACCINATIONS TAB ── */}
-          <TabsContent value="vaccinations">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {pet.vaccinations.map((vax) => {
-                const isUpToDate = vax.status === 'Up to date';
-                return (
-                  <div
-                    key={vax.id}
-                    style={{
-                      backgroundColor: 'var(--surface-white)',
-                      border: `1px solid ${isUpToDate ? '#74C69D40' : '#F59E0B40'}`,
-                      borderRadius: '12px',
-                      padding: '18px',
-                      borderTop: `3px solid ${isUpToDate ? BRAND : '#F59E0B'}`,
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-                      <div style={{ width: '36px', height: '36px', borderRadius: '9px', backgroundColor: isUpToDate ? '#74C69D20' : '#F59E0B20', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <Syringe style={{ width: '18px', height: '18px', color: isUpToDate ? BRAND_TEXT : '#D97706' }} />
-                      </div>
-                      <span style={{
-                        fontSize: '11px', fontWeight: 700, padding: '3px 9px', borderRadius: '9999px',
-                        backgroundColor: isUpToDate ? '#74C69D20' : '#F59E0B20',
-                        color: isUpToDate ? BRAND_TEXT : '#D97706',
-                      }}>
-                        {vax.status}
-                      </span>
-                    </div>
-                    <p style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '10px' }}>{vax.name}</p>
-                    <Separator style={{ marginBottom: '10px' }} />
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                      {[
-                        ['Last Given', vax.lastGiven],
-                        ['Next Due',   vax.nextDue],
-                      ].map(([label, value]) => (
-                        <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 500 }}>{label}</span>
-                          <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>{value}</span>
-                        </div>
-                      ))}
-                    </div>
-                    {!isUpToDate && (
-                      <button
-                        onClick={() => navigate('/owner/appointments')}
-                        style={{
-                          marginTop: '12px', width: '100%', padding: '7px', borderRadius: '7px',
-                          backgroundColor: '#F59E0B15', border: '1px solid #F59E0B40',
-                          color: '#D97706', fontSize: '12px', fontWeight: 700,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        Schedule Booster
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </TabsContent>
-
-          {/* ── APPOINTMENTS TAB ── */}
-          <TabsContent value="appointments">
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '4px' }}>
-                <button
-                  onClick={() => navigate('/owner/appointments')}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: '6px',
-                    padding: '9px 18px', borderRadius: '9px',
-                    backgroundColor: BRAND, color: '#fff',
-                    border: 'none', fontSize: '13px', fontWeight: 700,
-                    cursor: 'pointer',
-                  }}
-                >
-                  <Calendar style={{ width: '14px', height: '14px' }} />
-                  Book New Appointment
-                </button>
+            {/* Allergies (read-only) */}
+            <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6 mb-6" style={{ borderRadius: '12px' }}>
+              <div className="flex items-center gap-2 mb-4">
+                <AlertCircle className="w-5 h-5 text-[#d4183d]" />
+                <h3 className="text-[var(--text-primary)]">Allergies</h3>
               </div>
-              {pet.upcomingAppointments.map((appt) => (
-                <div
-                  key={appt.id}
-                  style={{
-                    backgroundColor: 'var(--surface-white)',
-                    border: '1px solid color-mix(in srgb, var(--brand-green-text) 19%, transparent)',
-                    borderRadius: '12px', padding: '18px 20px',
-                    borderLeft: `4px solid ${BRAND}`,
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                    <div style={{ width: '44px', height: '44px', borderRadius: '10px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <Calendar style={{ width: '20px', height: '20px', color: BRAND_TEXT }} />
-                    </div>
-                    <div>
-                      <p style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '3px' }}>{appt.reason}</p>
-                      <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: 0 }}>{appt.date} · {appt.time}</p>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button style={{ padding: '7px 16px', borderRadius: '8px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--brand-green-text) 19%, transparent)', color: BRAND_TEXT, fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>
-                      Reschedule
-                    </button>
-                    <button style={{ padding: '7px 16px', borderRadius: '8px', backgroundColor: '#d4183d10', border: '1px solid #d4183d25', color: '#d4183d', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              ))}
-              {pet.upcomingAppointments.length === 0 && (
-                <div style={{ textAlign: 'center', padding: '48px 20px', color: 'var(--text-secondary)', fontSize: '14px' }}>
-                  No upcoming appointments for {pet.name}.
-                </div>
+              <div className="flex flex-wrap gap-2">
+                {allergies.length === 0 ? (
+                  <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>No known allergies on file.</span>
+                ) : (
+                  allergies.map((a) => (
+                    <span
+                      key={a}
+                      className="inline-flex items-center gap-1.5 px-3 py-1"
+                      style={{ backgroundColor: '#d4183d15', color: '#d4183d', borderRadius: '9999px', fontSize: '14px', fontWeight: 600 }}
+                    >
+                      <AlertCircle className="w-3 h-3" /> {a}
+                    </span>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Treatments (read-only) */}
+            <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6" style={{ borderRadius: '12px' }}>
+              <div className="mb-4">
+                <h3 className="text-[var(--text-primary)]">Treatments</h3>
+              </div>
+              {treatments.length === 0 ? (
+                <p className="text-[var(--text-secondary)] py-4" style={{ fontSize: '14px' }}>No treatments on file.</p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="py-3 px-4" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>Treatment</TableHead>
+                      <TableHead className="py-3 px-4" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>Date</TableHead>
+                      <TableHead className="py-3 px-4" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>Vet</TableHead>
+                      <TableHead className="py-3 px-4" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>Notes</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {treatments.map((t) => (
+                      <TableRow key={t.id} className="hover:bg-[var(--surface-elevated)]">
+                        <TableCell className="py-3 px-4">
+                          <span className="text-[var(--text-primary)]" style={{ fontSize: '16px', fontWeight: 500 }}>{t.name}</span>
+                        </TableCell>
+                        <TableCell className="py-3 px-4">
+                          <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>{t.date}</span>
+                        </TableCell>
+                        <TableCell className="py-3 px-4">
+                          <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>{t.vet}</span>
+                        </TableCell>
+                        <TableCell className="py-3 px-4">
+                          <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>{t.notes}</span>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               )}
             </div>
+
+            {/* Upcoming Appointments + Vaccination History */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+              {/* Upcoming Appointments */}
+              <div className="border border-[color-mix(in_srgb,var(--brand-green-text)_19%,transparent)] bg-[var(--surface-white)] p-6" style={{ borderRadius: '12px' }}>
+                <div className="flex items-center gap-2 mb-4">
+                  <Calendar className="w-5 h-5 text-[var(--brand-green-text)]" />
+                  <h3 className="text-[var(--text-primary)]">Upcoming Appointments</h3>
+                </div>
+                {pet.upcomingAppointments.length === 0 ? (
+                  <p className="text-[var(--text-secondary)] py-4" style={{ fontSize: '14px' }}>No upcoming appointments.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {pet.upcomingAppointments.map((appt) => (
+                      <div
+                        key={appt.id}
+                        className="border border-[var(--border-color)] p-4 cursor-pointer hover:border-[color-mix(in_srgb,var(--brand-green-text)_38%,transparent)] transition-colors"
+                        style={{ borderRadius: '8px' }}
+                        onClick={() => navigate('/owner/appointments')}
+                      >
+                        <div className="flex items-center gap-3">
+                          <Avatar className="w-10 h-10">
+                            <AvatarImage src={pet.image} alt={pet.name} className="object-cover" />
+                            <AvatarFallback>{pet.name.slice(0, 2).toUpperCase()}</AvatarFallback>
+                          </Avatar>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-0.5">
+                              <Clock className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
+                              <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>
+                                {appt.time} - {appt.date}
+                              </span>
+                            </div>
+                            <p className="text-[var(--text-primary)]" style={{ fontSize: '16px', fontWeight: 600 }}>{pet.name}</p>
+                          </div>
+                        </div>
+                        <div className="mt-3">
+                          <span
+                            className="inline-block px-2.5 py-1"
+                            style={{ backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)', color: 'var(--brand-green-text)', borderRadius: '6px', fontSize: '13px', fontWeight: 600 }}
+                          >
+                            {appt.reason}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Vaccination History */}
+              <div className="border border-[var(--border-color)] bg-[var(--surface-white)] p-6" style={{ borderRadius: '12px' }}>
+                <div className="flex items-center gap-2 mb-4">
+                  <Syringe className="w-5 h-5 text-[var(--brand-green-text)]" />
+                  <h3 className="text-[var(--text-primary)]">Vaccination History</h3>
+                </div>
+                {vaccinations.length === 0 ? (
+                  <p className="text-[var(--text-secondary)] py-4" style={{ fontSize: '14px' }}>No vaccination records yet.</p>
+                ) : (
+                  <div className="flex gap-3 overflow-x-auto pb-3" style={{ scrollbarWidth: 'none' }}>
+                    {vaccinations.map((vax) => {
+                      const isUpToDate = vax.status === 'Up to date';
+                      return (
+                        <div
+                          key={vax.id}
+                          className="flex-shrink-0 border p-4"
+                          style={{
+                            borderRadius: '10px',
+                            width: '200px',
+                            borderColor: isUpToDate ? 'color-mix(in srgb, var(--brand-green-text) 25%, transparent)' : '#F4A26180',
+                            backgroundColor: isUpToDate ? 'color-mix(in srgb, var(--brand-green-text) 3%, transparent)' : '#F4A26108',
+                          }}
+                        >
+                          <div className="flex items-center gap-2 mb-2">
+                            <div
+                              className="w-8 h-8 flex items-center justify-center"
+                              style={{ borderRadius: '8px', backgroundColor: isUpToDate ? 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)' : '#F4A26115' }}
+                            >
+                              <Syringe className="w-4 h-4" style={{ color: isUpToDate ? 'var(--brand-green-text)' : '#F4A261' }} />
+                            </div>
+                            <span className="text-[var(--text-primary)]" style={{ fontSize: '15px', fontWeight: 600 }}>{vax.name}</span>
+                          </div>
+                          <div className="flex items-center gap-1 mb-3">
+                            <CheckCircle2 className="w-3.5 h-3.5" style={{ color: isUpToDate ? 'var(--brand-green-text)' : '#F4A261' }} />
+                            <span style={{ fontSize: '13px', fontWeight: 500, color: isUpToDate ? 'var(--brand-green-text)' : '#F4A261' }}>
+                              {vax.status}
+                            </span>
+                          </div>
+                          <div className="space-y-1.5">
+                            <div className="flex justify-between">
+                              <span className="text-[var(--text-secondary)]" style={{ fontSize: '12px' }}>Last given:</span>
+                              <span className="text-[var(--text-primary)]" style={{ fontSize: '12px', fontWeight: 600 }}>{vax.lastGiven}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-[var(--text-secondary)]" style={{ fontSize: '12px' }}>Next due:</span>
+                              <span className="text-[var(--text-primary)]" style={{ fontSize: '12px', fontWeight: 600 }}>{vax.nextDue}</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </TabsContent>
+
+          {/* ══════════ VISITS TAB ══════════ */}
+          <TabsContent value="visits">
+            <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6" style={{ borderRadius: '12px' }}>
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-[var(--text-primary)]">Visit History</h3>
+                <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{visitReports.length} appointment{visitReports.length !== 1 ? 's' : ''}</span>
+              </div>
+
+              {visitReports.length === 0 ? (
+                <p className="text-[var(--text-secondary)] text-center py-8" style={{ fontSize: '14px' }}>No appointments found for this pet.</p>
+              ) : (
+                <Accordion type="single" collapsible className="space-y-3">
+                  {visitReports.map((v) => {
+                    const statusColor = v.status === 'Completed'
+                      ? { bg: '#74C69D20', text: 'var(--brand-green-text)' }
+                      : v.status === 'Cancelled'
+                      ? { bg: '#E76F5120', text: '#E76F51' }
+                      : v.status === 'In Progress' || v.status === 'Checked In'
+                      ? { bg: '#F4A26120', text: '#F4A261' }
+                      : { bg: '#5390D920', text: '#5390D9' };
+                    return (
+                      <AccordionItem key={v.id} value={`visit-${v.id}`} className="border border-[var(--border-color)] px-4" style={{ borderRadius: '8px' }}>
+                        <AccordionTrigger className="py-4 hover:no-underline">
+                          <div className="flex items-center gap-4 text-left flex-1 mr-4">
+                            <div className="flex flex-col flex-shrink-0 w-28">
+                              <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>
+                                {new Date(v.visit_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                              </span>
+                              {v.visit_time && <span className="text-[var(--text-secondary)]" style={{ fontSize: '12px' }}>{v.visit_time}</span>}
+                            </div>
+                            <span className="text-[var(--text-primary)] flex-1 truncate" style={{ fontSize: '16px', fontWeight: 600 }}>{v.reason}</span>
+                            <span className="text-[var(--text-secondary)] hidden sm:inline" style={{ fontSize: '14px' }}>{v.vet_name}</span>
+                            <span
+                              className="inline-block px-2 py-0.5 flex-shrink-0"
+                              style={{ backgroundColor: statusColor.bg, color: statusColor.text, borderRadius: '9999px', fontSize: '12px', fontWeight: 600 }}
+                            >
+                              {v.status}
+                            </span>
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent className="pb-4">
+                          <Separator className="mb-4" />
+                          <div className="space-y-4">
+                            {/* Basic info row */}
+                            <div className="flex flex-wrap gap-x-6 gap-y-2">
+                              {v.type && (
+                                <div>
+                                  <p className="text-[var(--text-secondary)] mb-0.5" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Type</p>
+                                  <p className="text-[var(--text-primary)]" style={{ fontSize: '14px' }}>{v.type}</p>
+                                </div>
+                              )}
+                              {v.service_name && (
+                                <div>
+                                  <p className="text-[var(--text-secondary)] mb-0.5" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Service</p>
+                                  <p className="text-[var(--text-primary)]" style={{ fontSize: '14px' }}>{v.service_name}</p>
+                                </div>
+                              )}
+                              {v.duration_minutes && (
+                                <div>
+                                  <p className="text-[var(--text-secondary)] mb-0.5" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Duration</p>
+                                  <p className="text-[var(--text-primary)]" style={{ fontSize: '14px' }}>{v.duration_minutes} min</p>
+                                </div>
+                              )}
+                              {v.record_number && (
+                                <div>
+                                  <p className="text-[var(--text-secondary)] mb-0.5" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Record #</p>
+                                  <p className="text-[var(--text-primary)]" style={{ fontSize: '14px' }}>{v.record_number}</p>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Chief complaint */}
+                            {v.chief_complaint && (
+                              <div>
+                                <p className="text-[var(--text-secondary)] mb-1" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Chief Complaint</p>
+                                <p className="text-[var(--text-primary)] whitespace-pre-wrap" style={{ fontSize: '14px', lineHeight: 1.6 }}>{v.chief_complaint}</p>
+                              </div>
+                            )}
+
+                            {/* Vitals */}
+                            {v.vitals_json && Object.keys(v.vitals_json).length > 0 && (
+                              <div>
+                                <p className="text-[var(--text-secondary)] mb-1.5" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Vitals</p>
+                                <div className="flex flex-wrap gap-x-5 gap-y-1.5">
+                                  {Object.entries(v.vitals_json).map(([key, val]: [string, any]) => (
+                                    <span key={key} className="text-[var(--text-primary)]" style={{ fontSize: '13px' }}>
+                                      <span className="text-[var(--text-secondary)]" style={{ fontWeight: 500 }}>{key.replace(/_/g, ' ')}:</span>{' '}
+                                      <span style={{ fontWeight: 600 }}>{val}</span>
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Diagnosis */}
+                            {(v.primary_diagnosis || v.secondary_diagnosis) && (
+                              <div>
+                                <p className="text-[var(--text-secondary)] mb-1" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Diagnosis</p>
+                                {v.primary_diagnosis && <p className="text-[var(--text-primary)]" style={{ fontSize: '14px', lineHeight: 1.6 }}><strong>Primary:</strong> {v.primary_diagnosis}</p>}
+                                {v.secondary_diagnosis && <p className="text-[var(--text-primary)]" style={{ fontSize: '14px', lineHeight: 1.6 }}><strong>Secondary:</strong> {v.secondary_diagnosis}</p>}
+                              </div>
+                            )}
+
+                            {/* Exam notes */}
+                            {v.exam_notes && (
+                              <div>
+                                <p className="text-[var(--text-secondary)] mb-1" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Exam Notes</p>
+                                <p className="text-[var(--text-primary)] whitespace-pre-wrap" style={{ fontSize: '14px', lineHeight: 1.6 }}>{v.exam_notes}</p>
+                              </div>
+                            )}
+
+                            {/* Procedures */}
+                            {v.procedures_text && (
+                              <div>
+                                <p className="text-[var(--text-secondary)] mb-1" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Procedures</p>
+                                <p className="text-[var(--text-primary)] whitespace-pre-wrap" style={{ fontSize: '14px', lineHeight: 1.6 }}>{v.procedures_text}</p>
+                              </div>
+                            )}
+
+                            {/* Medications */}
+                            {v.medications_json && v.medications_json.length > 0 && (
+                              <div>
+                                <p className="text-[var(--text-secondary)] mb-1.5" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Medications</p>
+                                <div className="space-y-1">
+                                  {v.medications_json.map((med: any, mi: number) => (
+                                    <p key={mi} className="text-[var(--text-primary)]" style={{ fontSize: '13px' }}>
+                                      <span style={{ fontWeight: 600 }}>{med.name || med.medication}</span>
+                                      {med.dosage && <span className="text-[var(--text-secondary)]"> — {med.dosage}</span>}
+                                      {med.frequency && <span className="text-[var(--text-secondary)]">, {med.frequency}</span>}
+                                      {med.duration && <span className="text-[var(--text-secondary)]">, {med.duration}</span>}
+                                    </p>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Clinical notes */}
+                            {v.clinical_notes && (
+                              <div>
+                                <p className="text-[var(--text-secondary)] mb-1" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Clinical Notes</p>
+                                <p className="text-[var(--text-primary)] whitespace-pre-wrap" style={{ fontSize: '14px', lineHeight: 1.6 }}>{v.clinical_notes}</p>
+                              </div>
+                            )}
+
+                            {/* General appointment notes */}
+                            {v.notes && !v.clinical_notes && (
+                              <div>
+                                <p className="text-[var(--text-secondary)] mb-1" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Notes</p>
+                                <p className="text-[var(--text-primary)] whitespace-pre-wrap" style={{ fontSize: '14px', lineHeight: 1.6 }}>{v.notes}</p>
+                              </div>
+                            )}
+
+                            {/* Owner instructions */}
+                            {v.owner_instructions && (
+                              <div>
+                                <p className="text-[var(--text-secondary)] mb-1" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Home Care Instructions</p>
+                                <p className="text-[var(--text-primary)] whitespace-pre-wrap" style={{ fontSize: '14px', lineHeight: 1.6 }}>{v.owner_instructions}</p>
+                              </div>
+                            )}
+
+                            {/* Follow-up */}
+                            {v.follow_up_date && (
+                              <div className="flex items-center gap-2 mt-1 p-2.5 border border-[var(--border-color)]" style={{ borderRadius: '8px', backgroundColor: 'var(--surface-elevated)' }}>
+                                <span className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600 }}>FOLLOW-UP:</span>
+                                <span className="text-[var(--text-primary)]" style={{ fontSize: '13px', fontWeight: 500 }}>
+                                  {new Date(v.follow_up_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                </span>
+                                {v.follow_up_notes && <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>— {v.follow_up_notes}</span>}
+                              </div>
+                            )}
+                          </div>
+                        </AccordionContent>
+                      </AccordionItem>
+                    );
+                  })}
+                </Accordion>
+              )}
+            </div>
+          </TabsContent>
+
+          {/* ══════════ INJECTIONS TAB ══════════ */}
+          <TabsContent value="injections">
+            <InjectionsTab petName={pet.name} petDbId={pet.id} />
+          </TabsContent>
+
+          {/* ══════════ X-RAY TAB ══════════ */}
+          <TabsContent value="xray">
+            <XRayTab petName={pet.name} petDbId={pet.id} />
+          </TabsContent>
+
+          {/* ══════════ SURGERY TAB ══════════ */}
+          <TabsContent value="surgery">
+            <SurgeryTab petName={pet.name} petDbId={pet.id} />
+          </TabsContent>
+
+          {/* ══════════ PLAN TAB ══════════ */}
+          <TabsContent value="plan">
+            <PlanTab petName={pet.name} petDbId={pet.id} />
+          </TabsContent>
+
+          {/* ══════════ DIET TAB ══════════ */}
+          <TabsContent value="diet">
+            <DietTab petName={pet.name} petSpecies={pet.species || ''} petWeight={pet.weight || ''} petDbId={pet.id} />
+          </TabsContent>
+
+          {/* ══════════ LAB TAB ══════════ */}
+          <TabsContent value="lab">
+            <div className="space-y-4">
+              <div className="border border-[var(--border-color)] p-6" style={{ borderRadius: '12px', backgroundColor: 'var(--surface-white)' }}>
+                <div className="mb-5">
+                  <h3 className="text-[var(--text-primary)]" style={{ fontSize: 16, fontWeight: 600 }}>Lab Results</h3>
+                  <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: 14 }}>
+                    Uploaded lab files and diagnostic results
+                  </p>
+                </div>
+
+                {labLoading ? (
+                  <div className="text-center py-10">
+                    <Loader2 className="w-8 h-8 mx-auto mb-3 animate-spin" style={{ color: 'var(--text-secondary)', opacity: 0.4 }} />
+                    <p className="text-[var(--text-secondary)]" style={{ fontSize: 14 }}>Loading lab results…</p>
+                  </div>
+                ) : labFiles.length === 0 ? (
+                  <div className="text-center py-10">
+                    <FlaskConical className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--text-secondary)', opacity: 0.4 }} />
+                    <p className="text-[var(--text-secondary)]" style={{ fontSize: 14 }}>No lab results yet.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {labFiles.map((f: any) => {
+                      const isReviewed = f.review_status === 'reviewed';
+                      const uploaderName = f.uploader ? `${f.uploader.first_name} ${f.uploader.last_name}`.trim() : '—';
+                      const reviewerName = f.reviewer ? `Dr. ${f.reviewer.first_name} ${f.reviewer.last_name}`.trim() : '';
+                      const isPdf = f.file_type === 'application/pdf';
+                      const isImage = f.file_type?.startsWith('image/');
+                      const uploadDate = f.created_at ? new Date(f.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+
+                      return (
+                        <div key={f.id} className="border border-[var(--border-color)] flex items-center justify-between px-5 py-3.5" style={{ borderRadius: '10px' }}>
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div
+                              className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+                              style={{ backgroundColor: isPdf ? '#EF444415' : isImage ? '#3B82F615' : '#6B728015' }}
+                            >
+                              {isPdf ? <FileText className="w-4 h-4" style={{ color: '#EF4444' }} />
+                                : isImage ? <Eye className="w-4 h-4" style={{ color: '#3B82F6' }} />
+                                : <FileText className="w-4 h-4" style={{ color: '#6B7280' }} />}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-[var(--text-primary)] truncate" style={{ fontSize: 14, fontWeight: 600 }}>{f.file_name || 'Unnamed file'}</p>
+                              <p className="text-[var(--text-secondary)]" style={{ fontSize: 12 }}>
+                                {f.test_panel && f.test_panel !== 'General' ? `${f.test_panel} · ` : ''}{uploadDate} · by {uploaderName}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <span
+                              className="inline-flex items-center gap-1 px-2 py-0.5"
+                              style={{
+                                backgroundColor: isReviewed ? 'rgba(22, 163, 74, 0.08)' : 'rgba(245, 158, 11, 0.08)',
+                                color: isReviewed ? '#16A34A' : '#D97706',
+                                borderRadius: 9999, fontSize: 11, fontWeight: 700,
+                                border: `1px solid ${isReviewed ? 'rgba(22, 163, 74, 0.2)' : 'rgba(245, 158, 11, 0.2)'}`,
+                              }}
+                            >
+                              {isReviewed ? <CheckCircle2 className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
+                              {isReviewed ? 'Reviewed' : 'Awaiting Review'}
+                            </span>
+                            {isReviewed && reviewerName && (
+                              <span className="text-[var(--text-secondary)]" style={{ fontSize: 11 }}>
+                                {reviewerName}
+                              </span>
+                            )}
+                            <a
+                              href={f.file_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              style={{
+                                width: 32, height: 32, borderRadius: 8,
+                                border: '1px solid var(--border-color)',
+                                backgroundColor: 'transparent', display: 'flex',
+                                alignItems: 'center', justifyContent: 'center',
+                                color: 'var(--text-secondary)', textDecoration: 'none',
+                              }}
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                            </a>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </TabsContent>
+
+          {/* ══════════ NOTES TAB (Read-only, only client-visible notes) ══════════ */}
+          <TabsContent value="notes">
+            <div className="space-y-6">
+              <div className="border border-[var(--border-color)] p-6" style={{ borderRadius: '12px', backgroundColor: 'var(--surface-white)' }}>
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-[var(--text-primary)]">Notes from Your Vet</h3>
+                    <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: '14px' }}>
+                      Messages and instructions shared by your clinic team
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="border-[var(--brand-green-text)] text-[var(--brand-green-text)]">Visible to You</Badge>
+                </div>
+
+                {noteHistory.length === 0 ? (
+                  <div className="text-center py-10">
+                    <MessageCircle className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--text-secondary)', opacity: 0.4 }} />
+                    <p className="text-[var(--text-secondary)]" style={{ fontSize: 14 }}>No notes from your vet yet.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {noteHistory.map((note) => (
+                      <div key={note.id} className="border border-[var(--border-color)] p-4" style={{ borderRadius: '10px', backgroundColor: 'var(--surface-elevated)' }}>
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <div style={{ width: 28, height: 28, borderRadius: '50%', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand-green-text)' }}>
+                                {note.author.first_name?.[0]}{note.author.last_name?.[0]}
+                              </span>
+                            </div>
+                            <div>
+                              <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+                                Dr. {note.author.first_name} {note.author.last_name}
+                              </p>
+                            </div>
+                          </div>
+                          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                            {new Date(note.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} at {new Date(note.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                          </span>
+                        </div>
+                        <p style={{ fontSize: 14, color: 'var(--text-primary)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{note.content}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </TabsContent>
+
+          {/* ══════════ PHOTOS TAB ══════════ */}
+          <TabsContent value="photos">
+            <PhotosTab petName={pet.name} petImage={pet.image} petDbId={pet.id} />
+          </TabsContent>
+
+          {/* ══════════ REPORTS TAB ══════════ */}
+          <TabsContent value="reports">
+            <PetReportsTab petName={pet.name} petDbId={pet.id} />
           </TabsContent>
         </Tabs>
 
