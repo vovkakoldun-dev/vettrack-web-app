@@ -404,6 +404,9 @@ function PortalDetailDialog({
       }}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="portal-detail-title"
         onClick={e => e.stopPropagation()}
         style={{
           backgroundColor: 'var(--surface-white)',
@@ -411,7 +414,7 @@ function PortalDetailDialog({
           maxWidth: 560, width: '100%',
           maxHeight: '90vh', overflowY: 'auto',
           border: '1px solid var(--border-color)',
-          boxShadow: '0 24px 80px rgba(0,0,0,0.35)',
+          boxShadow: '0 24px 80px rgba(0,0,0,0.45)',
           animation: 'slideUp 0.22s cubic-bezier(0.4,0,0.2,1)',
         }}
       >
@@ -424,10 +427,13 @@ function PortalDetailDialog({
           <AvatarCircle initials={user.initials} color={user.avatarColor} size={56} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              <h2 style={{
-                fontSize: 20, fontWeight: 800, color: 'var(--text-primary)',
-                margin: 0, lineHeight: 1.2,
-              }}>{user.name}</h2>
+              <h2
+                id="portal-detail-title"
+                style={{
+                  fontSize: 20, fontWeight: 800, color: 'var(--text-primary)',
+                  margin: 0, lineHeight: 1.2,
+                }}
+              >{user.name}</h2>
               <StatusBadge status={user.status} />
             </div>
             <p style={{
