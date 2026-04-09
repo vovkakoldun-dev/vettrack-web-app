@@ -766,6 +766,44 @@
     font-family: 'Inter', sans-serif;
   }
 
+  /* ── Hide scrollbars globally ──────────────────────────────
+     Chrome/Safari/Edge (WebKit) + Firefox + old IE/Edge.
+     Content still scrolls via mouse wheel, trackpad, touch,
+     and keyboard — only the visual scrollbar track is hidden.
+     Opt back in on specific elements with class `show-scrollbar`. */
+  html,
+  body,
+  * {
+    scrollbar-width: none;          /* Firefox */
+    -ms-overflow-style: none;       /* IE 10+ / legacy Edge */
+  }
+  html::-webkit-scrollbar,
+  body::-webkit-scrollbar,
+  *::-webkit-scrollbar {
+    display: none;                  /* Chrome / Safari / new Edge */
+    width: 0;
+    height: 0;
+  }
+
+  /* Escape hatch — add `className="show-scrollbar"` on any element
+     that should still display its scrollbar. */
+  .show-scrollbar {
+    scrollbar-width: thin;
+    -ms-overflow-style: auto;
+  }
+  .show-scrollbar::-webkit-scrollbar {
+    display: block;
+    width: 8px;
+    height: 8px;
+  }
+  .show-scrollbar::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 9999px;
+  }
+  .show-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: var(--text-secondary);
+  }
+
   /* Smooth theme transition */
   html {
     transition: background-color 0.2s ease, color 0.2s ease;
