@@ -3,6 +3,7 @@ import {
   Search, MonitorSmartphone, Users, UserCheck, UserX, AlertTriangle,
   Clock, Mail, Trash2, Bell, ChevronDown, ChevronUp, X, Shield,
   PawPrint, Calendar, LogIn, Send, CheckCircle2, Loader2,
+  Phone, Copy, KeyRound, Building2, Activity,
 } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import { useTenantDb } from '../../context/TenantContext';
@@ -347,6 +348,391 @@ function ReminderToast({ name, onDismiss }: { name: string; onDismiss: () => voi
   );
 }
 
+// ─── Portal Detail Dialog ─────────────────────────────────────
+function PortalDetailDialog({
+  user, onClose, onSendReminder, onRemoveAccount, onSendResetEmail,
+}: {
+  user: PortalUser;
+  onClose: () => void;
+  onSendReminder: (id: string) => void;
+  onRemoveAccount: (id: string) => void;
+  onSendResetEmail: (email: string) => Promise<void>;
+}) {
+  const [copied, setCopied] = useState<string | null>(null);
+  const [resetSending, setResetSending] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
+
+  const copyToClipboard = (text: string, label: string) => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    setCopied(label);
+    setTimeout(() => setCopied(null), 2000);
+  };
+
+  const handleSendReset = async () => {
+    if (!user.email) return;
+    setResetSending(true);
+    try {
+      await onSendResetEmail(user.email);
+      setResetSent(true);
+      setTimeout(() => setResetSent(false), 4000);
+    } catch (e) {
+      console.error('[PortalDetailDialog] reset failed:', e);
+    } finally {
+      setResetSending(false);
+    }
+  };
+
+  const cfg = STATUS_CFG[user.status];
+  const daysSinceLogin = daysSince(user.lastLogin);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 9999,
+        backgroundColor: 'rgba(0,0,0,0.55)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 20, animation: 'fadeIn 0.15s ease',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          backgroundColor: 'var(--surface-white)',
+          borderRadius: 18,
+          maxWidth: 560, width: '100%',
+          maxHeight: '90vh', overflowY: 'auto',
+          border: '1px solid var(--border-color)',
+          boxShadow: '0 24px 80px rgba(0,0,0,0.35)',
+          animation: 'slideUp 0.22s cubic-bezier(0.4,0,0.2,1)',
+        }}
+      >
+        {/* Header with gradient avatar */}
+        <div style={{
+          padding: '24px 24px 20px',
+          borderBottom: '1px solid var(--border-color)',
+          display: 'flex', alignItems: 'flex-start', gap: 16,
+        }}>
+          <AvatarCircle initials={user.initials} color={user.avatarColor} size={56} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <h2 style={{
+                fontSize: 20, fontWeight: 800, color: 'var(--text-primary)',
+                margin: 0, lineHeight: 1.2,
+              }}>{user.name}</h2>
+              <StatusBadge status={user.status} />
+            </div>
+            <p style={{
+              fontSize: 13, color: 'var(--text-secondary)',
+              margin: '4px 0 0', wordBreak: 'break-all',
+            }}>{user.email || 'No email'}</p>
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              width: 34, height: 34, borderRadius: 10,
+              border: '1px solid var(--border-color)',
+              backgroundColor: 'var(--surface-elevated)',
+              cursor: 'pointer', flexShrink: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: 'var(--text-secondary)',
+            }}
+            title="Close"
+          >
+            <X style={{ width: 16, height: 16 }} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+
+          {/* ── Contact ── */}
+          <section>
+            <SectionLabel icon={Mail}>Contact</SectionLabel>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <DetailRow
+                icon={Mail}
+                label="Email"
+                value={user.email || '—'}
+                action={user.email ? {
+                  label: copied === 'email' ? '✓' : 'Copy',
+                  onClick: () => copyToClipboard(user.email, 'email'),
+                } : undefined}
+              />
+              <DetailRow
+                icon={Phone}
+                label="Phone"
+                value={user.phone || '—'}
+                action={user.phone ? {
+                  label: copied === 'phone' ? '✓' : 'Copy',
+                  onClick: () => copyToClipboard(user.phone, 'phone'),
+                } : undefined}
+              />
+            </div>
+          </section>
+
+          {/* ── Clinic ── */}
+          <section>
+            <SectionLabel icon={Building2}>Clinic</SectionLabel>
+            <p style={{
+              fontSize: 14, color: 'var(--text-primary)', margin: 0,
+              padding: '10px 12px', backgroundColor: 'var(--surface-elevated)',
+              borderRadius: 10, border: '1px solid var(--border-color)',
+            }}>
+              {user.clinic}
+            </p>
+          </section>
+
+          {/* ── Pets ── */}
+          <section>
+            <SectionLabel icon={PawPrint}>
+              Pets ({user.pets.length})
+            </SectionLabel>
+            {user.pets.length > 0 ? (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {user.pets.map(p => (
+                  <span key={p} style={{
+                    fontSize: 12, fontWeight: 600, padding: '6px 12px',
+                    borderRadius: 20, backgroundColor: 'var(--surface-elevated)',
+                    color: 'var(--text-primary)', border: '1px solid var(--border-color)',
+                    display: 'inline-flex', alignItems: 'center', gap: 5,
+                  }}>
+                    <PawPrint style={{ width: 12, height: 12, color: ACCENT_D }} />{p}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p style={{
+                fontSize: 13, color: 'var(--text-secondary)', margin: 0,
+                fontStyle: 'italic',
+              }}>No pets registered</p>
+            )}
+          </section>
+
+          {/* ── Account Activity ── */}
+          <section>
+            <SectionLabel icon={Activity}>Account activity</SectionLabel>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <DetailRow icon={Calendar} label="Created" value={fmtDate(user.accountCreated)} />
+              <DetailRow
+                icon={LogIn}
+                label="Last login"
+                value={
+                  user.lastLogin
+                    ? `${lastLoginLabel(user.lastLogin)} · ${fmtDate(user.lastLogin)}`
+                    : 'Never logged in'
+                }
+                valueColor={
+                  user.lastLogin === null ? '#DC2626'
+                  : daysSinceLogin > 365 ? '#D97706'
+                  : 'var(--text-primary)'
+                }
+              />
+              {user.reminderSentAt && (
+                <DetailRow
+                  icon={Bell}
+                  label="Warning sent"
+                  value={fmtDate(user.reminderSentAt)}
+                  valueColor="#B45309"
+                />
+              )}
+            </div>
+          </section>
+
+          {/* ── Password ── */}
+          <section>
+            <SectionLabel icon={KeyRound}>Password</SectionLabel>
+            <div style={{
+              padding: '14px 14px', backgroundColor: 'var(--surface-elevated)',
+              borderRadius: 12, border: '1px dashed var(--border-color)',
+            }}>
+              <p style={{
+                fontSize: 12, color: 'var(--text-secondary)', margin: '0 0 10px',
+                lineHeight: 1.45,
+              }}>
+                Passwords are hashed by Supabase Auth and cannot be viewed. Send a
+                password reset email — the user will receive a secure link to set a new one.
+              </p>
+              <button
+                onClick={handleSendReset}
+                disabled={!user.email || resetSending || resetSent}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 7,
+                  padding: '9px 16px', borderRadius: 9, border: 'none',
+                  backgroundColor: resetSent ? '#22C55E' : ACCENT,
+                  color: '#fff', fontSize: 13, fontWeight: 700,
+                  cursor: resetSending || resetSent || !user.email ? 'default' : 'pointer',
+                  opacity: !user.email ? 0.5 : 1,
+                  transition: 'all 0.15s',
+                }}
+              >
+                {resetSending ? (
+                  <>
+                    <Loader2 style={{ width: 14, height: 14, animation: 'spin 1s linear infinite' }} />
+                    Sending…
+                  </>
+                ) : resetSent ? (
+                  <>
+                    <CheckCircle2 style={{ width: 14, height: 14 }} />
+                    Reset email sent
+                  </>
+                ) : (
+                  <>
+                    <Send style={{ width: 14, height: 14 }} />
+                    Send Password Reset Email
+                  </>
+                )}
+              </button>
+            </div>
+          </section>
+        </div>
+
+        {/* Footer actions */}
+        <div style={{
+          padding: '16px 24px', borderTop: '1px solid var(--border-color)',
+          display: 'flex', gap: 8, justifyContent: 'space-between',
+          flexWrap: 'wrap', backgroundColor: 'var(--surface-elevated)',
+          borderBottomLeftRadius: 18, borderBottomRightRadius: 18,
+        }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {user.status === 'Inactive' && (
+              <button
+                onClick={() => onSendReminder(user.id)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px',
+                  borderRadius: 9, border: '1px solid #FCD34D',
+                  backgroundColor: '#FEF9C3', color: '#92400E',
+                  fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                }}
+              >
+                <Bell style={{ width: 13, height: 13 }} />
+                Send Warning
+              </button>
+            )}
+            {confirmingRemove ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#DC2626' }}>Remove this account?</span>
+                <button
+                  onClick={() => { onRemoveAccount(user.id); onClose(); }}
+                  style={{
+                    padding: '7px 12px', borderRadius: 8, border: 'none',
+                    backgroundColor: '#DC2626', color: '#fff',
+                    fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                  }}
+                >Yes, Remove</button>
+                <button
+                  onClick={() => setConfirmingRemove(false)}
+                  style={{
+                    width: 28, height: 28, borderRadius: 8,
+                    border: '1px solid var(--border-color)',
+                    background: 'transparent', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: 'var(--text-secondary)',
+                  }}
+                >
+                  <X style={{ width: 13, height: 13 }} />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmingRemove(true)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px',
+                  borderRadius: 9, border: '1px solid #FCA5A5',
+                  backgroundColor: '#FEF2F2', color: '#DC2626',
+                  fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                }}
+              >
+                <Trash2 style={{ width: 13, height: 13 }} />
+                Remove Account
+              </button>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              padding: '8px 18px', borderRadius: 9,
+              border: '1px solid var(--border-color)',
+              backgroundColor: 'var(--surface-white)', color: 'var(--text-primary)',
+              fontSize: 13, fontWeight: 600, cursor: 'pointer',
+            }}
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Dialog sub-components ────────────────────────────────────
+function SectionLabel({ icon: Icon, children }: { icon: React.ElementType; children: React.ReactNode }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 6,
+      marginBottom: 8,
+      fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
+      letterSpacing: '0.06em', color: 'var(--text-secondary)',
+    }}>
+      <Icon style={{ width: 12, height: 12 }} />
+      {children}
+    </div>
+  );
+}
+
+function DetailRow({
+  icon: Icon, label, value, valueColor, action,
+}: {
+  icon: React.ElementType;
+  label: string;
+  value: string;
+  valueColor?: string;
+  action?: { label: string; onClick: () => void };
+}) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 10,
+      padding: '8px 12px', borderRadius: 8,
+      backgroundColor: 'var(--surface-elevated)',
+      border: '1px solid var(--border-color)',
+    }}>
+      <Icon style={{ width: 14, height: 14, color: 'var(--text-secondary)', flexShrink: 0 }} />
+      <span style={{
+        fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)',
+        minWidth: 70, flexShrink: 0,
+      }}>{label}</span>
+      <span style={{
+        fontSize: 13, fontWeight: 500,
+        color: valueColor || 'var(--text-primary)',
+        flex: 1, wordBreak: 'break-word', minWidth: 0,
+      }}>{value}</span>
+      {action && (
+        <button
+          onClick={action.onClick}
+          style={{
+            padding: '4px 10px', borderRadius: 6,
+            border: '1px solid var(--border-color)',
+            backgroundColor: 'var(--surface-white)',
+            color: 'var(--text-secondary)',
+            fontSize: 11, fontWeight: 700, cursor: 'pointer',
+            flexShrink: 0,
+          }}
+        >
+          {action.label}
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────
 export default function SuperAdminPatientPortalsPage() {
   const isDark = useDarkMode();
@@ -359,6 +745,18 @@ export default function SuperAdminPatientPortalsPage() {
   const [clinicOptions, setClinicOptions] = useState<string[]>(['All Clinics']);
   const [toast, setToast]             = useState<{ name: string } | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [selectedUser, setSelectedUser] = useState<PortalUser | null>(null);
+
+  // Send a Supabase password reset email for a given address.
+  const handleSendResetEmail = useCallback(async (email: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    if (error) {
+      console.error('[PortalsPage] resetPasswordForEmail failed:', error);
+      throw error;
+    }
+  }, []);
 
   // ── Fetch portal accounts from Supabase ─────────────────────
   const fetchPortalUsers = useCallback(async () => {
@@ -674,9 +1072,11 @@ export default function SuperAdminPatientPortalsPage() {
                   return (
                     <tr
                       key={u.id}
+                      onClick={() => setSelectedUser(u)}
                       style={{
                         borderBottom: i < filtered.length - 1 ? '1px solid var(--border-color)' : 'none',
                         transition: 'background 0.12s',
+                        cursor: 'pointer',
                       }}
                       onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'var(--surface-elevated)')}
                       onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
@@ -745,7 +1145,7 @@ export default function SuperAdminPatientPortalsPage() {
                       </td>
 
                       {/* Actions */}
-                      <td style={{ padding: '14px 16px' }}>
+                      <td style={{ padding: '14px 16px' }} onClick={e => e.stopPropagation()}>
                         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                           {/* Send reminder — show for Inactive only */}
                           {u.status === 'Inactive' && (
@@ -835,6 +1235,17 @@ export default function SuperAdminPatientPortalsPage() {
 
       {/* ── Toast notification ── */}
       {toast && <ReminderToast name={toast.name} onDismiss={() => setToast(null)} />}
+
+      {/* ── Portal Detail Dialog ── */}
+      {selectedUser && (
+        <PortalDetailDialog
+          user={selectedUser}
+          onClose={() => setSelectedUser(null)}
+          onSendReminder={(id) => { handleSendReminder(id); }}
+          onRemoveAccount={(id) => { handleRemoveAccount(id); }}
+          onSendResetEmail={handleSendResetEmail}
+        />
+      )}
     </div>
   );
 }
