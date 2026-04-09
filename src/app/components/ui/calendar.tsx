@@ -53,6 +53,8 @@ function CustomCaption({ displayMonth }: CaptionProps) {
 
         {open && (
           <div
+            data-slot="dropdown-menu-content"
+            role="menu"
             className="absolute top-full left-1/2 -translate-x-1/2 mt-1 z-50 bg-[var(--surface-white)] border border-[var(--border-color)] shadow-lg overflow-hidden"
             style={{ borderRadius: '10px', width: '220px' }}
           >

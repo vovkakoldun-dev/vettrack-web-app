@@ -323,6 +323,8 @@ export function OwnerSidebar({
 
           {profileOpen && (
             <div
+              data-slot="dropdown-menu-content"
+              role="menu"
               className="bg-[var(--surface-white)] border border-[var(--border-color)]"
               style={effectiveCollapsed ? {
                 position: 'fixed',

@@ -590,6 +590,8 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
           {/* Popup — fixed when collapsed so it never clips off-screen */}
           {profileOpen && (
             <div
+              data-slot="dropdown-menu-content"
+              role="menu"
               className="bg-[var(--surface-white)] border border-[var(--border-color)]"
               style={collapsed ? {
                 position: 'fixed',
