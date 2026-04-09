@@ -198,7 +198,14 @@ type FilterTab = typeof FILTER_TABS[number];
 
 // ─── Component ───────────────────────────────────────────────
 
-export default function AdminBookingsPage() {
+export interface AdminBookingsPageProps {
+  /** When true, hide the page's own "Bookings" header (used when embedded in another page like SuperAdminAppointmentsPage). */
+  hideHeader?: boolean;
+  /** Override the wrapper classes (e.g. remove padding when embedded). */
+  wrapperClassName?: string;
+}
+
+export default function AdminBookingsPage({ hideHeader = false, wrapperClassName }: AdminBookingsPageProps = {}) {
   const db = useTenantDb();
   const navigate = useNavigate();
   const location = useLocation();
@@ -793,21 +800,30 @@ export default function AdminBookingsPage() {
   };
 
   return (
-    <div className="max-w-[1440px] mx-auto p-8">
+    <div className={wrapperClassName ?? 'max-w-[1440px] mx-auto p-8'}>
       {/* ─── Header ───────────────────────────────────── */}
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-[var(--text-primary)]" style={{ fontSize: '32px', fontWeight: 700 }}>
-            Bookings
-          </h1>
-          <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: '16px', fontWeight: 400 }}>
-            Manage your clinic schedule and bookings.
-          </p>
+      {!hideHeader && (
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-[var(--text-primary)]" style={{ fontSize: '32px', fontWeight: 700 }}>
+              Bookings
+            </h1>
+            <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: '16px', fontWeight: 400 }}>
+              Manage your clinic schedule and bookings.
+            </p>
+          </div>
+          <Button onClick={() => openNewApptDialog()}>
+            <Plus className="w-4 h-4" /> New Booking
+          </Button>
         </div>
-        <Button onClick={() => openNewApptDialog()}>
-          <Plus className="w-4 h-4" /> New Booking
-        </Button>
-      </div>
+      )}
+      {hideHeader && (
+        <div className="flex justify-end mb-4">
+          <Button onClick={() => openNewApptDialog()}>
+            <Plus className="w-4 h-4" /> New Booking
+          </Button>
+        </div>
+      )}
 
       {/* ─── Portal Appointment Requests ───────────────── */}
       {portalRequests.length > 0 && (
