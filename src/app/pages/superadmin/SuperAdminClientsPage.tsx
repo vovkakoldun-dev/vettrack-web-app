@@ -217,6 +217,12 @@ export default function SuperAdminClientsPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  // True while "Select All" is fetching every matching client across all pages
+  const [selectingAll, setSelectingAll] = useState(false);
+  // True when the current selection represents EVERY matching client across
+  // all pages (not just the loaded rows). Reset whenever filters change or
+  // the user toggles a row individually.
+  const [allAcrossPagesSelected, setAllAcrossPagesSelected] = useState(false);
 
   // Total pet count for the "Pet" header badge
   const [totalPetCount, setTotalPetCount] = useState<number | null>(null);
@@ -553,6 +559,8 @@ export default function SuperAdminClientsPage() {
 
   // ── Bulk selection helpers ───────────────────────────────────
   const toggleSelectClient = (supaId: string) => {
+    // Any manual row toggle invalidates the "all across pages" assumption.
+    setAllAcrossPagesSelected(false);
     setSelectedIds(prev => {
       const next = new Set(prev);
       if (next.has(supaId)) next.delete(supaId);
@@ -560,6 +568,13 @@ export default function SuperAdminClientsPage() {
       return next;
     });
   };
+
+  // Whenever the user changes filters/search, the previously computed
+  // "all across pages" selection is no longer valid — clear the flag but
+  // keep any already-selected ids so the user doesn't lose their work.
+  useEffect(() => {
+    setAllAcrossPagesSelected(false);
+  }, [search, filterSpecies, filterStatus, filterVet]);
 
   const handleBulkDelete = async () => {
     if (selectedIds.size === 0) return;
@@ -573,6 +588,7 @@ export default function SuperAdminClientsPage() {
     await refetch();
     window.dispatchEvent(new CustomEvent('clientDataChanged'));
     setSelectedIds(new Set());
+    setAllAcrossPagesSelected(false);
     setSelectMode(false);
     setBulkDeleting(false);
     setShowBulkDeleteConfirm(false);
@@ -657,12 +673,93 @@ export default function SuperAdminClientsPage() {
 
   const hasActiveFilters = filterSpecies !== 'All' || filterStatus !== 'All' || filterVet !== 'All';
 
-  const toggleSelectAllClients = () => {
-    if (selectedIds.size === filtered.length && filtered.length > 0) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(filtered.map(c => c._supaId)));
+  // Fetch EVERY client in the org (bypassing the 30-row pagination), apply
+  // the exact same filter logic the table uses, and return their ids. This is
+  // how "Select All" selects across all pages instead of just the ones the user
+  // has scrolled into view.
+  const fetchAllMatchingClientIds = async (): Promise<string[]> => {
+    const { organizationId } = await getOrgContext();
+    const { data, error } = await db
+      .from('clients')
+      .select(
+        'id, first_name, last_name, email, phone, health_status, pets(name, species, breed, assigned_vet:staff!pets_assigned_vet_org_fkey(profiles:profiles!staff_profile_org_fkey(first_name, last_name)))'
+      )
+      .eq('organization_id', organizationId);
+    if (error || !data) {
+      console.error('[fetchAllMatchingClientIds] failed:', error);
+      return [];
     }
+    const q = search.toLowerCase();
+    return (data as any[])
+      .filter((c) => {
+        const pet = c.pets?.[0];
+        const petName: string = pet?.name || '';
+        const species: string = pet?.species || '';
+        const breed: string = pet?.breed || '';
+        const ownerName = `${c.first_name || ''} ${c.last_name || ''}`;
+        const ownerEmail: string = c.email || '';
+        const ownerPhone: string = c.phone || '';
+        const profiles = pet?.assigned_vet?.profiles;
+        const assignedVetName = profiles
+          ? `Dr. ${profiles.first_name || ''} ${profiles.last_name || ''}`.trim()
+          : null;
+        const status = (statusOverrides[c.id] || c.health_status || 'Healthy') as Status;
+
+        const matchesSearch = !q || (
+          petName.toLowerCase().includes(q) ||
+          ownerName.toLowerCase().includes(q) ||
+          breed.toLowerCase().includes(q) ||
+          ownerEmail.toLowerCase().includes(q) ||
+          ownerPhone.includes(q)
+        );
+        const matchesSpecies = filterSpecies === 'All' || species === filterSpecies;
+        const matchesStatus = filterStatus === 'All' || status === filterStatus;
+        const matchesVet = filterVet === 'All' || assignedVetName === filterVet;
+        return matchesSearch && matchesSpecies && matchesStatus && matchesVet;
+      })
+      .map((c: any) => c.id as string);
+  };
+
+  // Select every matching client across ALL pages (not just the currently
+  // loaded rows). Shows a loading indicator while the fetch is in flight and
+  // falls back to the visible rows if the query fails.
+  const selectAllAcrossPages = async () => {
+    if (selectingAll) return;
+    setSelectingAll(true);
+    try {
+      const ids = await fetchAllMatchingClientIds();
+      if (ids.length === 0) {
+        // Nothing matches — clear the flag and fall back to visible rows
+        setAllAcrossPagesSelected(false);
+        setSelectedIds(new Set(filtered.map((c) => c._supaId).filter(Boolean)));
+      } else {
+        setSelectedIds(new Set(ids));
+        setAllAcrossPagesSelected(true);
+      }
+    } finally {
+      setSelectingAll(false);
+    }
+  };
+
+  // One-click "Select All" from the header:
+  //   • not in selectMode → enter selectMode AND immediately select every
+  //     matching client across all pages
+  //   • in selectMode with every match already selected → clear the selection
+  //   • in selectMode with a partial selection → expand to select every match
+  //     across all pages
+  const handleHeaderSelectAllClick = async () => {
+    if (filtered.length === 0 && !selectMode) return;
+    if (!selectMode) {
+      setSelectMode(true);
+      await selectAllAcrossPages();
+      return;
+    }
+    if (allAcrossPagesSelected) {
+      setAllAcrossPagesSelected(false);
+      setSelectedIds(new Set());
+      return;
+    }
+    await selectAllAcrossPages();
   };
 
   return (
@@ -919,7 +1016,7 @@ export default function SuperAdminClientsPage() {
             </button>
           )}
           <button
-            onClick={() => { setSelectedIds(new Set()); setSelectMode(false); }}
+            onClick={() => { setSelectedIds(new Set()); setAllAcrossPagesSelected(false); setSelectMode(false); }}
             className="flex items-center gap-1 px-3 py-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
             style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 500 }}
           >
@@ -969,31 +1066,42 @@ export default function SuperAdminClientsPage() {
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               <TableHead className="py-3 px-4" style={{ width: '44px' }}>
-                <div
-                  onClick={() => {
-                    if (!selectMode) { setSelectMode(true); }
-                    else { toggleSelectAllClients(); }
-                  }}
-                  style={{
-                    width: '18px', height: '18px', borderRadius: '4px', cursor: 'pointer',
-                    border: selectMode && selectedIds.size === filtered.length && filtered.length > 0
-                      ? '2px solid var(--brand-green-text)'
-                      : '2px solid var(--text-secondary)',
-                    backgroundColor: selectMode && selectedIds.size === filtered.length && filtered.length > 0
-                      ? 'var(--brand-green-text)' : 'transparent',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    opacity: selectMode ? 1 : 0.5,
-                    transition: 'all 0.15s ease',
-                  }}
-                  title={selectMode ? 'Select all' : 'Enable selection mode'}
-                >
-                  {selectMode && selectedIds.size === filtered.length && filtered.length > 0 && (
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                  )}
-                  {selectMode && selectedIds.size > 0 && selectedIds.size < filtered.length && (
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M3 6h6" stroke="var(--text-secondary)" strokeWidth="2" strokeLinecap="round"/></svg>
-                  )}
-                </div>
+                {(() => {
+                  const allSelected = allAcrossPagesSelected && selectedIds.size > 0;
+                  const partial = !allSelected && selectedIds.size > 0;
+                  return (
+                    <div
+                      onClick={handleHeaderSelectAllClick}
+                      style={{
+                        width: '18px', height: '18px', borderRadius: '4px', cursor: selectingAll ? 'wait' : 'pointer',
+                        border: allSelected || partial
+                          ? '2px solid var(--brand-green-text)'
+                          : '2px solid var(--text-secondary)',
+                        backgroundColor: allSelected || partial ? 'var(--brand-green-text)' : 'transparent',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        opacity: 1,
+                        transition: 'all 0.15s ease',
+                      }}
+                      title={
+                        selectingAll
+                          ? 'Selecting all clients…'
+                          : allSelected
+                            ? 'Clear selection'
+                            : 'Select all clients across all pages'
+                      }
+                    >
+                      {selectingAll && (
+                        <Loader2 className="animate-spin" style={{ width: '12px', height: '12px', color: '#fff' }} />
+                      )}
+                      {!selectingAll && allSelected && (
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                      )}
+                      {!selectingAll && partial && (
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M3 6h6" stroke="#fff" strokeWidth="2" strokeLinecap="round"/></svg>
+                      )}
+                    </div>
+                  );
+                })()}
               </TableHead>
               <TableHead className="py-3 px-4" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' }}>
                 Pet

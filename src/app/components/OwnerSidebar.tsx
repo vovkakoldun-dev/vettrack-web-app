@@ -44,7 +44,7 @@ const NAV_SECTIONS: NavSection[] = [
     label: 'My Pets',
     items: [
       { name: 'My Pets',      icon: PawPrint,    path: '/owner/pets' },
-      { name: 'Appointments', icon: Calendar,    path: '/owner/appointments', badge: 1 },
+      { name: 'Appointments', icon: Calendar,    path: '/owner/appointments' },
       { name: 'Records',      icon: FileText,    path: '/owner/records' },
       { name: 'Invoices',     icon: CreditCard,  path: '/owner/invoices' },
     ],

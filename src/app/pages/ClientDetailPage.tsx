@@ -2612,7 +2612,7 @@ const INJECTION_SITES = [
   'Right Shoulder', 'Left Shoulder', 'Intranasal', 'Subcutaneous (Scruff)',
 ];
 
-export function InjectionsTab({ petName, petDbId, onChanged }: { petName: string; petDbId: string; onChanged?: () => void }) {
+export function InjectionsTab({ petName, petDbId, onChanged, readOnly = false }: { petName: string; petDbId: string; onChanged?: () => void; readOnly?: boolean }) {
   const db = useTenantDb();
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -2741,9 +2741,11 @@ export function InjectionsTab({ petName, petDbId, onChanged }: { petName: string
         icon={Syringe}
         iconColor="var(--brand-green-text)"
         action={
-          <Button size="sm" onClick={() => setAddOpen(true)} disabled={!petDbId}>
-            <Plus className="w-4 h-4" /> Record Injection
-          </Button>
+          !readOnly ? (
+            <Button size="sm" onClick={() => setAddOpen(true)} disabled={!petDbId}>
+              <Plus className="w-4 h-4" /> Record Injection
+            </Button>
+          ) : undefined
         }
       >
         {loading ? (
@@ -2754,11 +2756,17 @@ export function InjectionsTab({ petName, petDbId, onChanged }: { petName: string
           <EmptyState
             icon={Syringe}
             title="No injections recorded yet"
-            description={`Injections recorded during a visit for ${petName} will appear here automatically, or you can record one manually.`}
+            description={
+              readOnly
+                ? `No injections have been recorded for ${petName} yet.`
+                : `Injections recorded during a visit for ${petName} will appear here automatically, or you can record one manually.`
+            }
             action={
-              <Button size="sm" onClick={() => setAddOpen(true)} disabled={!petDbId}>
-                <Plus className="w-4 h-4" /> Record Injection
-              </Button>
+              !readOnly ? (
+                <Button size="sm" onClick={() => setAddOpen(true)} disabled={!petDbId}>
+                  <Plus className="w-4 h-4" /> Record Injection
+                </Button>
+              ) : undefined
             }
           />
         ) : (
@@ -2989,7 +2997,7 @@ const COMMON_REGIONS = [
   'Dental', 'Whole Body',
 ];
 
-export function XRayTab({ petName, petDbId }: { petName: string; petDbId: string }) {
+export function XRayTab({ petName, petDbId, readOnly = false }: { petName: string; petDbId: string; readOnly?: boolean }) {
   const db = useTenantDb();
   const { user } = useAuth();
 
@@ -3247,9 +3255,11 @@ export function XRayTab({ petName, petDbId }: { petName: string; petDbId: string
         icon={ScanLine}
         iconColor="#8B5CF6"
         action={
-          <Button size="sm" onClick={openNewStudy} disabled={!petDbId}>
-            <Plus className="w-4 h-4" /> New Study
-          </Button>
+          !readOnly ? (
+            <Button size="sm" onClick={openNewStudy} disabled={!petDbId}>
+              <Plus className="w-4 h-4" /> New Study
+            </Button>
+          ) : undefined
         }
       >
         {loading ? (
@@ -3260,11 +3270,17 @@ export function XRayTab({ petName, petDbId }: { petName: string; petDbId: string
           <EmptyState
             icon={ScanLine}
             title="No imaging studies yet"
-            description={`X-rays, ultrasounds, CT and MRI scans for ${petName} will appear here. Upload images and add findings to get started.`}
+            description={
+              readOnly
+                ? `No imaging studies have been uploaded for ${petName} yet.`
+                : `X-rays, ultrasounds, CT and MRI scans for ${petName} will appear here. Upload images and add findings to get started.`
+            }
             action={
-              <Button size="sm" onClick={openNewStudy} disabled={!petDbId}>
-                <Plus className="w-4 h-4" /> New Study
-              </Button>
+              !readOnly ? (
+                <Button size="sm" onClick={openNewStudy} disabled={!petDbId}>
+                  <Plus className="w-4 h-4" /> New Study
+                </Button>
+              ) : undefined
             }
           />
         ) : (
@@ -3377,25 +3393,27 @@ export function XRayTab({ petName, petDbId }: { petName: string; petDbId: string
                         {!doctor && !s.radiologist && <span>—</span>}
                       </div>
                       <div className="flex items-center gap-1 flex-shrink-0">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <button
-                              className="p-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-                              style={{ background: 'none', border: 'none', cursor: 'pointer' }}
-                            >
-                              <MoreHorizontal className="w-4 h-4" />
-                            </button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => openEditStudy(s)}>
-                              <Edit2 className="w-3.5 h-3.5" /> Edit study
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem onClick={() => handleDeleteStudy(s.id)} className="text-[#d4183d]">
-                              <Trash2 className="w-3.5 h-3.5" /> Delete study
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                        {!readOnly && (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                className="p-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                                style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+                              >
+                                <MoreHorizontal className="w-4 h-4" />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => openEditStudy(s)}>
+                                <Edit2 className="w-3.5 h-3.5" /> Edit study
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem onClick={() => handleDeleteStudy(s.id)} className="text-[#d4183d]">
+                                <Trash2 className="w-3.5 h-3.5" /> Delete study
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        )}
                         <button
                           onClick={() => setExpandedId(isExpanded ? null : s.id)}
                           className="text-[var(--brand-green-text)] flex items-center gap-1"
@@ -3428,14 +3446,16 @@ export function XRayTab({ petName, petDbId }: { petName: string; petDbId: string
                                   >
                                     {f.view_label || `V${i + 1}`}
                                   </div>
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); handleDeleteFile(s.id, f); }}
-                                    className="absolute top-1 right-1 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
-                                    style={{ backgroundColor: 'rgba(212,24,61,0.85)', borderRadius: 3, border: 'none', cursor: 'pointer' }}
-                                    title="Delete image"
-                                  >
-                                    <X className="w-3 h-3" style={{ color: '#fff' }} />
-                                  </button>
+                                  {!readOnly && (
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); handleDeleteFile(s.id, f); }}
+                                      className="absolute top-1 right-1 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                                      style={{ backgroundColor: 'rgba(212,24,61,0.85)', borderRadius: 3, border: 'none', cursor: 'pointer' }}
+                                      title="Delete image"
+                                    >
+                                      <X className="w-3 h-3" style={{ color: '#fff' }} />
+                                    </button>
+                                  )}
                                 </div>
                               ))}
                             </div>
@@ -3733,7 +3753,7 @@ const COMMON_SURGERIES = [
 
 const SURGERY_STATUSES = ['Scheduled', 'In Progress', 'Recovered', 'Complications', 'Deceased'] as const;
 
-export function SurgeryTab({ petName, petDbId }: { petName: string; petDbId: string }) {
+export function SurgeryTab({ petName, petDbId, readOnly = false }: { petName: string; petDbId: string; readOnly?: boolean }) {
   const db = useTenantDb();
   const { user } = useAuth();
 
@@ -3957,9 +3977,11 @@ export function SurgeryTab({ petName, petDbId }: { petName: string; petDbId: str
         icon={Scissors}
         iconColor="#EC4899"
         action={
-          <Button size="sm" onClick={openNew} disabled={!petDbId}>
-            <Plus className="w-4 h-4" /> Add Surgery
-          </Button>
+          !readOnly ? (
+            <Button size="sm" onClick={openNew} disabled={!petDbId}>
+              <Plus className="w-4 h-4" /> Add Surgery
+            </Button>
+          ) : undefined
         }
       >
         {loading ? (
@@ -3970,11 +3992,17 @@ export function SurgeryTab({ petName, petDbId }: { petName: string; petDbId: str
           <EmptyState
             icon={Scissors}
             title="No surgeries recorded yet"
-            description={`Surgical procedures performed on ${petName} will appear here. Click "Add Surgery" to record one.`}
+            description={
+              readOnly
+                ? `No surgical procedures have been recorded for ${petName} yet.`
+                : `Surgical procedures performed on ${petName} will appear here. Click "Add Surgery" to record one.`
+            }
             action={
-              <Button size="sm" onClick={openNew} disabled={!petDbId}>
-                <Plus className="w-4 h-4" /> Add Surgery
-              </Button>
+              !readOnly ? (
+                <Button size="sm" onClick={openNew} disabled={!petDbId}>
+                  <Plus className="w-4 h-4" /> Add Surgery
+                </Button>
+              ) : undefined
             }
           />
         ) : (
@@ -4067,19 +4095,21 @@ export function SurgeryTab({ petName, petDbId }: { petName: string; petDbId: str
                         )}
                       </div>
 
-                      <div className="flex items-center justify-end gap-2 mt-4 pt-3 border-t border-[var(--border-color)]">
-                        <Button variant="outline" size="sm" onClick={() => openEdit(s)}>
-                          <Edit2 className="w-3.5 h-3.5" /> Edit
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleDelete(s.id)}
-                          style={{ color: '#d4183d', borderColor: '#d4183d40' }}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" /> Delete
-                        </Button>
-                      </div>
+                      {!readOnly && (
+                        <div className="flex items-center justify-end gap-2 mt-4 pt-3 border-t border-[var(--border-color)]">
+                          <Button variant="outline" size="sm" onClick={() => openEdit(s)}>
+                            <Edit2 className="w-3.5 h-3.5" /> Edit
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleDelete(s.id)}
+                            style={{ color: '#d4183d', borderColor: '#d4183d40' }}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" /> Delete
+                          </Button>
+                        </div>
+                      )}
                     </AccordionContent>
                   </AccordionItem>
                 </Accordion>
@@ -4313,10 +4343,12 @@ export function ProblemsSection({
   petName,
   petDbId,
   onChanged,
+  readOnly = false,
 }: {
   petName: string;
   petDbId: string;
   onChanged?: () => void;
+  readOnly?: boolean;
 }) {
   const db = useTenantDb();
 
@@ -4535,9 +4567,11 @@ export function ProblemsSection({
             </span>
           )}
         </div>
-        <Button variant="outline" size="sm" onClick={openNew} disabled={!petDbId}>
-          <Plus className="w-4 h-4" /> Add Problem
-        </Button>
+        {!readOnly && (
+          <Button variant="outline" size="sm" onClick={openNew} disabled={!petDbId}>
+            <Plus className="w-4 h-4" /> Add Problem
+          </Button>
+        )}
       </div>
 
       {loading ? (
@@ -4546,7 +4580,9 @@ export function ProblemsSection({
         </div>
       ) : problems.length === 0 ? (
         <p className="text-[var(--text-secondary)] py-4" style={{ fontSize: '14px' }}>
-          No problems on file for {petName}. Click "Add Problem" to record one with SOAP notes.
+          {readOnly
+            ? `No problems on file for ${petName}.`
+            : `No problems on file for ${petName}. Click "Add Problem" to record one with SOAP notes.`}
         </p>
       ) : (
         <div className="space-y-4">
@@ -4608,22 +4644,24 @@ export function ProblemsSection({
                   </div>
                 )}
 
-                <div className="flex items-center justify-end gap-2 mt-4 pt-3 border-t" style={{ borderColor: sc.ring + '30' }}>
-                  <Button variant="outline" size="sm" onClick={() => openEdit(p)}>
-                    <Edit2 className="w-3.5 h-3.5" /> Edit
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => handleToggleStatus(p)}>
-                    <CheckCircle2 className="w-3.5 h-3.5" /> Mark Resolved
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleDelete(p.id)}
-                    style={{ color: '#d4183d', borderColor: '#d4183d40' }}
-                  >
-                    <Trash2 className="w-3.5 h-3.5" /> Delete
-                  </Button>
-                </div>
+                {!readOnly && (
+                  <div className="flex items-center justify-end gap-2 mt-4 pt-3 border-t" style={{ borderColor: sc.ring + '30' }}>
+                    <Button variant="outline" size="sm" onClick={() => openEdit(p)}>
+                      <Edit2 className="w-3.5 h-3.5" /> Edit
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => handleToggleStatus(p)}>
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Mark Resolved
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleDelete(p.id)}
+                      style={{ color: '#d4183d', borderColor: '#d4183d40' }}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" /> Delete
+                    </Button>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -4654,22 +4692,26 @@ export function ProblemsSection({
                         <span className="text-[var(--text-secondary)]" style={{ fontSize: 12 }}>
                           Resolved: {formatDate(p.resolved_date)}
                         </span>
-                        <button
-                          onClick={() => handleToggleStatus(p)}
-                          title="Reopen"
-                          className="text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12 }}
-                        >
-                          Reopen
-                        </button>
-                        <button
-                          onClick={() => handleDelete(p.id)}
-                          title="Delete"
-                          className="text-[var(--text-secondary)] hover:text-[#d4183d]"
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}
-                        >
-                          ×
-                        </button>
+                        {!readOnly && (
+                          <>
+                            <button
+                              onClick={() => handleToggleStatus(p)}
+                              title="Reopen"
+                              className="text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12 }}
+                            >
+                              Reopen
+                            </button>
+                            <button
+                              onClick={() => handleDelete(p.id)}
+                              title="Delete"
+                              className="text-[var(--text-secondary)] hover:text-[#d4183d]"
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}
+                            >
+                              ×
+                            </button>
+                          </>
+                        )}
                       </div>
                     </div>
                   );
@@ -4899,7 +4941,7 @@ const planStatusColor = (s: string) => {
   }
 };
 
-export function PlanTab({ petName, petDbId }: { petName: string; petDbId: string }) {
+export function PlanTab({ petName, petDbId, readOnly = false }: { petName: string; petDbId: string; readOnly?: boolean }) {
   const db = useTenantDb();
   const { user } = useAuth();
 
@@ -5173,11 +5215,17 @@ export function PlanTab({ petName, petDbId }: { petName: string; petDbId: string
         <EmptyState
           icon={Target}
           title="No treatment plans yet"
-          description={`Long-term care plans for ${petName} will appear here. Create a plan to track goals, milestones, and medications.`}
+          description={
+            readOnly
+              ? `No long-term care plans have been created for ${petName} yet.`
+              : `Long-term care plans for ${petName} will appear here. Create a plan to track goals, milestones, and medications.`
+          }
           action={
-            <Button size="sm" onClick={openNew} disabled={!petDbId}>
-              <Plus className="w-4 h-4" /> New Plan
-            </Button>
+            !readOnly ? (
+              <Button size="sm" onClick={openNew} disabled={!petDbId}>
+                <Plus className="w-4 h-4" /> New Plan
+              </Button>
+            ) : undefined
           }
         />
       ) : (
@@ -5190,9 +5238,11 @@ export function PlanTab({ petName, petDbId }: { petName: string; petDbId: string
                 {plans.length} plan{plans.length === 1 ? '' : 's'} for {petName}
               </p>
             </div>
-            <Button size="sm" onClick={openNew} disabled={!petDbId}>
-              <Plus className="w-4 h-4" /> New Plan
-            </Button>
+            {!readOnly && (
+              <Button size="sm" onClick={openNew} disabled={!petDbId}>
+                <Plus className="w-4 h-4" /> New Plan
+              </Button>
+            )}
           </div>
 
           {plans.map((p) => {
@@ -5235,19 +5285,21 @@ export function PlanTab({ petName, petDbId }: { petName: string; petDbId: string
                         </p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Button variant="outline" size="sm" onClick={() => openEdit(p)}>
-                        <Edit2 className="w-4 h-4" /> Edit Plan
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleDelete(p.id)}
-                        style={{ color: '#d4183d', borderColor: '#d4183d40' }}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
+                    {!readOnly && (
+                      <div className="flex items-center gap-2">
+                        <Button variant="outline" size="sm" onClick={() => openEdit(p)}>
+                          <Edit2 className="w-4 h-4" /> Edit Plan
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDelete(p.id)}
+                          style={{ color: '#d4183d', borderColor: '#d4183d40' }}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    )}
                   </div>
                   <div className="grid grid-cols-3 gap-4 mt-4">
                     <StatTile
@@ -5657,11 +5709,13 @@ export function DietTab({
   petSpecies: _petSpecies,
   petWeight,
   petDbId,
+  readOnly = false,
 }: {
   petName: string;
   petSpecies: string;
   petWeight: string;
   petDbId: string;
+  readOnly?: boolean;
 }) {
   const db = useTenantDb();
   const { user } = useAuth();
@@ -5952,20 +6006,28 @@ export function DietTab({
         icon={Utensils}
         iconColor="#F4A261"
         action={
-          <Button variant="outline" size="sm" onClick={openEdit} disabled={!petDbId}>
-            <Edit2 className="w-4 h-4" /> {plan ? 'Update' : 'Set Up'}
-          </Button>
+          !readOnly ? (
+            <Button variant="outline" size="sm" onClick={openEdit} disabled={!petDbId}>
+              <Edit2 className="w-4 h-4" /> {plan ? 'Update' : 'Set Up'}
+            </Button>
+          ) : undefined
         }
       >
         {!plan ? (
           <EmptyState
             icon={Utensils}
             title="No diet plan yet"
-            description={`Record ${petName}'s current feeding regimen — food, portions, meals, and any restrictions.`}
+            description={
+              readOnly
+                ? `No diet plan has been set up for ${petName} yet.`
+                : `Record ${petName}'s current feeding regimen — food, portions, meals, and any restrictions.`
+            }
             action={
-              <Button size="sm" onClick={openEdit} disabled={!petDbId}>
-                <Plus className="w-4 h-4" /> Create Diet Plan
-              </Button>
+              !readOnly ? (
+                <Button size="sm" onClick={openEdit} disabled={!petDbId}>
+                  <Plus className="w-4 h-4" /> Create Diet Plan
+                </Button>
+              ) : undefined
             }
           />
         ) : (
@@ -6202,14 +6264,16 @@ export function DietTab({
                             </span>
                           )}
                         </div>
-                        <button
-                          onClick={() => handleDeleteWeight(w.id)}
-                          className="text-[var(--text-secondary)] hover:text-[#d4183d] transition-colors"
-                          style={{ background: 'none', border: 'none', cursor: 'pointer' }}
-                          aria-label="Delete weight entry"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        {!readOnly && (
+                          <button
+                            onClick={() => handleDeleteWeight(w.id)}
+                            className="text-[var(--text-secondary)] hover:text-[#d4183d] transition-colors"
+                            style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+                            aria-label="Delete weight entry"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -6226,7 +6290,7 @@ export function DietTab({
           icon={AlertCircle}
           iconColor="#d4183d"
           action={
-            plan ? (
+            !readOnly && plan ? (
               <Button variant="outline" size="sm" onClick={openEdit}>
                 <Edit2 className="w-4 h-4" /> Edit
               </Button>
@@ -6517,10 +6581,12 @@ export function PhotosTab({
   petName,
   petImage: _petImage,
   petDbId,
+  readOnly = false,
 }: {
   petName: string;
   petImage: string;
   petDbId: string;
+  readOnly?: boolean;
 }) {
   const db = useTenantDb();
   const { user } = useAuth();
@@ -6711,11 +6777,13 @@ export function PhotosTab({
         icon={Image}
         iconColor="#3B82F6"
         action={
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={openUpload} disabled={!petDbId}>
-              <Upload className="w-4 h-4" /> Upload Photo
-            </Button>
-          </div>
+          !readOnly ? (
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={openUpload} disabled={!petDbId}>
+                <Upload className="w-4 h-4" /> Upload Photo
+              </Button>
+            </div>
+          ) : undefined
         }
       >
         {loading ? (
@@ -6726,11 +6794,17 @@ export function PhotosTab({
           <EmptyState
             icon={FileImage}
             title="No photos yet"
-            description={`Upload photos to keep a visual record of ${petName}'s treatments and progress.`}
+            description={
+              readOnly
+                ? `No photos have been uploaded for ${petName} yet.`
+                : `Upload photos to keep a visual record of ${petName}'s treatments and progress.`
+            }
             action={
-              <Button size="sm" onClick={openUpload} disabled={!petDbId}>
-                <Upload className="w-4 h-4" /> Upload Photo
-              </Button>
+              !readOnly ? (
+                <Button size="sm" onClick={openUpload} disabled={!petDbId}>
+                  <Upload className="w-4 h-4" /> Upload Photo
+                </Button>
+              ) : undefined
             }
           />
         ) : (
@@ -6770,11 +6844,13 @@ export function PhotosTab({
               <EmptyState
                 icon={FileImage}
                 title="No photos in this category"
-                description="Upload more photos or switch categories."
+                description={readOnly ? "No photos in this category yet." : "Upload more photos or switch categories."}
                 action={
-                  <Button size="sm" onClick={openUpload} disabled={!petDbId}>
-                    <Upload className="w-4 h-4" /> Upload Photo
-                  </Button>
+                  !readOnly ? (
+                    <Button size="sm" onClick={openUpload} disabled={!petDbId}>
+                      <Upload className="w-4 h-4" /> Upload Photo
+                    </Button>
+                  ) : undefined
                 }
               />
             ) : (
@@ -6829,14 +6905,16 @@ export function PhotosTab({
                           >
                             <Download className="w-3.5 h-3.5" style={{ color: '#fff' }} />
                           </button>
-                          <button
-                            className="w-8 h-8 flex items-center justify-center"
-                            style={{ backgroundColor: 'rgba(212,24,61,0.75)', borderRadius: 8, border: 'none', cursor: 'pointer' }}
-                            onClick={(e) => { e.stopPropagation(); handleDeletePhoto(p); }}
-                            aria-label="Delete photo"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" style={{ color: '#fff' }} />
-                          </button>
+                          {!readOnly && (
+                            <button
+                              className="w-8 h-8 flex items-center justify-center"
+                              style={{ backgroundColor: 'rgba(212,24,61,0.75)', borderRadius: 8, border: 'none', cursor: 'pointer' }}
+                              onClick={(e) => { e.stopPropagation(); handleDeletePhoto(p); }}
+                              aria-label="Delete photo"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" style={{ color: '#fff' }} />
+                            </button>
+                          )}
                         </div>
                       </div>
                       <div className="p-3">
@@ -7049,14 +7127,16 @@ export function PhotosTab({
                     <Button variant="outline" size="sm" onClick={() => handleDownload(viewerPhoto)}>
                       <Download className="w-4 h-4" /> Open Full-size
                     </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleDeletePhoto(viewerPhoto)}
-                      style={{ color: '#d4183d', borderColor: '#d4183d40' }}
-                    >
-                      <Trash2 className="w-4 h-4" /> Delete
-                    </Button>
+                    {!readOnly && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDeletePhoto(viewerPhoto)}
+                        style={{ color: '#d4183d', borderColor: '#d4183d40' }}
+                      >
+                        <Trash2 className="w-4 h-4" /> Delete
+                      </Button>
+                    )}
                   </div>
                 </div>
               </>
@@ -7100,9 +7180,11 @@ function formatBytes(bytes: number | null): string {
 export function PetReportsTab({
   petName,
   petDbId,
+  readOnly = false,
 }: {
   petName: string;
   petDbId: string;
+  readOnly?: boolean;
 }) {
   const db = useTenantDb();
   const { user } = useAuth();
@@ -7226,14 +7308,20 @@ export function PetReportsTab({
     <div className="space-y-6">
       <SectionCard
         title="Report Snapshots"
-        subtitle={`Auto-generated PDF snapshots for ${petName}. A new PDF is created every time you log data in any tab.`}
+        subtitle={
+          readOnly
+            ? `PDF snapshots of ${petName}'s medical record. Download any report to view it.`
+            : `Auto-generated PDF snapshots for ${petName}. A new PDF is created every time you log data in any tab.`
+        }
         icon={FileText}
         iconColor="#2D6A4F"
         action={
-          <Button size="sm" onClick={handleGenerateNow} disabled={!petDbId || generating}>
-            {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
-            {generating ? 'Generating…' : 'Generate Snapshot Now'}
-          </Button>
+          !readOnly ? (
+            <Button size="sm" onClick={handleGenerateNow} disabled={!petDbId || generating}>
+              {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
+              {generating ? 'Generating…' : 'Generate Snapshot Now'}
+            </Button>
+          ) : undefined
         }
       >
         {/* Quick stats */}
@@ -7262,12 +7350,18 @@ export function PetReportsTab({
           <EmptyState
             icon={FileText}
             title="No snapshots yet"
-            description={`Log any data in the other tabs and a fresh PDF snapshot of ${petName}'s full record will appear here automatically. You can also generate one manually.`}
+            description={
+              readOnly
+                ? `No PDF snapshots have been generated for ${petName} yet.`
+                : `Log any data in the other tabs and a fresh PDF snapshot of ${petName}'s full record will appear here automatically. You can also generate one manually.`
+            }
             action={
-              <Button size="sm" onClick={handleGenerateNow} disabled={!petDbId || generating}>
-                {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
-                {generating ? 'Generating…' : 'Generate Snapshot Now'}
-              </Button>
+              !readOnly ? (
+                <Button size="sm" onClick={handleGenerateNow} disabled={!petDbId || generating}>
+                  {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
+                  {generating ? 'Generating…' : 'Generate Snapshot Now'}
+                </Button>
+              ) : undefined
             }
           />
         ) : (
@@ -7380,21 +7474,23 @@ export function PetReportsTab({
                     >
                       <Download className="w-3.5 h-3.5" />
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteReport(r)}
-                      className="inline-flex items-center justify-center"
-                      style={{
-                        width: 32, height: 32, borderRadius: 8,
-                        border: '1px solid #d4183d40',
-                        color: '#d4183d',
-                        backgroundColor: 'transparent',
-                        cursor: 'pointer',
-                      }}
-                      title="Delete snapshot"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {!readOnly && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteReport(r)}
+                        className="inline-flex items-center justify-center"
+                        style={{
+                          width: 32, height: 32, borderRadius: 8,
+                          border: '1px solid #d4183d40',
+                          color: '#d4183d',
+                          backgroundColor: 'transparent',
+                          cursor: 'pointer',
+                        }}
+                        title="Delete snapshot"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -7458,17 +7554,19 @@ export function PetReportsTab({
                   >
                     <Download className="w-4 h-4" /> Open in new tab
                   </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      handleDeleteReport(viewerReport);
-                      setViewerReport(null);
-                    }}
-                    style={{ color: '#d4183d', borderColor: '#d4183d40' }}
-                  >
-                    <Trash2 className="w-4 h-4" /> Delete
-                  </Button>
+                  {!readOnly && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        handleDeleteReport(viewerReport);
+                        setViewerReport(null);
+                      }}
+                      style={{ color: '#d4183d', borderColor: '#d4183d40' }}
+                    >
+                      <Trash2 className="w-4 h-4" /> Delete
+                    </Button>
+                  )}
                 </div>
               </>
             );

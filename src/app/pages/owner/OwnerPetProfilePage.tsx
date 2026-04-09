@@ -402,7 +402,7 @@ export default function OwnerPetProfilePage() {
           </div>
 
           {/* Profile row */}
-          <div style={{ padding: '0 24px 24px', position: 'relative' }}>
+          <div style={{ padding: '24px 24px 24px', position: 'relative' }}>
             {/* Avatar — overlaps cover */}
             <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
               <div style={{ display: 'flex', alignItems: 'flex-end', gap: '16px' }}>
@@ -751,6 +751,7 @@ export default function OwnerPetProfilePage() {
             <ProblemsSection
               petName={pet.name}
               petDbId={pet.id}
+              readOnly
             />
 
             {/* Allergies (read-only) */}
@@ -1102,27 +1103,27 @@ export default function OwnerPetProfilePage() {
 
           {/* ══════════ INJECTIONS TAB ══════════ */}
           <TabsContent value="injections">
-            <InjectionsTab petName={pet.name} petDbId={pet.id} />
+            <InjectionsTab petName={pet.name} petDbId={pet.id} readOnly />
           </TabsContent>
 
           {/* ══════════ X-RAY TAB ══════════ */}
           <TabsContent value="xray">
-            <XRayTab petName={pet.name} petDbId={pet.id} />
+            <XRayTab petName={pet.name} petDbId={pet.id} readOnly />
           </TabsContent>
 
           {/* ══════════ SURGERY TAB ══════════ */}
           <TabsContent value="surgery">
-            <SurgeryTab petName={pet.name} petDbId={pet.id} />
+            <SurgeryTab petName={pet.name} petDbId={pet.id} readOnly />
           </TabsContent>
 
           {/* ══════════ PLAN TAB ══════════ */}
           <TabsContent value="plan">
-            <PlanTab petName={pet.name} petDbId={pet.id} />
+            <PlanTab petName={pet.name} petDbId={pet.id} readOnly />
           </TabsContent>
 
           {/* ══════════ DIET TAB ══════════ */}
           <TabsContent value="diet">
-            <DietTab petName={pet.name} petSpecies={pet.species || ''} petWeight={pet.weight || ''} petDbId={pet.id} />
+            <DietTab petName={pet.name} petSpecies={pet.species || ''} petWeight={pet.weight || ''} petDbId={pet.id} readOnly />
           </TabsContent>
 
           {/* ══════════ LAB TAB ══════════ */}
@@ -1221,14 +1222,11 @@ export default function OwnerPetProfilePage() {
           <TabsContent value="notes">
             <div className="space-y-6">
               <div className="border border-[var(--border-color)] p-6" style={{ borderRadius: '12px', backgroundColor: 'var(--surface-white)' }}>
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h3 className="text-[var(--text-primary)]">Notes from Your Vet</h3>
-                    <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: '14px' }}>
-                      Messages and instructions shared by your clinic team
-                    </p>
-                  </div>
-                  <Badge variant="outline" className="border-[var(--brand-green-text)] text-[var(--brand-green-text)]">Visible to You</Badge>
+                <div className="mb-4">
+                  <h3 className="text-[var(--text-primary)]">Notes from Your Vet</h3>
+                  <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: '14px' }}>
+                    Messages and instructions shared by your clinic team
+                  </p>
                 </div>
 
                 {noteHistory.length === 0 ? (
@@ -1268,12 +1266,12 @@ export default function OwnerPetProfilePage() {
 
           {/* ══════════ PHOTOS TAB ══════════ */}
           <TabsContent value="photos">
-            <PhotosTab petName={pet.name} petImage={pet.image} petDbId={pet.id} />
+            <PhotosTab petName={pet.name} petImage={pet.image} petDbId={pet.id} readOnly />
           </TabsContent>
 
           {/* ══════════ REPORTS TAB ══════════ */}
           <TabsContent value="reports">
-            <PetReportsTab petName={pet.name} petDbId={pet.id} />
+            <PetReportsTab petName={pet.name} petDbId={pet.id} readOnly />
           </TabsContent>
         </Tabs>
 

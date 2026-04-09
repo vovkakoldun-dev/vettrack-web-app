@@ -1,12 +1,14 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   ChevronLeft, ChevronRight, X, Calendar, Clock, PawPrint,
-  CheckCircle2, Plus, FileText, Bell, User,
+  CheckCircle2, Plus, FileText, User,
 } from 'lucide-react';
 import { Avatar, AvatarImage, AvatarFallback } from '../../components/ui/avatar';
 import { useAppointments } from '../../hooks/useAppointments';
 import { usePets } from '../../hooks/usePets';
 import { useOwnerClient } from '../../hooks/useOwnerClient';
+import { supabase } from '../../../lib/supabase';
+import { getOrgContext } from '../../hooks/useOrgContext';
 
 // ─── Brand ───────────────────────────────────────────────────
 const BRAND = 'var(--brand-green-text)';
@@ -26,19 +28,6 @@ interface Appointment {
 }
 
 // ─── Static data ─────────────────────────────────────────────
-const PETS = [
-  {
-    name: 'Max',
-    breed: 'Golden Retriever',
-    image: 'https://images.unsplash.com/photo-1734966213753-1b361564bab4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxnb2xkZW4lMjByZXRyaWV2ZXIlMjBkb2clMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyNDMxMzB8MA&ixlib=rb-4.1.0&q=80&w=400',
-  },
-  {
-    name: 'Hugo',
-    breed: 'Persian Cat',
-    image: 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=400',
-  },
-];
-
 const SERVICES = [
   { label: 'Annual Checkup',  color: 'var(--brand-green-text)', emoji: '🩺' },
   { label: 'Vaccination',     color: '#3B82F6', emoji: '💉' },
@@ -50,11 +39,15 @@ const SERVICES = [
   { label: 'Other',           color: '#6B7280', emoji: '📝' },
 ];
 
-const VETS = [
-  { name: 'Dr. Chen',   initials: 'SC', color: 'var(--brand-green-text)' },
-  { name: 'Dr. Patel',  initials: 'RP', color: '#3B82F6' },
-  { name: 'Dr. Garcia', initials: 'MG', color: '#8B5CF6' },
-];
+// Colors cycled for dynamically-loaded vets
+const VET_COLOR_PALETTE = ['var(--brand-green-text)', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261', '#06B6D4', '#10B981'];
+
+interface VetOption {
+  id: string;          // staff.id (= profile_id)
+  name: string;        // "Dr. Smith"
+  initials: string;    // "JS"
+  color: string;
+}
 
 const DURATIONS = ['15 min', '30 min', '45 min', '60 min', '90 min'];
 
@@ -62,8 +55,6 @@ const TIME_SLOTS = [
   '9:00 AM', '9:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM',
   '2:00 PM', '2:30 PM', '3:00 PM', '3:30 PM', '4:00 PM', '4:30 PM',
 ];
-
-const INITIAL_APPOINTMENTS_PLACEHOLDER: Appointment[] = []
 
 const DAYS_OF_WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -79,7 +70,13 @@ export default function OwnerAppointmentsPage() {
   const [viewMonth, setViewMonth] = useState(today.getMonth());
   const { appointments: allAppts } = useAppointments();
   const { pets: allPets } = usePets();
-  const { clientId } = useOwnerClient();
+  const { client, clientId } = useOwnerClient();
+
+  // Derive this owner's pets from Supabase
+  const ownerPets = useMemo(() => {
+    if (!clientId) return [];
+    return allPets.filter(p => p.client_id === clientId);
+  }, [allPets, clientId]);
 
   // Filter appointments to only this owner's pets
   const supaAppts = useMemo(() => {
@@ -120,17 +117,74 @@ export default function OwnerAppointmentsPage() {
   const [detailAppt, setDetailAppt]     = useState<Appointment | null>(null);
   const [formSubmitted, setFormSubmitted] = useState(false);
 
+  // Real vets from Supabase staff table
+  const [vets, setVets] = useState<VetOption[]>([]);
+
   // Form state — mirrors admin form fields
-  const [formPet,      setFormPet]      = useState('Max');
+  const [formPetId,    setFormPetId]    = useState<string>('');
   const [formService,  setFormService]  = useState('Annual Checkup');
   const [formDate,     setFormDate]     = useState('');
   const [formTime,     setFormTime]     = useState('9:00 AM');
   const [formDuration, setFormDuration] = useState('30 min');
-  const [formVet,      setFormVet]      = useState('Dr. Chen');
+  const [formVetId,    setFormVetId]    = useState<string>('');
   const [formNotes,    setFormNotes]    = useState('');
-  const [confirmMethod,  setConfirmMethod]  = useState('Email');
-  const [reminderMethod, setReminderMethod] = useState('Email');
-  const [reminderTiming, setReminderTiming] = useState('1 day');
+  const [submitting,   setSubmitting]   = useState(false);
+  const [submitError,  setSubmitError]  = useState<string | null>(null);
+
+  // Initialize form pet to first pet once loaded
+  useEffect(() => {
+    if (!formPetId && ownerPets.length > 0) setFormPetId(ownerPets[0].id);
+  }, [ownerPets, formPetId]);
+
+  // Fetch real vets (staff with vet roles) for this organization.
+  // Uses two queries instead of a PostgREST nested join because the owner's
+  // RLS policy on profiles isn't applied reliably through composite FKs.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { organizationId } = await getOrgContext();
+        const { data: staffRows, error: staffErr } = await supabase
+          .from('staff')
+          .select('id')
+          .eq('organization_id', organizationId)
+          .in('role', ['veterinarian', 'senior_veterinarian', 'specialist'])
+          .eq('status', 'Active');
+        if (cancelled || staffErr || !staffRows || staffRows.length === 0) {
+          if (!cancelled) setVets([]);
+          return;
+        }
+        const ids = staffRows.map((s: any) => s.id);
+        const { data: profileRows, error: profErr } = await supabase
+          .from('profiles')
+          .select('id, first_name, last_name')
+          .in('id', ids);
+        if (cancelled || profErr || !profileRows) return;
+        const list: VetOption[] = profileRows.map((p: any, idx: number) => {
+          const fn = p.first_name || '';
+          const ln = p.last_name || '';
+          const display = ln ? `Dr. ${ln}` : (fn ? `Dr. ${fn}` : 'Vet');
+          const initials = ((fn[0] || '') + (ln[0] || '')).toUpperCase() || 'DR';
+          return {
+            id: p.id,
+            name: display,
+            initials,
+            color: VET_COLOR_PALETTE[idx % VET_COLOR_PALETTE.length],
+          };
+        });
+        list.sort((a, b) => a.name.localeCompare(b.name));
+        if (!cancelled) setVets(list);
+      } catch {
+        // ignore — vets list stays empty
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Initialize form vet when list loads
+  useEffect(() => {
+    if (!formVetId && vets.length > 0) setFormVetId(vets[0].id);
+  }, [vets, formVetId]);
 
   const prevMonth = () => { if (viewMonth === 0) { setViewMonth(11); setViewYear(y => y - 1); } else setViewMonth(m => m - 1); };
   const nextMonth = () => { if (viewMonth === 11) { setViewMonth(0);  setViewYear(y => y + 1); } else setViewMonth(m => m + 1); };
@@ -145,31 +199,107 @@ export default function OwnerAppointmentsPage() {
     setSelectedDate(dateKey);
     setFormDate(dateKey);
     setFormSubmitted(false);
-    setFormPet('Max');
+    setFormPetId(ownerPets[0]?.id || '');
     setFormService('Annual Checkup');
     setFormTime('9:00 AM');
     setFormDuration('30 min');
-    setFormVet('Dr. Chen');
+    setFormVetId(vets[0]?.id || '');
     setFormNotes('');
-    setConfirmMethod('Email');
-    setReminderMethod('Email');
-    setReminderTiming('1 day');
+    setSubmitError(null);
     setBookingOpen(true);
   };
 
-  const handleBooking = () => {
-    if (!formDate) return;
-    const petObj = PETS.find(p => p.name === formPet)!;
-    setAppointments(prev => [...prev, {
-      id: Date.now(), date: formDate, time: formTime, reason: formService,
-      pet: formPet, petImage: petObj.image, vet: formVet, status: 'upcoming',
-      notes: formNotes || undefined,
-    }]);
-    setFormSubmitted(true);
+  // Convert "9:00 AM" → "09:00"
+  const to24h = (t: string): string | null => {
+    const m = t.match(/^(\d+):(\d+)\s*(AM|PM)$/i);
+    if (!m) return null;
+    let h = parseInt(m[1], 10);
+    const min = m[2];
+    const ap = m[3].toUpperCase();
+    if (ap === 'PM' && h < 12) h += 12;
+    if (ap === 'AM' && h === 12) h = 0;
+    return `${String(h).padStart(2, '0')}:${min}`;
+  };
+
+  const handleBooking = async () => {
+    if (!formDate || !formPetId || !clientId) {
+      setSubmitError('Please select a pet and date.');
+      return;
+    }
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const { organizationId } = await getOrgContext();
+      const selectedPet = ownerPets.find(p => p.id === formPetId);
+      const selectedVet = vets.find(v => v.id === formVetId);
+      const ownerName = client.fullName || 'pet owner';
+      const vetName = selectedVet?.name || 'No preference';
+
+      const notesLines = [
+        `Appointment request from ${ownerName}`,
+        `Service: ${formService}`,
+        `Preferred vet: ${vetName}`,
+        `Preferred time: ${formTime}`,
+        `Duration: ${formDuration}`,
+      ];
+      if (formNotes.trim()) {
+        notesLines.push('', 'Owner notes:', formNotes.trim());
+      }
+
+      const priority = formService === 'Emergency' ? 'Urgent' : 'Normal';
+
+      const { error } = await supabase.from('tasks').insert({
+        organization_id: organizationId,
+        type: 'Schedule Appointment',
+        priority,
+        status: 'Pending',
+        due_date: formDate,
+        due_time: to24h(formTime),
+        visit_date: todayKey,
+        doctor_notes: notesLines.join('\n'),
+        pet_id: formPetId,
+        client_id: clientId,
+        assigned_by_id: null,
+        // Route the task to the preferred vet so they see it in their queue
+        assigned_to_id: selectedVet?.id || null,
+        tags: ['owner-request', formService],
+      });
+
+      if (error) {
+        setSubmitError(error.message || 'Failed to submit request.');
+        setSubmitting(false);
+        return;
+      }
+
+      // Optimistic UI — add to local upcoming list
+      if (selectedPet) {
+        setAppointments(prev => [...prev, {
+          id: Date.now(),
+          date: formDate,
+          time: formTime,
+          reason: formService,
+          pet: selectedPet.name,
+          petImage: selectedPet.photo_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(selectedPet.name)}&background=74C69D&color=fff`,
+          vet: vetName,
+          status: 'upcoming',
+          notes: formNotes || undefined,
+        }]);
+      }
+
+      setFormSubmitted(true);
+    } catch (e: any) {
+      setSubmitError(e?.message || 'Failed to submit request.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const todayKey      = toDateKey(today.getFullYear(), today.getMonth(), today.getDate());
   const upcomingList  = appointments.filter(a => a.status === 'upcoming').sort((a,b) => a.date.localeCompare(b.date));
+  // History: completed + cancelled, most recent first
+  const historyList   = appointments
+    .filter(a => a.status === 'completed' || a.status === 'cancelled')
+    .sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time));
 
   const statusConf = (s: Appointment['status']) => ({
     upcoming:  { bg: 'color-mix(in srgb, var(--brand-green-text) 9%, transparent)', text: BRAND_TEXT, label: 'Upcoming' },
@@ -295,6 +425,52 @@ export default function OwnerAppointmentsPage() {
                 ))}
               </div>
             </div>
+            {/* History — completed & cancelled appointments */}
+            <div style={{ backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)', borderRadius: '14px', overflow: 'hidden' }}>
+              <div style={{ padding: '14px 16px 12px', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <FileText style={{ width: '15px', height: '15px', color: BRAND_TEXT }} />
+                <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>History</span>
+                <span style={{ marginLeft: 'auto', fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', backgroundColor: 'var(--surface-elevated)', padding: '2px 8px', borderRadius: '10px' }}>{historyList.length}</span>
+              </div>
+              <div style={{ padding: '8px', display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '360px', overflowY: 'auto' }}>
+                {historyList.length === 0 && (
+                  <p style={{ fontSize: '13px', color: 'var(--text-secondary)', padding: '8px', margin: 0 }}>No past appointments yet.</p>
+                )}
+                {historyList.map(appt => {
+                  const isCancelled = appt.status === 'cancelled';
+                  const badgeBg = isCancelled ? '#d4183d15' : '#74C69D25';
+                  const badgeText = isCancelled ? '#d4183d' : BRAND_TEXT;
+                  const borderColor = isCancelled ? 'rgba(212,24,61,0.18)' : 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)';
+                  const bgColor = isCancelled ? 'rgba(212,24,61,0.03)' : 'color-mix(in srgb, var(--brand-green-text) 2%, transparent)';
+                  const hoverBg = isCancelled ? 'rgba(212,24,61,0.07)' : 'color-mix(in srgb, var(--brand-green-text) 7%, transparent)';
+                  return (
+                    <div
+                      key={appt.id}
+                      onClick={() => setDetailAppt(appt)}
+                      style={{ padding: '10px 12px', borderRadius: '10px', cursor: 'pointer', border: `1px solid ${borderColor}`, backgroundColor: bgColor, transition: 'background-color 0.1s' }}
+                      onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.backgroundColor = hoverBg}
+                      onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.backgroundColor = bgColor}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                        <Avatar style={{ width: '24px', height: '24px', flexShrink: 0 }}>
+                          <AvatarImage src={appt.petImage} alt={appt.pet} style={{ objectFit: 'cover' }} />
+                          <AvatarFallback style={{ fontSize: '9px' }}>{appt.pet[0]}</AvatarFallback>
+                        </Avatar>
+                        <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: isCancelled ? 'line-through' : 'none' }}>{appt.reason}</span>
+                        <span style={{ fontSize: '9px', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', backgroundColor: badgeBg, color: badgeText, textTransform: 'uppercase', letterSpacing: '0.04em', flexShrink: 0 }}>
+                          {isCancelled ? 'Cancelled' : 'Done'}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px', paddingLeft: '32px' }}>
+                        <Clock style={{ width: '10px', height: '10px', color: 'var(--text-secondary)' }} />
+                        <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{appt.date.slice(5).replace('-', '/')} · {appt.time} · {appt.pet}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
             <div style={{ backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '14px 16px' }}>
               <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '10px' }}>Legend</p>
               {[{ color: BRAND, label: 'Upcoming' }, { color: '#74C69D', label: 'Completed' }, { color: '#d4183d', label: 'Cancelled' }].map(({ color, label }) => (
@@ -350,12 +526,12 @@ export default function OwnerAppointmentsPage() {
                 </div>
                 <p style={{ fontSize: '20px', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '8px' }}>All Set!</p>
                 <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                  <strong style={{ color: 'var(--text-primary)' }}>{formService}</strong> for <strong style={{ color: 'var(--text-primary)' }}>{formPet}</strong>
+                  <strong style={{ color: 'var(--text-primary)' }}>{formService}</strong> for <strong style={{ color: 'var(--text-primary)' }}>{ownerPets.find(p => p.id === formPetId)?.name || 'your pet'}</strong>
                 </p>
                 <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '24px' }}>{fmtDate(formDate)} at {formTime}</p>
                 <div style={{ padding: '12px 16px', borderRadius: '10px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 3%, transparent)', border: '1px solid color-mix(in srgb, var(--brand-green-text) 12%, transparent)', marginBottom: '24px', textAlign: 'left' }}>
                   <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.6 }}>
-                    📧 A confirmation will be sent via <strong>{confirmMethod}</strong>. A reminder will be sent <strong>{reminderTiming}</strong> before your appointment.
+                    Your request has been sent to the clinic. You'll hear back soon with a confirmation.
                   </p>
                 </div>
                 <button onClick={() => setBookingOpen(false)} style={{ padding: '12px 32px', borderRadius: '10px', backgroundColor: BRAND, color: '#fff', border: 'none', fontSize: '15px', fontWeight: 700, cursor: 'pointer' }}>
@@ -372,25 +548,36 @@ export default function OwnerAppointmentsPage() {
                   {/* Pet selector */}
                   <div>
                     <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Patient</p>
-                    <div style={{ display: 'flex', gap: '10px' }}>
-                      {PETS.map(pet => (
-                        <button
-                          key={pet.name}
-                          onClick={() => setFormPet(pet.name)}
-                          style={{ flex: 1, padding: '10px 12px', borderRadius: '10px', cursor: 'pointer', border: formPet === pet.name ? `2px solid ${BRAND}` : '2px solid var(--border-color)', backgroundColor: formPet === pet.name ? 'color-mix(in srgb, var(--brand-green-text) 5%, transparent)' : 'transparent', display: 'flex', alignItems: 'center', gap: '8px', transition: 'all 0.15s' }}
-                        >
-                          <Avatar style={{ width: '32px', height: '32px', flexShrink: 0 }}>
-                            <AvatarImage src={pet.image} alt={pet.name} style={{ objectFit: 'cover' }} />
-                            <AvatarFallback style={{ fontSize: '11px' }}>{pet.name[0]}</AvatarFallback>
-                          </Avatar>
-                          <div style={{ textAlign: 'left' }}>
-                            <p style={{ fontSize: '13px', fontWeight: 700, color: formPet === pet.name ? BRAND : 'var(--text-primary)', margin: 0 }}>{pet.name}</p>
-                            <p style={{ fontSize: '10px', color: 'var(--text-secondary)', margin: 0 }}>{pet.breed}</p>
-                          </div>
-                          {formPet === pet.name && <CheckCircle2 style={{ width: '14px', height: '14px', color: BRAND_TEXT, marginLeft: 'auto', flexShrink: 0 }} />}
-                        </button>
-                      ))}
-                    </div>
+                    {ownerPets.length === 0 ? (
+                      <div style={{ padding: '12px', borderRadius: '10px', border: '1px dashed var(--border-color)', backgroundColor: 'var(--surface-elevated)', color: 'var(--text-secondary)', fontSize: '13px', textAlign: 'center' }}>
+                        No pets found. Add a pet to your account first.
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                        {ownerPets.map(p => {
+                          const active = formPetId === p.id;
+                          const img = p.photo_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.name)}&background=74C69D&color=fff`;
+                          const subLabel = p.breed || p.species || '';
+                          return (
+                            <button
+                              key={p.id}
+                              onClick={() => setFormPetId(p.id)}
+                              style={{ flex: '1 1 180px', padding: '10px 12px', borderRadius: '10px', cursor: 'pointer', border: active ? `2px solid ${BRAND}` : '2px solid var(--border-color)', backgroundColor: active ? 'color-mix(in srgb, var(--brand-green-text) 5%, transparent)' : 'transparent', display: 'flex', alignItems: 'center', gap: '8px', transition: 'all 0.15s' }}
+                            >
+                              <Avatar style={{ width: '32px', height: '32px', flexShrink: 0 }}>
+                                <AvatarImage src={img} alt={p.name} style={{ objectFit: 'cover' }} />
+                                <AvatarFallback style={{ fontSize: '11px' }}>{p.name[0]}</AvatarFallback>
+                              </Avatar>
+                              <div style={{ textAlign: 'left' }}>
+                                <p style={{ fontSize: '13px', fontWeight: 700, color: active ? BRAND : 'var(--text-primary)', margin: 0 }}>{p.name}</p>
+                                <p style={{ fontSize: '10px', color: 'var(--text-secondary)', margin: 0 }}>{subLabel}</p>
+                              </div>
+                              {active && <CheckCircle2 style={{ width: '14px', height: '14px', color: BRAND_TEXT, marginLeft: 'auto', flexShrink: 0 }} />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
 
                   {/* Service type grid — 4 cols with emojis */}
@@ -439,17 +626,25 @@ export default function OwnerAppointmentsPage() {
                   {/* Veterinarian */}
                   <div>
                     <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Preferred Veterinarian</p>
-                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                      {VETS.map(v => {
-                        const active = formVet === v.name;
-                        return (
-                          <button key={v.name} onClick={() => setFormVet(v.name)} style={{ padding: '7px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: active ? 700 : 500, border: `1.5px solid ${active ? v.color : 'var(--border-color)'}`, backgroundColor: active ? `${v.color}18` : 'transparent', color: active ? v.color : 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '7px', transition: 'all 0.15s' }}>
-                            <span style={{ width: '22px', height: '22px', borderRadius: '50%', backgroundColor: `${v.color}20`, color: v.color, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', fontWeight: 700, flexShrink: 0 }}>{v.initials}</span>
-                            {v.name}
-                          </button>
-                        );
-                      })}
-                    </div>
+                    {vets.length === 0 ? (
+                      <div style={{ padding: '10px 12px', borderRadius: '8px', border: '1px dashed var(--border-color)', backgroundColor: 'var(--surface-elevated)', color: 'var(--text-secondary)', fontSize: '12px' }}>
+                        Loading vets from clinic…
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        {vets.map(v => {
+                          const active = formVetId === v.id;
+                          const tintBg = `color-mix(in srgb, ${v.color} 9%, transparent)`;
+                          const bubbleBg = `color-mix(in srgb, ${v.color} 12%, transparent)`;
+                          return (
+                            <button key={v.id} onClick={() => setFormVetId(v.id)} style={{ padding: '7px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: active ? 700 : 500, border: `1.5px solid ${active ? v.color : 'var(--border-color)'}`, backgroundColor: active ? tintBg : 'transparent', color: active ? v.color : 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '7px', transition: 'all 0.15s' }}>
+                              <span style={{ width: '22px', height: '22px', borderRadius: '50%', backgroundColor: bubbleBg, color: v.color, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', fontWeight: 700, flexShrink: 0 }}>{v.initials}</span>
+                              {v.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
 
                   {/* Notes */}
@@ -475,7 +670,7 @@ export default function OwnerAppointmentsPage() {
                       {[
                         { icon: Calendar, value: fmtDate(formDate) },
                         { icon: Clock,    value: formTime },
-                        { icon: User,     value: formVet },
+                        { icon: User,     value: vets.find(v => v.id === formVetId)?.name || 'No preference' },
                       ].map(({ icon: Icon, value }) => (
                         <div key={value} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <Icon style={{ width: '12px', height: '12px', color: 'var(--text-secondary)', flexShrink: 0 }} />
@@ -488,57 +683,44 @@ export default function OwnerAppointmentsPage() {
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <PawPrint style={{ width: '12px', height: '12px', color: 'var(--text-secondary)', flexShrink: 0 }} />
-                        <span style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{formPet}</span>
+                        <span style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{ownerPets.find(p => p.id === formPetId)?.name || '—'}</span>
                       </div>
                     </div>
                   </div>
 
-                  {/* Notifications */}
-                  <div style={{ backgroundColor: 'var(--surface-white)', borderRadius: '10px', padding: '14px', border: '1px solid var(--border-color)' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '14px' }}>
-                      <Bell style={{ width: '12px', height: '12px', color: 'var(--text-secondary)' }} />
-                      <p style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', margin: 0 }}>Notifications</p>
-                    </div>
-                    {/* Confirmation */}
-                    <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '6px' }}>Confirmation</p>
-                    <div style={{ display: 'flex', gap: '4px', marginBottom: '12px' }}>
-                      {['Email','SMS','Both','None'].map(m => {
-                        const active = confirmMethod === m;
-                        return <button key={m} onClick={() => setConfirmMethod(m)} style={{ flex: 1, padding: '4px 2px', borderRadius: '6px', fontSize: '11px', fontWeight: active ? 700 : 400, border: `1.5px solid ${active ? BRAND : 'var(--border-color)'}`, backgroundColor: active ? 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)' : 'transparent', color: active ? BRAND_TEXT : 'var(--text-secondary)', cursor: 'pointer' }}>{m}</button>;
-                      })}
-                    </div>
-                    {/* Reminder */}
-                    <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '6px' }}>Reminder</p>
-                    <div style={{ display: 'flex', gap: '4px', marginBottom: reminderMethod !== 'None' ? '8px' : '0' }}>
-                      {['Email','SMS','Both','None'].map(m => {
-                        const active = reminderMethod === m;
-                        return <button key={m} onClick={() => setReminderMethod(m)} style={{ flex: 1, padding: '4px 2px', borderRadius: '6px', fontSize: '11px', fontWeight: active ? 700 : 400, border: `1.5px solid ${active ? BRAND : 'var(--border-color)'}`, backgroundColor: active ? 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)' : 'transparent', color: active ? BRAND_TEXT : 'var(--text-secondary)', cursor: 'pointer' }}>{m}</button>;
-                      })}
-                    </div>
-                    {reminderMethod !== 'None' && (
-                      <>
-                        <p style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>Send before</p>
-                        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                          {['1 hr','4 hrs','1 day','2 days'].map(t => {
-                            const active = reminderTiming === t;
-                            return <button key={t} onClick={() => setReminderTiming(t)} style={{ padding: '4px 8px', borderRadius: '5px', fontSize: '11px', fontWeight: active ? 700 : 400, border: `1.5px solid ${active ? BRAND : 'var(--border-color)'}`, backgroundColor: active ? 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)' : 'transparent', color: active ? BRAND_TEXT : 'var(--text-secondary)', cursor: 'pointer' }}>{t}</button>;
-                          })}
-                        </div>
-                      </>
-                    )}
-                  </div>
                 </div>
               </div>
             )}
 
             {/* ── Footer ── */}
             {!formSubmitted && (
-              <div style={{ borderTop: '1px solid var(--border-color)', padding: '14px 24px', display: 'flex', justifyContent: 'flex-end', gap: '10px', flexShrink: 0, backgroundColor: 'var(--surface-white)' }}>
-                <button onClick={() => setBookingOpen(false)} style={{ padding: '9px 20px', borderRadius: '9px', border: '1px solid var(--border-color)', backgroundColor: 'transparent', color: 'var(--text-primary)', fontSize: '14px', fontWeight: 600, cursor: 'pointer' }}>
+              <div style={{ borderTop: '1px solid var(--border-color)', padding: '14px 24px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px', flexShrink: 0, backgroundColor: 'var(--surface-white)', flexWrap: 'wrap' }}>
+                {submitError && (
+                  <span style={{ fontSize: '12px', color: '#d4183d', marginRight: 'auto' }}>{submitError}</span>
+                )}
+                <button onClick={() => setBookingOpen(false)} disabled={submitting} style={{ padding: '9px 20px', borderRadius: '9px', border: '1px solid var(--border-color)', backgroundColor: 'transparent', color: 'var(--text-primary)', fontSize: '14px', fontWeight: 600, cursor: submitting ? 'not-allowed' : 'pointer', opacity: submitting ? 0.6 : 1 }}>
                   Cancel
                 </button>
-                <button onClick={handleBooking} style={{ padding: '9px 22px', borderRadius: '9px', backgroundColor: BRAND, color: '#fff', border: 'none', fontSize: '14px', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '7px' }}>
-                  <Calendar style={{ width: '15px', height: '15px' }} /> Request Appointment
+                <button
+                  onClick={handleBooking}
+                  disabled={submitting || !formDate || !formPetId || !clientId}
+                  style={{
+                    padding: '9px 22px',
+                    borderRadius: '9px',
+                    backgroundColor: BRAND,
+                    color: '#fff',
+                    border: 'none',
+                    fontSize: '14px',
+                    fontWeight: 700,
+                    cursor: submitting || !formDate || !formPetId || !clientId ? 'not-allowed' : 'pointer',
+                    opacity: submitting || !formDate || !formPetId || !clientId ? 0.6 : 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '7px',
+                  }}
+                >
+                  <Calendar style={{ width: '15px', height: '15px' }} />
+                  {submitting ? 'Sending…' : 'Request Appointment'}
                 </button>
               </div>
             )}

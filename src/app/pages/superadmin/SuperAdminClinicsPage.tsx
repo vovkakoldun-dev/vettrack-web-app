@@ -4,6 +4,7 @@ import {
   Stethoscope, Scissors, Coffee, Microscope, Bed, DoorOpen,
   Briefcase, Bath, Move, MapPin, Loader2, Check, X, Sparkles,
   ImagePlus, Upload, Type as TypeIcon, Image as ImageIcon, Palette,
+  Phone as PhoneIcon, Mail as MailIcon, Clock as ClockIcon, MessageSquare,
 } from 'lucide-react';
 import { Input } from '../../components/ui/input';
 import { Button } from '../../components/ui/button';
@@ -57,6 +58,12 @@ const ROOM_TYPES: Record<RoomType, RoomTypeConfig> = {
 };
 
 // ─── Types ────────────────────────────────────────────────────
+interface BusinessHourRow {
+  day: string;
+  open: string | null;
+  close: string | null;
+}
+
 interface Clinic {
   id: string;
   name: string;
@@ -67,7 +74,37 @@ interface Clinic {
   banner_gradient: string | null;
   banner_text: string | null;
   logo_image_url: string | null;
+  // Contact info (used by the owner Contact Clinic page)
+  tagline: string | null;
+  phone: string | null;
+  emergency_phone: string | null;
+  email: string | null;
+  map_url: string | null;
+  business_hours: BusinessHourRow[] | null;
 }
+
+// Shape the contact editor persists back to clinics
+interface ContactDraft {
+  name: string;
+  tagline: string | null;
+  phone: string | null;
+  emergency_phone: string | null;
+  email: string | null;
+  address: string | null;
+  city: string | null;
+  map_url: string | null;
+  business_hours: BusinessHourRow[];
+}
+
+const DEFAULT_BUSINESS_HOURS: BusinessHourRow[] = [
+  { day: 'Monday',    open: '8:00 AM', close: '6:00 PM' },
+  { day: 'Tuesday',   open: '8:00 AM', close: '6:00 PM' },
+  { day: 'Wednesday', open: '8:00 AM', close: '7:00 PM' },
+  { day: 'Thursday',  open: '8:00 AM', close: '6:00 PM' },
+  { day: 'Friday',    open: '8:00 AM', close: '5:00 PM' },
+  { day: 'Saturday',  open: '9:00 AM', close: '3:00 PM' },
+  { day: 'Sunday',    open: null,       close: null },
+];
 
 // ─── Banner gradient presets ──────────────────────────────────
 const BANNER_PRESETS: { id: string; label: string; gradient: string }[] = [
@@ -150,6 +187,9 @@ export default function SuperAdminClinicsPage() {
   const bannerFileInputRef = useRef<HTMLInputElement>(null);
   const logoFileInputRef = useRef<HTMLInputElement>(null);
 
+  // Contact info editor state
+  const [contactSaving, setContactSaving] = useState(false);
+
   // Drag state for moving + resizing rooms
   const dragRef = useRef<{
     mode: 'move' | 'resize';
@@ -172,7 +212,7 @@ export default function SuperAdminClinicsPage() {
         const { organizationId } = await getOrgContext();
         const { data: cl } = await db
           .from('clinics')
-          .select('id, name, city, address, is_active, banner_image_url, banner_gradient, banner_text, logo_image_url')
+          .select('id, name, city, address, is_active, banner_image_url, banner_gradient, banner_text, logo_image_url, tagline, phone, emergency_phone, email, map_url, business_hours')
           .eq('organization_id', organizationId)
           .order('name');
         if (!alive) return;
@@ -320,6 +360,49 @@ export default function SuperAdminClinicsPage() {
       setClinics(prev => prev.map(c => c.id === id ? { ...c, ...draft } : c));
     } finally {
       setBannerSaving(false);
+    }
+  }, [db]);
+
+  // ── Contact info: explicit save ─────────────────────────────
+  // Persists all editable clinic presentation fields (name, tagline, phone,
+  // emergency phone, email, address, city, map URL, opening hours). The owner
+  // "Contact Clinic" page reads these same columns.
+  const saveContactDraft = useCallback(async (id: string, draft: ContactDraft) => {
+    setContactSaving(true);
+    try {
+      const { error } = await db
+        .from('clinics')
+        .update({
+          name: draft.name,
+          tagline: draft.tagline,
+          phone: draft.phone,
+          emergency_phone: draft.emergency_phone,
+          email: draft.email,
+          address: draft.address,
+          city: draft.city,
+          map_url: draft.map_url,
+          business_hours: draft.business_hours,
+        })
+        .eq('id', id);
+      if (error) {
+        console.error('[clinics] contact save failed:', error.message);
+        return;
+      }
+      // Mirror into local state so the section's "saved" baseline matches the DB.
+      setClinics(prev => prev.map(c => c.id === id ? {
+        ...c,
+        name: draft.name,
+        tagline: draft.tagline,
+        phone: draft.phone,
+        emergency_phone: draft.emergency_phone,
+        email: draft.email,
+        address: draft.address,
+        city: draft.city,
+        map_url: draft.map_url,
+        business_hours: draft.business_hours,
+      } : c));
+    } finally {
+      setContactSaving(false);
     }
   }, [db]);
 
@@ -515,7 +598,7 @@ export default function SuperAdminClinicsPage() {
             Clinics &amp; Layout
           </h1>
           <p style={{ fontSize: '16px', color: 'var(--text-secondary)' }}>
-            Design the floor plan for each location and assign staff to rooms.
+            Customise branding, contact details, opening hours and floor plan for each location.
           </p>
         </div>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
@@ -553,9 +636,6 @@ export default function SuperAdminClinicsPage() {
               >
                 <Building2 style={{ width: 14, height: 14 }} />
                 {c.name}
-                <span style={{ fontSize: '11px', fontWeight: 700, padding: '1px 7px', borderRadius: '9999px', backgroundColor: 'var(--surface-elevated)', color: 'var(--text-secondary)' }}>
-                  {rooms.filter(r => r.clinic_id === c.id).length}
-                </span>
               </button>
             );
           })}
@@ -579,7 +659,17 @@ export default function SuperAdminClinicsPage() {
         />
       )}
 
-      {/* ── Section 2: Floor Plan Builder ── */}
+      {/* ── Section 2: Contact Info & Hours (mirrors owner Contact Clinic page) ── */}
+      {selectedClinic && (
+        <ContactInfoEditorSection
+          key={`contact-${selectedClinic.id}`}
+          clinic={selectedClinic}
+          saving={contactSaving}
+          onSave={(draft) => saveContactDraft(selectedClinic.id, draft)}
+        />
+      )}
+
+      {/* ── Section 3: Floor Plan Builder ── */}
       <section style={{ backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)', borderRadius: '14px', overflow: 'hidden' }}>
         {/* Section header */}
         <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
@@ -1345,6 +1435,326 @@ function BannerEditorSection({
         <Button
           onClick={handleSave}
           disabled={!isDirty || saving || uploading || logoUploading}
+          style={{ gap: '6px', fontSize: '12px', height: 34, backgroundColor: ACCENT, borderColor: ACCENT, minWidth: 110 }}
+        >
+          {saving ? (
+            <><Loader2 className="animate-spin" style={{ width: 13, height: 13 }} /> Saving</>
+          ) : (
+            <><Save style={{ width: 13, height: 13 }} /> Save changes</>
+          )}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+// ─── Contact Info Editor Section ──────────────────────────────
+// Editable clinic contact info + opening hours. Feeds the owner
+// "Contact Clinic" page via the same columns on the clinics table.
+interface ContactInfoEditorSectionProps {
+  clinic: Clinic;
+  saving: boolean;
+  onSave: (draft: ContactDraft) => Promise<void>;
+}
+
+function contactDraftFrom(clinic: Clinic): ContactDraft {
+  return {
+    name: clinic.name || '',
+    tagline: clinic.tagline,
+    phone: clinic.phone,
+    emergency_phone: clinic.emergency_phone,
+    email: clinic.email,
+    address: clinic.address,
+    city: clinic.city,
+    map_url: clinic.map_url,
+    business_hours: (clinic.business_hours && clinic.business_hours.length > 0)
+      ? clinic.business_hours
+      : DEFAULT_BUSINESS_HOURS,
+  };
+}
+
+function ContactInfoEditorSection({ clinic, saving, onSave }: ContactInfoEditorSectionProps) {
+  const [draft, setDraft] = useState<ContactDraft>(() => contactDraftFrom(clinic));
+
+  // Sync baseline when the selected clinic changes or after a save.
+  useEffect(() => {
+    setDraft(contactDraftFrom(clinic));
+  }, [
+    clinic.id, clinic.name, clinic.tagline, clinic.phone, clinic.emergency_phone,
+    clinic.email, clinic.address, clinic.city, clinic.map_url, clinic.business_hours,
+  ]);
+
+  const baseline = contactDraftFrom(clinic);
+  const isDirty =
+    draft.name !== baseline.name ||
+    (draft.tagline || '') !== (baseline.tagline || '') ||
+    (draft.phone || '') !== (baseline.phone || '') ||
+    (draft.emergency_phone || '') !== (baseline.emergency_phone || '') ||
+    (draft.email || '') !== (baseline.email || '') ||
+    (draft.address || '') !== (baseline.address || '') ||
+    (draft.city || '') !== (baseline.city || '') ||
+    (draft.map_url || '') !== (baseline.map_url || '') ||
+    JSON.stringify(draft.business_hours) !== JSON.stringify(baseline.business_hours);
+
+  function patch(p: Partial<ContactDraft>) {
+    setDraft(prev => ({ ...prev, ...p }));
+  }
+
+  function updateHourRow(index: number, patchRow: Partial<BusinessHourRow>) {
+    setDraft(prev => ({
+      ...prev,
+      business_hours: prev.business_hours.map((row, i) => i === index ? { ...row, ...patchRow } : row),
+    }));
+  }
+
+  function toggleDayOpen(index: number) {
+    const row = draft.business_hours[index];
+    if (row.open && row.close) {
+      updateHourRow(index, { open: null, close: null });
+    } else {
+      updateHourRow(index, { open: '9:00 AM', close: '5:00 PM' });
+    }
+  }
+
+  function handleDiscard() {
+    setDraft(contactDraftFrom(clinic));
+  }
+
+  async function handleSave() {
+    await onSave(draft);
+  }
+
+  return (
+    <section style={{ backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)', borderRadius: '14px', overflow: 'hidden', marginBottom: '20px' }}>
+      {/* Section header */}
+      <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+        <div>
+          <h2 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <MessageSquare style={{ width: 16, height: 16, color: ACCENT_D }} /> Contact Info &amp; Hours
+          </h2>
+          <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+            These details appear on the pet owner&rsquo;s Contact Clinic page.
+          </p>
+        </div>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+          {saving ? (
+            <><Loader2 className="animate-spin" style={{ width: 12, height: 12 }} /> Saving…</>
+          ) : isDirty ? (
+            <><span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: ACCENT }} /> Unsaved changes</>
+          ) : (
+            <><Check style={{ width: 12, height: 12, color: 'var(--brand-green-text)' }} /> Saved</>
+          )}
+        </span>
+      </div>
+
+      {/* Body */}
+      <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+
+        {/* ── Two-column grid of text fields ── */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '14px' }}>
+
+          {/* Clinic name */}
+          <div style={{ padding: '14px', borderRadius: '12px', border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-elevated)' }}>
+            <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '8px' }}>
+              <Building2 style={{ width: 11, height: 11 }} /> Clinic name
+            </label>
+            <Input
+              value={draft.name}
+              maxLength={80}
+              onChange={(e) => patch({ name: e.target.value })}
+              placeholder="e.g. Hugory Veterinary Clinic"
+              style={{ height: 34, fontSize: '13px' }}
+            />
+          </div>
+
+          {/* Tagline */}
+          <div style={{ padding: '14px', borderRadius: '12px', border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-elevated)' }}>
+            <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '8px' }}>
+              <TypeIcon style={{ width: 11, height: 11 }} /> Tagline
+            </label>
+            <Input
+              value={draft.tagline || ''}
+              maxLength={120}
+              onChange={(e) => patch({ tagline: e.target.value || null })}
+              placeholder="e.g. Caring for your pets since 2008"
+              style={{ height: 34, fontSize: '13px' }}
+            />
+          </div>
+
+          {/* Phone */}
+          <div style={{ padding: '14px', borderRadius: '12px', border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-elevated)' }}>
+            <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '8px' }}>
+              <PhoneIcon style={{ width: 11, height: 11 }} /> General phone
+            </label>
+            <Input
+              value={draft.phone || ''}
+              maxLength={40}
+              onChange={(e) => patch({ phone: e.target.value || null })}
+              placeholder="(555) 987-6543"
+              style={{ height: 34, fontSize: '13px' }}
+            />
+          </div>
+
+          {/* Emergency phone */}
+          <div style={{ padding: '14px', borderRadius: '12px', border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-elevated)' }}>
+            <label style={{ fontSize: '11px', fontWeight: 700, color: '#d4183d', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '8px' }}>
+              <PhoneIcon style={{ width: 11, height: 11 }} /> Emergency phone
+            </label>
+            <Input
+              value={draft.emergency_phone || ''}
+              maxLength={40}
+              onChange={(e) => patch({ emergency_phone: e.target.value || null })}
+              placeholder="(555) 987-9999"
+              style={{ height: 34, fontSize: '13px' }}
+            />
+          </div>
+
+          {/* Email */}
+          <div style={{ padding: '14px', borderRadius: '12px', border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-elevated)' }}>
+            <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '8px' }}>
+              <MailIcon style={{ width: 11, height: 11 }} /> Email
+            </label>
+            <Input
+              type="email"
+              value={draft.email || ''}
+              maxLength={120}
+              onChange={(e) => patch({ email: e.target.value || null })}
+              placeholder="hello@hugoryvets.com"
+              style={{ height: 34, fontSize: '13px' }}
+            />
+          </div>
+
+          {/* Map URL */}
+          <div style={{ padding: '14px', borderRadius: '12px', border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-elevated)' }}>
+            <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '8px' }}>
+              <MapPin style={{ width: 11, height: 11 }} /> Map URL
+            </label>
+            <Input
+              value={draft.map_url || ''}
+              maxLength={300}
+              onChange={(e) => patch({ map_url: e.target.value || null })}
+              placeholder="https://maps.google.com/?q=..."
+              style={{ height: 34, fontSize: '13px' }}
+            />
+          </div>
+
+          {/* Address */}
+          <div style={{ padding: '14px', borderRadius: '12px', border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-elevated)' }}>
+            <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '8px' }}>
+              <MapPin style={{ width: 11, height: 11 }} /> Street address
+            </label>
+            <Input
+              value={draft.address || ''}
+              maxLength={160}
+              onChange={(e) => patch({ address: e.target.value || null })}
+              placeholder="1420 Oak Street, Suite 200"
+              style={{ height: 34, fontSize: '13px' }}
+            />
+          </div>
+
+          {/* City */}
+          <div style={{ padding: '14px', borderRadius: '12px', border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-elevated)' }}>
+            <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '8px' }}>
+              <MapPin style={{ width: 11, height: 11 }} /> City, state, zip
+            </label>
+            <Input
+              value={draft.city || ''}
+              maxLength={120}
+              onChange={(e) => patch({ city: e.target.value || null })}
+              placeholder="Springfield, IL 62704"
+              style={{ height: 34, fontSize: '13px' }}
+            />
+          </div>
+        </div>
+
+        {/* ── Opening hours editor ── */}
+        <div style={{ padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-elevated)' }}>
+          <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '12px' }}>
+            <ClockIcon style={{ width: 11, height: 11 }} /> Opening hours
+          </label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {draft.business_hours.map((row, i) => {
+              const isClosed = !row.open || !row.close;
+              return (
+                <div
+                  key={row.day}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '110px 80px 1fr 1fr',
+                    alignItems: 'center',
+                    gap: '10px',
+                    padding: '8px 10px',
+                    borderRadius: '8px',
+                    backgroundColor: 'var(--surface-white)',
+                    border: '1px solid var(--border-color)',
+                  }}
+                >
+                  {/* Day name */}
+                  <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                    {row.day}
+                  </span>
+
+                  {/* Open/Closed toggle */}
+                  <button
+                    type="button"
+                    onClick={() => toggleDayOpen(i)}
+                    style={{
+                      padding: '4px 8px',
+                      borderRadius: '6px',
+                      border: '1px solid',
+                      borderColor: isClosed ? 'color-mix(in srgb, #d4183d 30%, transparent)' : 'color-mix(in srgb, var(--brand-green-text) 30%, transparent)',
+                      backgroundColor: isClosed ? 'color-mix(in srgb, #d4183d 8%, transparent)' : 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)',
+                      color: isClosed ? '#d4183d' : 'var(--brand-green-text)',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
+                    }}
+                  >
+                    {isClosed ? 'Closed' : 'Open'}
+                  </button>
+
+                  {/* Open time */}
+                  <Input
+                    value={row.open || ''}
+                    onChange={(e) => updateHourRow(i, { open: e.target.value || null })}
+                    disabled={isClosed}
+                    placeholder="8:00 AM"
+                    style={{ height: 30, fontSize: '12px' }}
+                  />
+
+                  {/* Close time */}
+                  <Input
+                    value={row.close || ''}
+                    onChange={(e) => updateHourRow(i, { close: e.target.value || null })}
+                    disabled={isClosed}
+                    placeholder="6:00 PM"
+                    style={{ height: 30, fontSize: '12px' }}
+                  />
+                </div>
+              );
+            })}
+          </div>
+          <p style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '10px', lineHeight: 1.5 }}>
+            Use a free-form time format like &ldquo;8:00 AM&rdquo; or &ldquo;5:30 PM&rdquo;. Tap &ldquo;Open&rdquo; to mark a day closed.
+          </p>
+        </div>
+      </div>
+
+      {/* Footer with explicit Save / Discard */}
+      <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
+        <Button
+          variant="outline"
+          onClick={handleDiscard}
+          disabled={!isDirty || saving}
+          style={{ gap: '6px', fontSize: '12px', height: 34 }}
+        >
+          <RotateCcw style={{ width: 13, height: 13 }} /> Discard
+        </Button>
+        <Button
+          onClick={handleSave}
+          disabled={!isDirty || saving}
           style={{ gap: '6px', fontSize: '12px', height: 34, backgroundColor: ACCENT, borderColor: ACCENT, minWidth: 110 }}
         >
           {saving ? (

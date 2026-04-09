@@ -4,11 +4,31 @@ import {
   MessageSquare, ChevronRight,
 } from 'lucide-react';
 import { useOwnerClient } from '../../hooks/useOwnerClient';
+import { supabase } from '../../../lib/supabase';
+import { getOrgContext } from '../../hooks/useOrgContext';
 
 const BRAND = 'var(--brand-green-text)';
 const BRAND_TEXT = 'var(--brand-green-text)';
 
-const CLINIC = {
+interface ClinicInfo {
+  name: string;
+  tagline: string;
+  phone: string;
+  emergency: string;
+  email: string;
+  address: string;
+  city: string;
+  mapUrl: string;
+}
+
+interface HourRow {
+  day: string;
+  open: string | null;
+  close: string | null;
+}
+
+// Fallback values used while the clinic row is loading or if nothing is set.
+const CLINIC_FALLBACK: ClinicInfo = {
   name: 'Hugory Veterinary Clinic',
   tagline: 'Caring for your pets since 2008',
   phone: '(555) 987-6543',
@@ -19,8 +39,8 @@ const CLINIC = {
   mapUrl: 'https://maps.google.com/?q=1420+Oak+Street+Springfield+IL',
 };
 
-const HOURS = [
-  { day: 'Monday',    open: '8:00 AM', close: '6:00 PM', today: true },
+const HOURS_FALLBACK: HourRow[] = [
+  { day: 'Monday',    open: '8:00 AM', close: '6:00 PM' },
   { day: 'Tuesday',   open: '8:00 AM', close: '6:00 PM' },
   { day: 'Wednesday', open: '8:00 AM', close: '7:00 PM' },
   { day: 'Thursday',  open: '8:00 AM', close: '6:00 PM' },
@@ -29,11 +49,40 @@ const HOURS = [
   { day: 'Sunday',    open: null,       close: null },
 ];
 
-const TEAM = [
-  { name: 'Dr. Sarah Chen',  role: 'Lead Veterinarian', initials: 'DC', color: 'var(--brand-green-text)' },
-  { name: 'Dr. Raj Patel',   role: 'Veterinarian',      initials: 'RP', color: '#3B82F6' },
-  { name: 'Emma Wilson',     role: 'Receptionist',      initials: 'EW', color: '#8B5CF6' },
-];
+// JS Date.getDay(): Sunday=0, Monday=1, ..., Saturday=6
+const TODAY_NAME = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][new Date().getDay()];
+
+// Color palette cycled for team member avatars
+const TEAM_COLORS = ['var(--brand-green-text)', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261', '#06B6D4', '#10B981'];
+
+// Display names for staff roles — keys MUST match the user_role enum values in Supabase
+const ROLE_LABELS: Record<string, string> = {
+  senior_veterinarian: 'Senior Veterinarian',
+  veterinarian:        'Veterinarian',
+  specialist:          'Specialist',
+  clinic_manager:      'Clinic Manager',
+  front_desk_manager:  'Front Desk Manager',
+  receptionist:        'Receptionist',
+};
+
+// Priority order so vets show first, then managers, then front desk
+const ROLE_PRIORITY: Record<string, number> = {
+  senior_veterinarian: 1,
+  veterinarian:        2,
+  specialist:          3,
+  clinic_manager:      4,
+  front_desk_manager:  5,
+  receptionist:        6,
+};
+
+interface TeamMember {
+  id: string;
+  name: string;
+  role: string;
+  initials: string;
+  color: string;
+  sortKey: number;
+}
 
 function Card({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return (
@@ -70,6 +119,119 @@ export default function OwnerContactPage() {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
 
+  // ── Live clinic info from Supabase ────────────────────────────
+  // Picks the first active clinic for the owner's organization and reads
+  // the editable presentation fields. Falls back to CLINIC_FALLBACK while
+  // loading or if nothing is set in the database.
+  const [clinicInfo, setClinicInfo] = useState<ClinicInfo>(CLINIC_FALLBACK);
+  const [hours, setHours] = useState<(HourRow & { today: boolean })[]>(
+    HOURS_FALLBACK.map(h => ({ ...h, today: h.day === TODAY_NAME }))
+  );
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { organizationId } = await getOrgContext();
+        const { data, error } = await supabase
+          .from('clinics')
+          .select('name, tagline, phone, emergency_phone, email, address, city, map_url, business_hours, is_active')
+          .eq('organization_id', organizationId)
+          .eq('is_active', true)
+          .order('created_at', { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if (cancelled) return;
+        if (error) {
+          console.error('[OwnerContactPage] clinic fetch error:', error);
+          return;
+        }
+        if (!data) return;
+        setClinicInfo({
+          name: data.name || CLINIC_FALLBACK.name,
+          tagline: data.tagline || CLINIC_FALLBACK.tagline,
+          phone: data.phone || CLINIC_FALLBACK.phone,
+          emergency: (data as any).emergency_phone || CLINIC_FALLBACK.emergency,
+          email: data.email || CLINIC_FALLBACK.email,
+          address: data.address || CLINIC_FALLBACK.address,
+          city: data.city || CLINIC_FALLBACK.city,
+          mapUrl: (data as any).map_url || CLINIC_FALLBACK.mapUrl,
+        });
+        const bh = (data as any).business_hours as HourRow[] | null;
+        const rows = (bh && Array.isArray(bh) && bh.length > 0) ? bh : HOURS_FALLBACK;
+        setHours(rows.map(h => ({ ...h, today: h.day === TODAY_NAME })));
+      } catch (err) {
+        console.error('[OwnerContactPage] clinic fetch exception:', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Fetch real clinic team members from Supabase.
+  // Uses two queries (staff + profiles) to avoid composite-FK nested RLS issues.
+  const [team, setTeam] = useState<TeamMember[]>([]);
+  const [teamLoading, setTeamLoading] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { organizationId } = await getOrgContext();
+        const ALLOWED_ROLES = Object.keys(ROLE_PRIORITY);
+        const { data: staffRows, error: staffErr } = await supabase
+          .from('staff')
+          .select('id, role')
+          .eq('organization_id', organizationId)
+          .eq('status', 'Active')
+          .in('role', ALLOWED_ROLES);
+        if (staffErr) {
+          console.error('[OwnerContactPage] staff query error:', staffErr);
+          if (!cancelled) { setTeam([]); setTeamLoading(false); }
+          return;
+        }
+        if (cancelled || !staffRows || staffRows.length === 0) {
+          if (!cancelled) { setTeam([]); setTeamLoading(false); }
+          return;
+        }
+        const roleById: Record<string, string> = {};
+        staffRows.forEach((s: any) => { roleById[s.id] = s.role; });
+        const ids = staffRows.map((s: any) => s.id);
+        const { data: profileRows, error: profErr } = await supabase
+          .from('profiles')
+          .select('id, first_name, last_name')
+          .in('id', ids);
+        if (profErr) {
+          console.error('[OwnerContactPage] profiles query error:', profErr);
+          if (!cancelled) { setTeam([]); setTeamLoading(false); }
+          return;
+        }
+        if (cancelled || !profileRows) return;
+        const list: TeamMember[] = profileRows.map((p: any, idx: number) => {
+          const fn = p.first_name || '';
+          const ln = p.last_name || '';
+          const role = roleById[p.id] || '';
+          const isVet = role === 'veterinarian' || role === 'senior_veterinarian' || role === 'specialist';
+          const display = isVet
+            ? (ln ? `Dr. ${ln}` : (fn ? `Dr. ${fn}` : 'Vet'))
+            : [fn, ln].filter(Boolean).join(' ') || 'Team Member';
+          const initials = ((fn[0] || '') + (ln[0] || '')).toUpperCase() || 'TM';
+          return {
+            id: p.id,
+            name: display,
+            role: ROLE_LABELS[role] || 'Team Member',
+            initials,
+            color: TEAM_COLORS[idx % TEAM_COLORS.length],
+            sortKey: ROLE_PRIORITY[role] || 99,
+          };
+        });
+        list.sort((a, b) => a.sortKey - b.sortKey || a.name.localeCompare(b.name));
+        if (!cancelled) { setTeam(list); setTeamLoading(false); }
+      } catch (err) {
+        console.error('[OwnerContactPage] team fetch exception:', err);
+        if (!cancelled) { setTeam([]); setTeamLoading(false); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.subject.trim() || !form.message.trim()) return;
@@ -87,7 +249,7 @@ export default function OwnerContactPage() {
             Contact Clinic
           </h1>
           <p style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>
-            Get in touch with {CLINIC.name}
+            Get in touch with {clinicInfo.name}
           </p>
         </div>
 
@@ -95,12 +257,12 @@ export default function OwnerContactPage() {
         <Card style={{ marginBottom: '24px', borderTop: `4px solid ${BRAND}`, overflow: 'hidden' }}>
           <div style={{ padding: '24px 28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
             <div>
-              <p style={{ fontSize: '20px', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '3px' }}>{CLINIC.name}</p>
-              <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{CLINIC.tagline}</p>
+              <p style={{ fontSize: '20px', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '3px' }}>{clinicInfo.name}</p>
+              <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{clinicInfo.tagline}</p>
             </div>
             <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
               <a
-                href={`tel:${CLINIC.phone.replace(/\D/g, '')}`}
+                href={`tel:${clinicInfo.phone.replace(/\D/g, '')}`}
                 style={{
                   padding: '9px 18px', borderRadius: '9px',
                   backgroundColor: BRAND, color: '#fff',
@@ -112,7 +274,7 @@ export default function OwnerContactPage() {
                 <Phone style={{ width: '14px', height: '14px' }} /> Call Now
               </a>
               <a
-                href={`mailto:${CLINIC.email}`}
+                href={`mailto:${clinicInfo.email}`}
                 style={{
                   padding: '9px 18px', borderRadius: '9px',
                   backgroundColor: 'transparent', color: BRAND_TEXT,
@@ -142,11 +304,11 @@ export default function OwnerContactPage() {
                   <Phone style={{ width: '18px', height: '18px', color: BRAND_TEXT }} />
                 </div>
                 <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '4px' }}>Phone</p>
-                <p style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '2px' }}>{CLINIC.phone}</p>
+                <p style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '2px' }}>{clinicInfo.phone}</p>
                 <p style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>General enquiries</p>
                 <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid var(--border-color)' }}>
                   <p style={{ fontSize: '11px', fontWeight: 700, color: '#d4183d', marginBottom: '2px' }}>Emergency</p>
-                  <p style={{ fontSize: '13px', fontWeight: 700, color: '#d4183d' }}>{CLINIC.emergency}</p>
+                  <p style={{ fontSize: '13px', fontWeight: 700, color: '#d4183d' }}>{clinicInfo.emergency}</p>
                 </div>
               </Card>
 
@@ -156,7 +318,7 @@ export default function OwnerContactPage() {
                   <Mail style={{ width: '18px', height: '18px', color: '#3B82F6' }} />
                 </div>
                 <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '4px' }}>Email</p>
-                <p style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '2px', wordBreak: 'break-all' }}>{CLINIC.email}</p>
+                <p style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '2px', wordBreak: 'break-all' }}>{clinicInfo.email}</p>
                 <p style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Replies within 24 h</p>
               </Card>
 
@@ -166,10 +328,10 @@ export default function OwnerContactPage() {
                   <MapPin style={{ width: '18px', height: '18px', color: '#D97706' }} />
                 </div>
                 <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '4px' }}>Address</p>
-                <p style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '2px' }}>{CLINIC.address}</p>
-                <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '10px' }}>{CLINIC.city}</p>
+                <p style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '2px' }}>{clinicInfo.address}</p>
+                <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '10px' }}>{clinicInfo.city}</p>
                 <a
-                  href={CLINIC.mapUrl}
+                  href={clinicInfo.mapUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{ fontSize: '12px', fontWeight: 600, color: BRAND_TEXT, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '3px' }}
@@ -307,7 +469,7 @@ export default function OwnerContactPage() {
             <Card>
               <SectionTitle icon={Clock} title="Opening Hours" />
               <div style={{ padding: '14px 20px' }}>
-                {HOURS.map(h => (
+                {hours.map(h => (
                   <div
                     key={h.day}
                     style={{
@@ -345,11 +507,15 @@ export default function OwnerContactPage() {
             <Card>
               <SectionTitle icon={MessageSquare} title="Our Team" />
               <div style={{ padding: '14px 20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {TEAM.map(member => (
-                  <div key={member.name} style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                {teamLoading ? (
+                  <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: 0 }}>Loading clinic team…</p>
+                ) : team.length === 0 ? (
+                  <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: 0 }}>No team members available.</p>
+                ) : team.map(member => (
+                  <div key={member.id} style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <div style={{
                       width: '38px', height: '38px', borderRadius: '50%',
-                      background: `linear-gradient(135deg, ${member.color}, ${member.color}bb)`,
+                      background: `linear-gradient(135deg, ${member.color}, color-mix(in srgb, ${member.color} 73%, transparent))`,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       flexShrink: 0, color: '#fff', fontSize: '12px', fontWeight: 700,
                     }}>
