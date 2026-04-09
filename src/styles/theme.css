@@ -940,3 +940,30 @@
   align-items: center;
   justify-content: center;
 }
+
+/* ─── SuperAdmin portal accent override ──────────────────────
+   SuperAdmin uses the orange #F4A261 as its brand accent instead
+   of the default green / indigo primary. Override the semantic
+   CSS variables so ANY component using var(--primary) or
+   var(--brand-green-text) automatically picks up the orange. */
+.portal-superadmin {
+  --primary: #F4A261;
+  --primary-foreground: #ffffff;
+  --primary-green: #F4A261;
+  --brand-green-text: #F4A261;
+  --on-brand-green: #ffffff;
+  --primary-light: #F6B27C;
+  --ring: #F4A261;
+  --accent: #F4A261;
+  --accent-foreground: #ffffff;
+  --sidebar-primary: #F4A261;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-ring: #F4A261;
+}
+.portal-superadmin [data-slot="button"][class*="bg-primary"] {
+  background-color: #F4A261;
+  color: #ffffff;
+}
+.portal-superadmin [data-slot="button"][class*="bg-primary"]:hover {
+  background-color: #E88A3D;
+}

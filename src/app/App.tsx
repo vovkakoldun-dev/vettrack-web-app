@@ -391,7 +391,7 @@ function SuperAdminApp() {
   const { isDark, toggle } = useTheme();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   return (
-    <div className="flex h-screen overflow-hidden bg-[var(--bg-base)]">
+    <div className="portal-superadmin flex h-screen overflow-hidden bg-[var(--bg-base)]">
       <SuperAdminSidebar
         isDark={isDark}
         onToggleTheme={toggle}
