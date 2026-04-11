@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { supabase } from '../../lib/supabase';
 
 /**
  * Visual theme styles available in the app.
@@ -174,8 +175,56 @@ function readMode(base: string): 'light' | 'dark' {
   return m === 'dark' ? 'dark' : 'light';
 }
 
+/* ─── Supabase theme sync helpers ──────────────────────────────────────── */
+
+const ALL_PORTAL_BASES = [
+  STORAGE_KEY_PREFIX,                       // doctor
+  `${STORAGE_KEY_PREFIX}-admin`,
+  `${STORAGE_KEY_PREFIX}-owner`,
+  `${STORAGE_KEY_PREFIX}-superadmin`,
+];
+const SUFFIXES = ['-mode', '-light', '-dark'];
+
+/** Collect all portal theme keys from localStorage into one object */
+function collectAllPrefs(): Record<string, string> {
+  const prefs: Record<string, string> = {};
+  for (const base of ALL_PORTAL_BASES) {
+    for (const sfx of SUFFIXES) {
+      const v = localStorage.getItem(`${base}${sfx}`);
+      if (v) prefs[`${base}${sfx}`] = v;
+    }
+  }
+  return prefs;
+}
+
+/** Apply Supabase-stored prefs into localStorage */
+function applyPrefsToStorage(prefs: Record<string, string>) {
+  for (const [key, val] of Object.entries(prefs)) {
+    localStorage.setItem(key, val);
+  }
+}
+
+let _saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Debounced save of all theme prefs to Supabase (300ms) */
+function persistToSupabase() {
+  if (_saveTimer) clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      await supabase.from('user_theme_preferences').upsert({
+        user_id: user.id,
+        preferences: collectAllPrefs(),
+        updated_at: new Date().toISOString(),
+      });
+    } catch {}
+  }, 300);
+}
+
 export function useTheme() {
   const storageBase = getPortalKey();
+  const syncedRef = useRef(false);
 
   // Run migration once
   if (typeof window !== 'undefined') migrateStorage(storageBase);
@@ -201,6 +250,38 @@ export function useTheme() {
     applyThemeToDOM(themeStyle);
   }, [themeStyle]);
 
+  // ── Supabase sync: load saved prefs on mount ───────────────────────
+  useEffect(() => {
+    if (syncedRef.current) return;
+    (async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        const { data } = await supabase
+          .from('user_theme_preferences')
+          .select('preferences')
+          .eq('user_id', user.id)
+          .single();
+        if (data?.preferences && typeof data.preferences === 'object') {
+          syncedRef.current = true;
+          applyPrefsToStorage(data.preferences as Record<string, string>);
+          // Re-read current portal's theme after applying remote prefs
+          const mode = readMode(storageBase);
+          const style = readSavedStyle(storageBase, mode);
+          setThemeStyleRaw(style);
+          setIsDark(resolveIsDark(style));
+          setSavedLight(readSavedStyle(storageBase, 'light'));
+          setSavedDark(readSavedStyle(storageBase, 'dark'));
+          applyThemeToDOM(style);
+        } else {
+          // No remote prefs yet — push current localStorage to Supabase
+          syncedRef.current = true;
+          persistToSupabase();
+        }
+      } catch {}
+    })();
+  }, [storageBase]);
+
   /** Select a theme — saves to the correct mode slot and switches to it */
   const setThemeStyle = useCallback((style: ThemeStyle) => {
     const meta = THEME_STYLES.find(t => t.value === style);
@@ -213,6 +294,7 @@ export function useTheme() {
     setThemeStyleRaw(style);
     setIsDark(meta?.isDarkBase ?? false);
     applyThemeToDOM(style);
+    persistToSupabase();
 
     window.dispatchEvent(
       new StorageEvent('storage', { key: `${storageBase}-mode`, newValue: modeKey }),
@@ -228,6 +310,7 @@ export function useTheme() {
     setThemeStyleRaw(targetStyle);
     setIsDark(resolveIsDark(targetStyle));
     applyThemeToDOM(targetStyle);
+    persistToSupabase();
   }, [isDark, storageBase]);
 
   // Cross-tab / cross-component sync

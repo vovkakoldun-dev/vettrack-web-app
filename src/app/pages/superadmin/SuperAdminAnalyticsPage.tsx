@@ -394,6 +394,7 @@ export default function SuperAdminAnalyticsPage() {
   const [monthLabels, setMonthLabels] = useState<string[]>([]);
   const [dailyAppts, setDailyAppts] = useState<{ day: string; val: number }[]>([]);
   const [services, setServices] = useState<{ name: string; count: number; color: string; pct: number }[]>([]);
+  const [showAllServices, setShowAllServices] = useState(false);
   const [patientsData, setPatientsData] = useState<number[]>([]);
   const [doctorPerf, setDoctorPerf] = useState<{ name: string; initials: string; color: string; role: string; revenue: string; completed: number; pets: number }[]>([]);
   const [adminPerf, setAdminPerf] = useState<{ name: string; initials: string; color: string; role: string; booked: number; tasksCompleted: number }[]>([]);
@@ -1344,7 +1345,7 @@ export default function SuperAdminAnalyticsPage() {
           }
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {services.map(s => (
+            {(showAllServices ? services : services.slice(0, 6)).map(s => (
               <div key={s.name}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1366,6 +1367,21 @@ export default function SuperAdminAnalyticsPage() {
                 </div>
               </div>
             ))}
+            {services.length > 6 && (
+              <button
+                onClick={() => setShowAllServices(v => !v)}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
+                  fontSize: '12px', fontWeight: 600, color: 'var(--brand-green-text)',
+                  background: 'none', border: '1px solid var(--border-color)',
+                  borderRadius: '8px', padding: '8px 0', cursor: 'pointer',
+                  marginTop: '4px',
+                }}
+              >
+                {showAllServices ? 'Show less' : `Load more (${services.length - 6})`}
+                <ChevronRight style={{ width: '13px', height: '13px', transform: showAllServices ? 'rotate(-90deg)' : 'rotate(90deg)', transition: 'transform 0.2s' }} />
+              </button>
+            )}
           </div>
         </ChartCard>
       </div>

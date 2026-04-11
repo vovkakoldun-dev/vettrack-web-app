@@ -246,8 +246,9 @@ const ADMIN_ROLES  = ['front_desk_manager', 'receptionist', 'clinic_manager', 's
 | `user_sessions` | Active device sessions | `id`, `user_id` (FK auth.users), `device`, `browser`, `location`, `ip_address`, `is_current`, `session_token` (unique), `last_active_at`, `created_at` |
 | `login_activity` | Login audit log | `id`, `user_id` (FK auth.users), `device`, `browser`, `location`, `ip_address`, `status` (success/failed), `created_at` |
 | `notification_preferences` | Per-user in-app notification toggles | `id`, `user_id` (FK auth.users, unique), `appt_new`, `appt_cancel`, `appt_reminder`, `appt_reschedule`, `lab_ready`, `lab_critical`, `invoice_gen`, `payment_recv`, `plan_expiry`, `system_updates`, `updated_at` |
+| `user_theme_preferences` | Per-user theme preferences (all portals) | `user_id` (uuid PK, FK auth.users), `preferences` (jsonb — stores all portal theme keys), `updated_at` |
 
-> All three tables use RLS scoped to `auth.uid() = user_id`. No `organization_id` needed — these are per-user settings, not tenant data.
+> All four tables use RLS scoped to `auth.uid() = user_id`. No `organization_id` needed — these are per-user settings, not tenant data.
 
 ### Database Views
 
