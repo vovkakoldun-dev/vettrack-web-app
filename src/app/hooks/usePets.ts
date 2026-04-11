@@ -45,7 +45,7 @@ export function usePets() {
       const { organizationId } = await getOrgContext()
       const { data, error: err } = await db
         .from('pets')
-        .select('id, name, species, breed, date_of_birth, sex, weight_kg, photo_url, microchip_no, is_active, created_at, client_id, assigned_vet_id, clients(id, first_name, last_name, phone), assigned_vet:staff!pets_assigned_vet_org_fkey(id, first_name, last_name)')
+        .select('id, name, species, breed, date_of_birth, sex, weight_kg, photo_url, microchip_no, is_active, created_at, client_id, assigned_vet_id, clients(id, first_name, last_name, phone), assigned_vet:staff!pets_assigned_vet_id_fkey(id, first_name, last_name)')
         .eq('organization_id', organizationId)
         .eq('is_active', true)
         .order('created_at', { ascending: false })
@@ -85,7 +85,7 @@ export function usePets() {
     const { data, error: err } = await db
       .from('pets')
       .insert([{ organization_id: organizationId, is_active: true, ...values }])
-      .select('id, name, species, breed, date_of_birth, sex, weight_kg, photo_url, microchip_no, is_active, created_at, client_id, assigned_vet_id, clients(id, first_name, last_name, phone), assigned_vet:staff!pets_assigned_vet_org_fkey(id, first_name, last_name)')
+      .select('id, name, species, breed, date_of_birth, sex, weight_kg, photo_url, microchip_no, is_active, created_at, client_id, assigned_vet_id, clients(id, first_name, last_name, phone), assigned_vet:staff!pets_assigned_vet_id_fkey(id, first_name, last_name)')
       .single()
     if (!err) {
       await fetchPets()

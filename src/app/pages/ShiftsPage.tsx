@@ -174,7 +174,7 @@ export default function ShiftsPage() {
       // Get current user's staff record
       const { data: staffRow } = await db
         .from('staff')
-        .select('id, profile_id, role, profiles:profiles!staff_profile_org_fkey(first_name, last_name, avatar_url)')
+        .select('id, profile_id, role, profiles:profiles!staff_profile_id_fkey(first_name, last_name, avatar_url)')
         .eq('id', user.id)
         .single();
 
@@ -198,14 +198,14 @@ export default function ShiftsPage() {
       const [{ data: allShiftData }, { data: staffData }, { data: timeBlockData }] = await Promise.all([
         db
           .from('shifts')
-          .select('*, staff:staff!shifts_staff_org_fkey(id, role, profiles:profiles!staff_profile_org_fkey(first_name, last_name, avatar_url))')
+          .select('*, staff:staff!shifts_staff_id_fkey(id, role, profiles:profiles!staff_profile_id_fkey(first_name, last_name, avatar_url))')
           .eq('organization_id', organizationId)
           .gte('date', weekStartStr)
           .lte('date', weekEndStr)
           .order('date'),
         db
           .from('staff')
-          .select('id, role, profiles:profiles!staff_profile_org_fkey(first_name, last_name, avatar_url)')
+          .select('id, role, profiles:profiles!staff_profile_id_fkey(first_name, last_name, avatar_url)')
           .eq('organization_id', organizationId),
         db
           .from('staff_time_blocks')

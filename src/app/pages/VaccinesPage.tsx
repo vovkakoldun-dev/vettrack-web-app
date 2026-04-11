@@ -71,7 +71,7 @@ export default function VaccinesPage() {
         const { organizationId } = await getOrgContext();
         const { data } = await supabase
           .from('vaccinations')
-          .select('id, vaccine_name, administered_date, next_due_date, notes, pets!inner(id, name, species, breed, photo_url, client_id, clients!inner(id, first_name, last_name)), staff:staff!vaccinations_administered_by_org_fkey(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name))')
+          .select('id, vaccine_name, administered_date, next_due_date, notes, pets!inner(id, name, species, breed, photo_url, client_id, clients!inner(id, first_name, last_name)), staff:staff!vaccinations_administered_by_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
           .order('administered_date', { ascending: false });
 
         if (data) {

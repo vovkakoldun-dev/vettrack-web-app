@@ -442,7 +442,7 @@ export default function RecordDetailPage() {
       setLoading(true);
       const { data } = await supabase
         .from('medical_records')
-        .select('*, pets(id, name, species, breed, photo_url, date_of_birth, sex, weight_kg, color, microchip_no), clients(id, first_name, last_name, email, phone), staff!medical_records_vet_org_fkey(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name)), record_vitals(weight_kg, temperature_c, heart_rate_bpm, respiratory_rate_bpm, blood_pressure_systolic, blood_pressure_diastolic, body_condition_score, pain_score, hydration_status), record_diagnoses(type, description, icd_code, notes), record_treatments(procedure_name, description, post_visit_instructions, activity_restrictions, home_care_plan)')
+        .select('*, pets(id, name, species, breed, photo_url, date_of_birth, sex, weight_kg, color, microchip_no), clients(id, first_name, last_name, email, phone), staff!medical_records_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name)), record_vitals(weight_kg, temperature_c, heart_rate_bpm, respiratory_rate_bpm, blood_pressure_systolic, blood_pressure_diastolic, body_condition_score, pain_score, hydration_status), record_diagnoses(type, description, icd_code, notes), record_treatments(procedure_name, description, post_visit_instructions, activity_restrictions, home_care_plan)')
         .eq('id', id)
         .single();
       if (data) {

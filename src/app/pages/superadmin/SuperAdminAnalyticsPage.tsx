@@ -446,7 +446,7 @@ export default function SuperAdminAnalyticsPage() {
             .eq('organization_id', organizationId),
           supabase
             .from('staff')
-            .select('id, role, total_appointments, profiles:profiles!staff_profile_org_fkey(first_name, last_name)')
+            .select('id, role, total_appointments, profiles:profiles!staff_profile_id_fkey(first_name, last_name)')
             .eq('organization_id', organizationId)
             .eq('status', 'Active')
             .neq('role', 'owner')

@@ -177,7 +177,7 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
           const readAt = part.last_read_at || '1970-01-01T00:00:00Z';
           const { data: latest } = await supabase
             .from('messages')
-            .select('sender_id, content, profiles:profiles!messages_sender_org_fkey(first_name, last_name)')
+            .select('sender_id, content, profiles:profiles!messages_sender_id_fkey(first_name, last_name)')
             .eq('organization_id', chatOrgId)
             .eq('conversation_id', part.conversation_id)
             .neq('sender_id', user!.id)

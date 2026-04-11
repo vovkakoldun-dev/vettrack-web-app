@@ -151,7 +151,7 @@ function NotificationsPanel() {
         // 4. Urgent pending tasks → action needed
         const { data: urgentTasks } = await db
           .from('tasks')
-          .select('id, type, priority, due_date, pet:pets!tasks_pet_org_fkey(name), assignedByStaff:staff!tasks_assigned_by_org_fkey(profiles:profiles!staff_profile_org_fkey(first_name, last_name))')
+          .select('id, type, priority, due_date, pet:pets!tasks_pet_id_fkey(name), assignedByStaff:staff!tasks_assigned_by_id_fkey(profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
           .eq('organization_id', organizationId)
           .eq('status', 'Pending')
           .eq('priority', 'Urgent')
@@ -998,7 +998,7 @@ export default function SuperAdminDashboardPage() {
         // 3. Medical records created today
         const { data: newRecords } = await db
           .from('medical_records')
-          .select('created_at, pets(name), staff:staff!medical_records_vet_org_fkey(profiles:profiles!staff_profile_org_fkey(last_name))')
+          .select('created_at, pets(name), staff:staff!medical_records_vet_id_fkey(profiles:profiles!staff_profile_id_fkey(last_name))')
           .eq('organization_id', organizationId)
           .gte('created_at', todayStart)
           .order('created_at', { ascending: false })
@@ -1104,7 +1104,7 @@ export default function SuperAdminDashboardPage() {
         // 1. Fetch all non-inactive staff with profile names
         const { data: staffData } = await db
           .from('staff')
-          .select('id, role, status, profiles:profiles!staff_profile_org_fkey(first_name, last_name)')
+          .select('id, role, status, profiles:profiles!staff_profile_id_fkey(first_name, last_name)')
           .eq('organization_id', organizationId)
           .neq('status', 'Inactive')
           .order('role');

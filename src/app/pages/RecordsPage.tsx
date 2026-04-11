@@ -103,7 +103,7 @@ export default function RecordsPage() {
     (async () => {
       const { data } = await db
         .from('medical_records')
-        .select('id, record_number, record_type, status, visit_date, visit_time, reason, clinical_notes, duration_minutes, pets!left(id, name, species, breed, photo_url), clients!left(id, first_name, last_name), staff!medical_records_vet_org_fkey!left(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name))')
+        .select('id, record_number, record_type, status, visit_date, visit_time, reason, clinical_notes, duration_minutes, pets!left(id, name, species, breed, photo_url), clients!left(id, first_name, last_name), staff!medical_records_vet_id_fkey!left(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
         .order('visit_date', { ascending: false });
       if (data) {
         const mapped: MedicalRecord[] = data.map((r: any, i: number) => {

@@ -137,7 +137,7 @@ export default function CheckoutPage() {
       setLoadingAppt(true);
       const { data } = await db
         .from('appointments')
-        .select('id, scheduled_at, duration_minutes, status, reason, notes, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name), staff!appointments_vet_org_fkey(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name))')
+        .select('id, scheduled_at, duration_minutes, status, reason, notes, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name), staff!appointments_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
         .eq('id', id)
         .single();
       if (data) {

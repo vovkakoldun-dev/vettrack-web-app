@@ -309,7 +309,7 @@ export default function AppointmentsPage() {
     (async () => {
       try {
         const { organizationId } = await getOrgContext();
-        const { data } = await db.from('staff').select('id, role, profiles:profiles!staff_profile_org_fkey(first_name, last_name)').eq('organization_id', organizationId).in('role', ['veterinarian', 'senior_veterinarian', 'specialist']).eq('status', 'Active').order('first_name');
+        const { data } = await db.from('staff').select('id, role, profiles:profiles!staff_profile_id_fkey(first_name, last_name)').eq('organization_id', organizationId).in('role', ['veterinarian', 'senior_veterinarian', 'specialist']).eq('status', 'Active').order('first_name');
         if (data) setStaffList(data.map((s: any) => {
           const fn = s.profiles?.first_name || '';
           const ln = s.profiles?.last_name || '';

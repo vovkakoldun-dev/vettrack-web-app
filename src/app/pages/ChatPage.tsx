@@ -344,7 +344,7 @@ export default function ChatPage() {
       db.from('conversations').select('id, type, title').eq('organization_id', organizationId).in('id', convIds),
       // 2. All other participants with profiles
       db.from('conversation_participants')
-        .select('conversation_id, profile_id, last_read_at, profiles:profiles!conv_participants_profile_org_fkey(id, first_name, last_name, role, avatar_url)')
+        .select('conversation_id, profile_id, last_read_at, profiles:profiles!conv_participants_profile_id_fkey(id, first_name, last_name, role, avatar_url)')
         .eq('organization_id', organizationId).in('conversation_id', convIds).neq('profile_id', user.id),
       // 3. My participation (for last_read_at)
       db.from('conversation_participants')
@@ -453,7 +453,7 @@ export default function ChatPage() {
     const { organizationId } = await getOrgContext();
     const { data } = await db
       .from('messages')
-      .select('id, content, sender_id, image_url, file_url, file_name, file_size, forwarded_from_name, created_at, sender:profiles!messages_sender_org_fkey(first_name, last_name, role)')
+      .select('id, content, sender_id, image_url, file_url, file_name, file_size, forwarded_from_name, created_at, sender:profiles!messages_sender_id_fkey(first_name, last_name, role)')
       .eq('organization_id', organizationId)
       .eq('conversation_id', convId)
       .order('created_at', { ascending: true });

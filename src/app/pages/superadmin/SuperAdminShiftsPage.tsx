@@ -217,13 +217,13 @@ export default function SuperAdminShiftsPage() {
       const [staffRes, shiftsRes, swapRes] = await Promise.all([
         db
           .from('staff')
-          .select('id, role, status, profiles:profiles!staff_profile_org_fkey(first_name, last_name, avatar_url)')
+          .select('id, role, status, profiles:profiles!staff_profile_id_fkey(first_name, last_name, avatar_url)')
           .eq('organization_id', organizationId)
           .eq('status', 'Active')
           .order('role'),
         db
           .from('shifts')
-          .select('*, staff:staff!shifts_staff_org_fkey(id, role, profiles:profiles!staff_profile_org_fkey(first_name, last_name))')
+          .select('*, staff:staff!shifts_staff_id_fkey(id, role, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
           .eq('organization_id', organizationId)
           .gte('date', weekStartStr)
           .lte('date', weekEndStr)
@@ -288,7 +288,7 @@ export default function SuperAdminShiftsPage() {
         const { organizationId } = await getOrgContext();
         const { data } = await db
           .from('shifts')
-          .select('*, staff:staff!shifts_staff_org_fkey(id, role, profiles:profiles!staff_profile_org_fkey(first_name, last_name))')
+          .select('*, staff:staff!shifts_staff_id_fkey(id, role, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
           .eq('organization_id', organizationId)
           .gte('date', statsMonthStr)
           .lte('date', statsMonthEnd)

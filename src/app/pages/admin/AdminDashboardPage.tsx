@@ -885,7 +885,7 @@ export default function AdminDashboardPage() {
           const lastRead = part.last_read_at || '1970-01-01T00:00:00Z';
           const { data: msgs } = await supabase
             .from('messages')
-            .select('id, content, created_at, sender_id, profiles:profiles!messages_sender_org_fkey(first_name, last_name)')
+            .select('id, content, created_at, sender_id, profiles:profiles!messages_sender_id_fkey(first_name, last_name)')
             .eq('organization_id', orgId)
             .eq('conversation_id', part.conversation_id)
             .gt('created_at', lastRead)

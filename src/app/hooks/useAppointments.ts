@@ -44,7 +44,7 @@ export function useAppointments(dateFilter?: string) {
       const { organizationId } = await getOrgContext()
       let query = db
         .from('appointments')
-        .select('id, scheduled_at, duration_minutes, status, reason, notes, room, room_id, created_at, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name, phone), staff!appointments_vet_org_fkey(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name)), services(id, name, price), clinic_rooms(id, name)')
+        .select('id, scheduled_at, duration_minutes, status, reason, notes, room, room_id, created_at, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name, phone), staff!appointments_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name)), services(id, name, price), clinic_rooms(id, name)')
         .eq('organization_id', organizationId)
         .order('scheduled_at', { ascending: true })
 
@@ -96,7 +96,7 @@ export function useAppointments(dateFilter?: string) {
         status: 'Scheduled',
         ...values,
       }])
-      .select('id, scheduled_at, duration_minutes, status, reason, notes, room, room_id, created_at, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name, phone), staff!appointments_vet_org_fkey(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name)), services(id, name, price), clinic_rooms(id, name)')
+      .select('id, scheduled_at, duration_minutes, status, reason, notes, room, room_id, created_at, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name, phone), staff!appointments_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name)), services(id, name, price), clinic_rooms(id, name)')
       .single()
     if (!err) {
       await fetchAppointments()

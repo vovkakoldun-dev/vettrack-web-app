@@ -158,7 +158,7 @@ export default function VisitPage() {
       setLoadingAppt(true);
       const { data } = await db
         .from('appointments')
-        .select('id, scheduled_at, duration_minutes, status, reason, notes, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name), staff!appointments_vet_org_fkey(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name))')
+        .select('id, scheduled_at, duration_minutes, status, reason, notes, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name), staff!appointments_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
         .eq('id', id)
         .single();
       if (data) {
@@ -1901,8 +1901,8 @@ function VisitLabTab({ petDbId }: { petDbId: string }) {
           .select(`
             id, file_name, file_url, file_type, test_panel, test_name, notes,
             review_status, reviewed_at, created_at, result_value, flag,
-            uploader:profiles!lab_results_uploaded_by_org_fkey(first_name, last_name),
-            reviewer:profiles!lab_results_reviewed_by_org_fkey(first_name, last_name)
+            uploader:profiles!lab_results_uploaded_by_fkey(first_name, last_name),
+            reviewer:profiles!lab_results_reviewed_by_fkey(first_name, last_name)
           `)
           .eq('pet_id', petDbId)
           .eq('organization_id', organizationId)
@@ -2049,7 +2049,7 @@ function VisitNotesTab({ petDbId }: { petDbId: string }) {
       const { organizationId } = await getOrgContext();
       const { data } = await db
         .from('pet_notes')
-        .select('id, type, content, created_at, author:profiles!pet_notes_author_id_org_fkey(first_name, last_name)')
+        .select('id, type, content, created_at, author:profiles!pet_notes_author_id_fkey(first_name, last_name)')
         .eq('pet_id', petDbId)
         .eq('organization_id', organizationId)
         .order('created_at', { ascending: false });

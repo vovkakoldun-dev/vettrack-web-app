@@ -125,7 +125,7 @@ export default function OwnerPetProfilePage() {
     });
     supabase
       .from('treatments')
-      .select('id, name, treatment_date, notes, created_at, staff:staff!treatments_vet_org_fkey(profiles:profiles!staff_profile_org_fkey(first_name, last_name))')
+      .select('id, name, treatment_date, notes, created_at, staff:staff!treatments_vet_org_fkey(profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
       .eq('pet_id', supaPet.id)
       .order('created_at', { ascending: false })
       .then(({ data }) => {
@@ -146,7 +146,7 @@ export default function OwnerPetProfilePage() {
     if (!petDbId) return;
     const { data } = await supabase
       .from('appointments')
-      .select('id, scheduled_at, duration_minutes, status, type, reason, notes, staff:staff!appointments_vet_org_fkey(profiles:profiles!staff_profile_org_fkey(first_name, last_name)), services:services!appointments_service_org_fkey(name)')
+      .select('id, scheduled_at, duration_minutes, status, type, reason, notes, staff:staff!appointments_vet_id_fkey(profiles:profiles!staff_profile_id_fkey(first_name, last_name)), services:services!appointments_service_id_fkey(name)')
       .eq('pet_id', petDbId)
       .eq('status', 'Completed')
       .order('scheduled_at', { ascending: false });
@@ -206,8 +206,8 @@ export default function OwnerPetProfilePage() {
       .select(`
         id, file_name, file_url, file_type, test_panel, notes,
         review_status, reviewed_at, created_at,
-        uploader:profiles!lab_results_uploaded_by_org_fkey(first_name, last_name),
-        reviewer:profiles!lab_results_reviewed_by_org_fkey(first_name, last_name)
+        uploader:profiles!lab_results_uploaded_by_fkey(first_name, last_name),
+        reviewer:profiles!lab_results_reviewed_by_fkey(first_name, last_name)
       `)
       .eq('pet_id', supaPet.id)
       .not('file_url', 'is', null)
@@ -223,7 +223,7 @@ export default function OwnerPetProfilePage() {
     if (!supaPet?.id) return;
     supabase
       .from('pet_notes')
-      .select('id, type, content, created_at, author:staff!pet_notes_author_org_fkey(role, profiles:profiles!staff_profile_org_fkey(first_name, last_name))')
+      .select('id, type, content, created_at, author:staff!pet_notes_author_id_fkey(role, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
       .eq('pet_id', supaPet.id)
       .eq('type', 'client')
       .order('created_at', { ascending: false })

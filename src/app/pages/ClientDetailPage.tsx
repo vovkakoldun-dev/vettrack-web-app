@@ -254,7 +254,7 @@ export default function ClientDetailPage() {
     const { organizationId } = await getOrgContext();
     const { data: c } = await db
       .from('clients')
-      .select('id, first_name, last_name, email, phone, address, city, state, zip, country, notes, portal_status, health_status, created_at, pets(id, name, species, breed, date_of_birth, sex, weight_kg, microchip_no, photo_url, assigned_vet_id, assigned_vet:staff!pets_assigned_vet_org_fkey(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name)))')
+      .select('id, first_name, last_name, email, phone, address, city, state, zip, country, notes, portal_status, health_status, created_at, pets(id, name, species, breed, date_of_birth, sex, weight_kg, microchip_no, photo_url, assigned_vet_id, assigned_vet:staff!pets_assigned_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name)))')
       .eq('organization_id', organizationId)
       .eq('id', id)
       .single();
@@ -264,7 +264,7 @@ export default function ClientDetailPage() {
         petIds.length > 0 ? db.from('pet_allergies').select('*').in('pet_id', petIds) : { data: [] },
         petIds.length > 0 ? db.from('pet_conditions').select('*').in('pet_id', petIds) : { data: [] },
         petIds.length > 0 ? db.from('pet_treatments').select('*').in('pet_id', petIds).order('date', { ascending: false }) : { data: [] },
-        petIds.length > 0 ? db.from('appointments').select('id, pet_id, scheduled_at, duration_minutes, status, reason, staff!appointments_vet_org_fkey(profiles:profiles!staff_profile_org_fkey(first_name, last_name))').eq('organization_id', organizationId).in('pet_id', petIds).gte('scheduled_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString()).order('scheduled_at', { ascending: true }) : { data: [] },
+        petIds.length > 0 ? db.from('appointments').select('id, pet_id, scheduled_at, duration_minutes, status, reason, staff!appointments_vet_id_fkey(profiles:profiles!staff_profile_id_fkey(first_name, last_name))').eq('organization_id', organizationId).in('pet_id', petIds).gte('scheduled_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString()).order('scheduled_at', { ascending: true }) : { data: [] },
         petIds.length > 0 ? db.from('vaccinations').select('*').in('pet_id', petIds).order('administered_date', { ascending: false }) : { data: [] },
       ]);
       const petAllergies = (allergiesRes.data || []) as any[];
@@ -384,7 +384,7 @@ export default function ClientDetailPage() {
         if (user?.id) {
           const { data: staffRow } = await db
             .from('staff')
-            .select('id, profiles:profiles!staff_profile_org_fkey(first_name, last_name)')
+            .select('id, profiles:profiles!staff_profile_id_fkey(first_name, last_name)')
             .eq('organization_id', organizationId)
             .eq('profile_id', user.id)
             .maybeSingle();
@@ -480,7 +480,7 @@ export default function ClientDetailPage() {
         const orgCtx = await getOrgContext();
         const { data: c } = await db
           .from('clients')
-          .select('id, first_name, last_name, email, phone, address, city, state, zip, country, notes, portal_status, health_status, created_at, pets(id, name, species, breed, date_of_birth, sex, weight_kg, microchip_no, photo_url, assigned_vet_id, assigned_vet:staff!pets_assigned_vet_org_fkey(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name)))')
+          .select('id, first_name, last_name, email, phone, address, city, state, zip, country, notes, portal_status, health_status, created_at, pets(id, name, species, breed, date_of_birth, sex, weight_kg, microchip_no, photo_url, assigned_vet_id, assigned_vet:staff!pets_assigned_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name)))')
           .eq('organization_id', orgCtx.organizationId)
           .eq('id', id)
           .single();
@@ -490,7 +490,7 @@ export default function ClientDetailPage() {
             petIds.length > 0 ? db.from('pet_allergies').select('*').in('pet_id', petIds) : { data: [] },
             petIds.length > 0 ? db.from('pet_conditions').select('*').in('pet_id', petIds) : { data: [] },
             petIds.length > 0 ? db.from('pet_treatments').select('*').in('pet_id', petIds).order('date', { ascending: false }) : { data: [] },
-            petIds.length > 0 ? db.from('appointments').select('id, pet_id, scheduled_at, duration_minutes, status, reason, staff!appointments_vet_org_fkey(profiles:profiles!staff_profile_org_fkey(first_name, last_name))').eq('organization_id', orgCtx.organizationId).in('pet_id', petIds).gte('scheduled_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString()).order('scheduled_at', { ascending: true }) : { data: [] },
+            petIds.length > 0 ? db.from('appointments').select('id, pet_id, scheduled_at, duration_minutes, status, reason, staff!appointments_vet_id_fkey(profiles:profiles!staff_profile_id_fkey(first_name, last_name))').eq('organization_id', orgCtx.organizationId).in('pet_id', petIds).gte('scheduled_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString()).order('scheduled_at', { ascending: true }) : { data: [] },
           ]);
           const petAppts2 = (apRes.data || []) as any[];
           const pets = (c.pets as any[] || []).map((p: any, idx: number) => ({
@@ -697,7 +697,7 @@ export default function ClientDetailPage() {
     const { organizationId } = await getOrgContext();
     const { data } = await db
       .from('pet_notes')
-      .select('id, type, content, created_at, author:staff!pet_notes_author_org_fkey(role, profiles:profiles!staff_profile_org_fkey(first_name, last_name))')
+      .select('id, type, content, created_at, author:staff!pet_notes_author_id_fkey(role, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
       .eq('pet_id', petDbId)
       .eq('organization_id', organizationId)
       .order('created_at', { ascending: false });
@@ -720,7 +720,7 @@ export default function ClientDetailPage() {
     // Fetch appointments
     const { data } = await db
       .from('appointments')
-      .select('id, scheduled_at, duration_minutes, status, type, reason, notes, visit_started_at, checkout_done_at, staff:staff!appointments_vet_org_fkey(profiles:profiles!staff_profile_org_fkey(first_name, last_name)), services:services!appointments_service_org_fkey(name)')
+      .select('id, scheduled_at, duration_minutes, status, type, reason, notes, visit_started_at, checkout_done_at, staff:staff!appointments_vet_id_fkey(profiles:profiles!staff_profile_id_fkey(first_name, last_name)), services:services!appointments_service_id_fkey(name)')
       .eq('pet_id', petDbId)
       .eq('organization_id', organizationId)
       .eq('status', 'Completed')
@@ -777,8 +777,8 @@ export default function ClientDetailPage() {
       .select(`
         id, file_name, file_url, file_type, test_panel, notes,
         review_status, reviewed_at, created_at,
-        uploader:profiles!lab_results_uploaded_by_org_fkey(first_name, last_name),
-        reviewer:profiles!lab_results_reviewed_by_org_fkey(first_name, last_name)
+        uploader:profiles!lab_results_uploaded_by_fkey(first_name, last_name),
+        reviewer:profiles!lab_results_reviewed_by_fkey(first_name, last_name)
       `)
       .eq('pet_id', petDbId)
       .eq('organization_id', organizationId)
@@ -2648,7 +2648,7 @@ export function InjectionsTab({ petName, petDbId, onChanged, readOnly = false }:
     setLoading(true);
     const { data, error } = await db
       .from('vaccinations')
-      .select('id, vaccine_name, manufacturer, lot_number, serial_number, administered_date, expiry_date, next_due_date, injection_site, notes, staff:staff!vaccinations_administered_by_org_fkey(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name))')
+      .select('id, vaccine_name, manufacturer, lot_number, serial_number, administered_date, expiry_date, next_due_date, injection_site, notes, staff:staff!vaccinations_administered_by_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
       .eq('pet_id', petDbId)
       .order('administered_date', { ascending: false });
     if (error) {
@@ -3046,7 +3046,7 @@ export function XRayTab({ petName, petDbId, readOnly = false }: { petName: strin
       .from('imaging_studies')
       .select(`
         id, title, modality, region, study_date, findings, impression, status, radiologist, created_at, performed_by,
-        staff:staff!imaging_studies_performed_by_fkey(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name)),
+        staff:staff!imaging_studies_performed_by_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name)),
         files:imaging_study_files(id, file_url, storage_path, file_name, view_label, sort_order)
       `)
       .eq('pet_id', petDbId)
@@ -3805,7 +3805,7 @@ export function SurgeryTab({ petName, petDbId, readOnly = false }: { petName: st
       .select(`
         id, name, surgery_date, duration_minutes, assistant, anesthesia,
         pre_op, procedure_notes, post_op, complications, follow_up, status, surgeon_id,
-        staff:staff!surgeries_surgeon_id_fkey(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name))
+        staff:staff!surgeries_surgeon_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))
       `)
       .eq('pet_id', petDbId)
       .order('surgery_date', { ascending: false });
@@ -3823,7 +3823,7 @@ export function SurgeryTab({ petName, petDbId, readOnly = false }: { petName: st
       const { organizationId } = await getOrgContext();
       const { data } = await db
         .from('staff')
-        .select('id, profiles:profiles!staff_profile_org_fkey(first_name, last_name), role')
+        .select('id, profiles:profiles!staff_profile_id_fkey(first_name, last_name), role')
         .eq('organization_id', organizationId)
         .in('role', ['veterinarian', 'senior_veterinarian', 'specialist', 'lead_vet_tech']);
       const list = ((data || []) as any[]).map(row => ({
@@ -4985,7 +4985,7 @@ export function PlanTab({ petName, petDbId, readOnly = false }: { petName: strin
       .from('treatment_plans')
       .select(`
         id, title, status, last_review_date, next_review_date, notes, created_at, updated_at, created_by,
-        staff:staff!treatment_plans_created_by_fkey(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name))
+        staff:staff!treatment_plans_created_by_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))
       `)
       .eq('pet_id', petDbId)
       .order('created_at', { ascending: false });
@@ -7203,7 +7203,7 @@ export function PetReportsTab({
         id, pet_id, title, summary, trigger_source, sections_count,
         file_url, storage_path, file_name, file_size, generated_by, created_at,
         generator:staff!pet_reports_generated_by_fkey(
-          profiles:profiles!staff_profile_org_fkey(first_name, last_name)
+          profiles:profiles!staff_profile_id_fkey(first_name, last_name)
         )
       `)
       .eq('pet_id', petDbId)
@@ -7247,7 +7247,7 @@ export function PetReportsTab({
       if (user?.id) {
         const { data: staffRow } = await db
           .from('staff')
-          .select('id, profiles:profiles!staff_profile_org_fkey(first_name, last_name)')
+          .select('id, profiles:profiles!staff_profile_id_fkey(first_name, last_name)')
           .eq('organization_id', organizationId)
           .eq('profile_id', user.id)
           .maybeSingle();

@@ -157,7 +157,7 @@ export interface UseClientsOptions {
   orderAscending?: boolean
 }
 
-const CLIENT_SELECT = 'id, first_name, last_name, email, phone, address, city, state, zip, country, notes, portal_status, health_status, created_at, pets(id, name, species, breed, photo_url, assigned_vet_id, assigned_vet:staff!pets_assigned_vet_org_fkey(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name)))';
+const CLIENT_SELECT = 'id, first_name, last_name, email, phone, address, city, state, zip, country, notes, portal_status, health_status, created_at, pets(id, name, species, breed, photo_url, assigned_vet_id, assigned_vet:staff!pets_assigned_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name)))';
 
 export function useClients(options: UseClientsOptions = {}) {
   const { pageSize, orderColumn = 'created_at', orderAscending = false } = options
@@ -262,7 +262,7 @@ export function useClients(options: UseClientsOptions = {}) {
     const { data, error: err } = await db
       .from('clients')
       .insert([{ organization_id: organizationId, ...values }])
-      .select('id, first_name, last_name, email, phone, address, city, state, zip, country, notes, portal_status, health_status, created_at, pets(id, name, species, breed, photo_url, assigned_vet_id, assigned_vet:staff!pets_assigned_vet_org_fkey(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name)))')
+      .select('id, first_name, last_name, email, phone, address, city, state, zip, country, notes, portal_status, health_status, created_at, pets(id, name, species, breed, photo_url, assigned_vet_id, assigned_vet:staff!pets_assigned_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name)))')
       .single()
     if (!err && data) {
       setClients(prev => [data as ClientRow, ...prev])

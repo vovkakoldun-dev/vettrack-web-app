@@ -374,7 +374,7 @@ export default function AdminMyPortalPage() {
         // Profile
         db.from('profiles').select('id, first_name, last_name, email, phone, avatar_url, role').eq('id', user.id).single(),
         // Tasks
-        db.from('tasks').select('id, type, priority, status, due_date, doctor_notes, pet:pets!tasks_pet_org_fkey(name), client:clients!tasks_client_org_fkey(first_name, last_name)').eq('organization_id', organizationId).order('due_date', { ascending: true }).limit(10),
+        db.from('tasks').select('id, type, priority, status, due_date, doctor_notes, pet:pets!tasks_pet_id_fkey(name), client:clients!tasks_client_id_fkey(first_name, last_name)').eq('organization_id', organizationId).order('due_date', { ascending: true }).limit(10),
         // Today's check-ins
         db.from('appointments').select('id, scheduled_at, status, reason, pets!inner(name, clients!inner(first_name, last_name)), services(name)').eq('organization_id', organizationId).gte('scheduled_at', `${today}T00:00:00`).lte('scheduled_at', `${today}T23:59:59`).order('scheduled_at', { ascending: true }).limit(8),
         // Recent payments
@@ -532,7 +532,7 @@ export default function AdminMyPortalPage() {
       const { organizationId } = await getOrgContext();
       const { data } = await db
         .from('tasks')
-        .select('id, type, priority, status, due_date, doctor_notes, pet:pets!tasks_pet_org_fkey(name), client:clients!tasks_client_org_fkey(first_name, last_name)')
+        .select('id, type, priority, status, due_date, doctor_notes, pet:pets!tasks_pet_id_fkey(name), client:clients!tasks_client_id_fkey(first_name, last_name)')
         .eq('organization_id', organizationId)
         .order('due_date', { ascending: true })
         .limit(10);

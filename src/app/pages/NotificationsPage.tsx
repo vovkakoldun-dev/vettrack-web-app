@@ -121,7 +121,7 @@ async function fetchNotificationsFromSupabase(db: any, isAdmin: boolean, userId?
   ] = await Promise.all([
     (() => {
       let q = db.from('appointments')
-        .select('id, scheduled_at, duration_minutes, status, reason, pets(id, name, species, breed), clients(id, first_name, last_name), staff(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name))')
+        .select('id, scheduled_at, duration_minutes, status, reason, pets(id, name, species, breed), clients(id, first_name, last_name), staff(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
         .eq('organization_id', organizationId)
         .gte('scheduled_at', `${today}T00:00:00`).lte('scheduled_at', `${today}T23:59:59`)
         .in('status', ['Scheduled', 'Confirmed']).order('scheduled_at', { ascending: true });
@@ -147,7 +147,7 @@ async function fetchNotificationsFromSupabase(db: any, isAdmin: boolean, userId?
       return q;
     })(),
     db.from('vaccinations')
-      .select('id, vaccine_name, next_due_date, administered_date, pets!inner(id, name, species, breed, organization_id, client_id, clients:clients!pets_client_org_fkey(id, first_name, last_name, phone))')
+      .select('id, vaccine_name, next_due_date, administered_date, pets!inner(id, name, species, breed, organization_id, client_id, clients:clients!pets_client_id_fkey(id, first_name, last_name, phone))')
       .eq('pets.organization_id', organizationId)
       .not('next_due_date', 'is', null).lte('next_due_date', thirtyDaysFromNowStr)
       .order('next_due_date', { ascending: true }).limit(50),

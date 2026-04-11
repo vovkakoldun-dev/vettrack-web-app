@@ -341,7 +341,7 @@ export default function AdminChatPage() {
     const [convMetaRes, allPartsRes, myPartsRes, lastMsgsRes, unreadRes] = await Promise.all([
       db.from('conversations').select('id, type, title').eq('organization_id', organizationId).in('id', convIds),
       db.from('conversation_participants')
-        .select('conversation_id, profile_id, last_read_at, profiles:profiles!conv_participants_profile_org_fkey(id, first_name, last_name, role, avatar_url)')
+        .select('conversation_id, profile_id, last_read_at, profiles:profiles!conv_participants_profile_id_fkey(id, first_name, last_name, role, avatar_url)')
         .eq('organization_id', organizationId).in('conversation_id', convIds).neq('profile_id', user.id),
       db.from('conversation_participants')
         .select('conversation_id, last_read_at')
@@ -439,7 +439,7 @@ export default function AdminChatPage() {
     setLoadingMsgs(true);
     const { data } = await db
       .from('messages')
-      .select('id, content, sender_id, image_url, file_url, file_name, file_size, forwarded_from_name, created_at, sender:profiles!messages_sender_org_fkey(first_name, last_name, role)')
+      .select('id, content, sender_id, image_url, file_url, file_name, file_size, forwarded_from_name, created_at, sender:profiles!messages_sender_id_fkey(first_name, last_name, role)')
       .eq('organization_id', organizationId)
       .eq('conversation_id', convId)
       .order('created_at', { ascending: true });

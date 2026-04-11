@@ -349,7 +349,7 @@ export default function SuperAdminChatPage() {
     const [convMetaRes, allPartsRes, myPartsRes, lastMsgsRes, unreadRes] = await Promise.all([
       db.from('conversations').select('id, type, title').eq('organization_id', organizationId).in('id', convIds),
       db.from('conversation_participants')
-        .select('conversation_id, profile_id, last_read_at, profiles:profiles!conv_participants_profile_org_fkey(id, first_name, last_name, role, avatar_url)')
+        .select('conversation_id, profile_id, last_read_at, profiles:profiles!conv_participants_profile_id_fkey(id, first_name, last_name, role, avatar_url)')
         .eq('organization_id', organizationId).in('conversation_id', convIds).neq('profile_id', saProfileId),
       db.from('conversation_participants')
         .select('conversation_id, last_read_at')

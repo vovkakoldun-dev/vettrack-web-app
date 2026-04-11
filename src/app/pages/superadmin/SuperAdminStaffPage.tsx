@@ -757,7 +757,7 @@ export default function SuperAdminStaffPage() {
     const { organizationId } = await getOrgContext();
     const { data, error } = await db
       .from('staff')
-      .select('*, profiles:profiles!staff_profile_org_fkey(first_name, last_name, email, phone, avatar_url)')
+      .select('*, profiles:profiles!staff_profile_id_fkey(first_name, last_name, email, phone, avatar_url)')
       .eq('organization_id', organizationId)
       .order('first_name');
 

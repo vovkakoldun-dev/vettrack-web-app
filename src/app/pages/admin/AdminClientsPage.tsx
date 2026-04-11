@@ -121,7 +121,7 @@ export default function AdminClientsPage() {
         const { organizationId } = await getOrgContext();
         const { data } = await db
           .from('staff')
-          .select('id, profiles:profiles!staff_profile_org_fkey(first_name, last_name)')
+          .select('id, profiles:profiles!staff_profile_id_fkey(first_name, last_name)')
           .eq('organization_id', organizationId)
           .eq('role', 'veterinarian');
         if (data) {
@@ -375,7 +375,7 @@ export default function AdminClientsPage() {
     const { data, error } = await db
       .from('clients')
       .select(
-        'id, first_name, last_name, email, phone, health_status, pets(id, name, species, breed, assigned_vet_id, assigned_vet:staff!pets_assigned_vet_org_fkey(profiles:profiles!staff_profile_org_fkey(first_name, last_name)))'
+        'id, first_name, last_name, email, phone, health_status, pets(id, name, species, breed, assigned_vet_id, assigned_vet:staff!pets_assigned_vet_id_fkey(profiles:profiles!staff_profile_id_fkey(first_name, last_name)))'
       )
       .eq('organization_id', organizationId);
     if (error || !data) {

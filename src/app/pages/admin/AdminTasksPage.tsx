@@ -64,11 +64,11 @@ interface Task {
 const TASKS_SELECT = `
   id, type, priority, status, due_date, due_time,
   visit_date, doctor_notes, completed_at, tags, snoozed_until, assigned_to_id, completed_by_id,
-  pet:pets!tasks_pet_org_fkey(id, name, species),
-  client:clients!tasks_client_org_fkey(id, first_name, last_name, phone),
-  assignedByProfile:profiles!tasks_assigned_by_org_fkey(first_name, last_name),
-  assignedToProfile:profiles!tasks_assigned_to_org_fkey(first_name, last_name),
-  completedByProfile:profiles!tasks_completed_by_org_fkey(first_name, last_name)
+  pet:pets!tasks_pet_id_fkey(id, name, species),
+  client:clients!tasks_client_id_fkey(id, first_name, last_name, phone),
+  assignedByProfile:profiles!tasks_assigned_by_id_fkey(first_name, last_name),
+  assignedToProfile:profiles!tasks_assigned_to_id_fkey(first_name, last_name),
+  completedByProfile:profiles!tasks_completed_by_id_fkey(first_name, last_name)
 `;
 
 function mapRow(r: any): Task {
@@ -665,7 +665,7 @@ export default function AdminTasksPage() {
         const [petsRes, clientsRes, staffRes] = await Promise.all([
           db.from('pets').select('id, name, species, client_id').eq('organization_id', organizationId).eq('is_active', true).order('name'),
           db.from('clients').select('id, first_name, last_name').eq('organization_id', organizationId).order('last_name'),
-          db.from('staff').select('id, role, profile_id, profiles:profiles!staff_profile_org_fkey(first_name, last_name)').eq('organization_id', organizationId).in('role', ['veterinarian', 'senior_veterinarian', 'specialist']).eq('status', 'Active'),
+          db.from('staff').select('id, role, profile_id, profiles:profiles!staff_profile_id_fkey(first_name, last_name)').eq('organization_id', organizationId).in('role', ['veterinarian', 'senior_veterinarian', 'specialist']).eq('status', 'Active'),
         ]);
         if (petsRes.data) setPetsList(petsRes.data.map((p: any) => ({ id: p.id, name: p.name, species: p.species || '', clientId: p.client_id })));
         if (clientsRes.data) setClientsList(clientsRes.data.map((c: any) => ({ id: c.id, name: `${c.first_name} ${c.last_name}`.trim() })));

@@ -141,9 +141,9 @@ export default function LabPage() {
         id, file_name, file_url, file_type, test_panel, notes,
         review_status, reviewed_at, tested_at, created_at,
         pet_id,
-        pets!left(id, name, photo_url, client_id, assigned_vet_id, clients!left(id, first_name, last_name, email), vet:staff!pets_assigned_vet_org_fkey(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name))),
-        uploader:profiles!lab_results_uploaded_by_org_fkey(first_name, last_name),
-        reviewer:profiles!lab_results_reviewed_by_org_fkey(first_name, last_name)
+        pets!left(id, name, photo_url, client_id, assigned_vet_id, clients!left(id, first_name, last_name, email), vet:staff!pets_assigned_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))),
+        uploader:profiles!lab_results_uploaded_by_fkey(first_name, last_name),
+        reviewer:profiles!lab_results_reviewed_by_fkey(first_name, last_name)
       `)
       .eq('organization_id', organizationId)
       .not('file_url', 'is', null)
@@ -245,7 +245,7 @@ export default function LabPage() {
       const selectedPet = pets.find(p => p.id === uploadPetId);
       const { data: petRow } = await db
         .from('pets')
-        .select('assigned_vet_id, staff!pets_assigned_vet_org_fkey(id, profiles:profiles!staff_profile_org_fkey(first_name, last_name))')
+        .select('assigned_vet_id, staff!pets_assigned_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
         .eq('id', uploadPetId)
         .single();
 
