@@ -4,9 +4,13 @@ import {
   CalendarDays, CheckCircle2, DollarSign, MessageSquare,
   TrendingUp, Clock, MoreHorizontal, Search, X, Users, ArrowRight, ArrowUpRight, UserCheck,
   Receipt, CreditCard, Banknote, Terminal, Plus, Trash2, Pencil, Lock, ChevronRight, PawPrint,
+  Stethoscope, Scissors, DoorOpen, Microscope, Bed, Briefcase, Bath, Coffee, Sparkles, Building2, Loader2,
 } from 'lucide-react';
 import { useAppointmentStatus } from '../../context/AppointmentStatusContext';
 import { getOrgContext } from '../../hooks/useOrgContext';
+import { useTenantDb } from '../../context/TenantContext';
+import { Dialog, DialogContent } from '../../components/ui/dialog';
+import { Avatar, AvatarImage, AvatarFallback } from '../../components/ui/avatar';
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '../../components/ui/select';
@@ -128,7 +132,7 @@ function useGlobalSearch(query: string, debounceMs = 300) {
 
 // ─── Types ────────────────────────────────────────────────────
 
-type ApptStatus = 'Confirmed' | 'Patient Arrived' | 'Waiting for Doctor' | 'In Progress' | 'Ready for Billing' | 'Completed' | 'Cancelled' | 'Pending' | 'Late';
+type ApptStatus = 'Scheduled' | 'Confirmed' | 'Patient Arrived' | 'Waiting for Doctor' | 'In Progress' | 'Ready for Billing' | 'Completed' | 'Cancelled' | 'Pending' | 'No Show' | 'Late';
 type PaymentStatus = 'Paid' | 'Pending' | 'Overdue';
 
 // (Recent payments & unread messages are fetched from Supabase inside the component)
@@ -136,6 +140,7 @@ type PaymentStatus = 'Paid' | 'Pending' | 'Overdue';
 // ─── Status Badge ─────────────────────────────────────────────
 
 const STATUS_STYLES: Record<ApptStatus, { bg: string; color: string }> = {
+  'Scheduled':          { bg: '#06B6D415', color: '#06B6D4' },
   'Confirmed':          { bg: 'rgba(34,197,94,0.12)', color: '#22C55E' },
   'Patient Arrived':    { bg: 'rgba(34,197,94,0.12)', color: '#22C55E' },
   'Waiting for Doctor': { bg: '#F4A26115', color: '#D97706' },
@@ -144,6 +149,7 @@ const STATUS_STYLES: Record<ApptStatus, { bg: string; color: string }> = {
   'Completed':          { bg: '#6B728015', color: '#6B7280' },
   'Cancelled':          { bg: '#d4183d15', color: '#d4183d' },
   'Pending':            { bg: '#F4A26115', color: '#F4A261' },
+  'No Show':            { bg: '#64748B15', color: '#64748B' },
   'Late':               { bg: '#F9731615', color: '#F97316' },
 };
 
@@ -154,7 +160,7 @@ const PAYMENT_STYLES: Record<PaymentStatus, { bg: string; color: string }> = {
 };
 
 function StatusBadge({ status }: { status: ApptStatus }) {
-  const s = STATUS_STYLES[status];
+  const s = STATUS_STYLES[status] || STATUS_STYLES.Pending;
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center',
@@ -165,6 +171,43 @@ function StatusBadge({ status }: { status: ApptStatus }) {
       {status}
     </span>
   );
+}
+
+// ─── Floor-plan Room Types (mirrors AdminBookingsPage) ──────
+type RoomTypeKey =
+  | 'exam' | 'surgery' | 'reception' | 'lab' | 'kennel'
+  | 'office' | 'restroom' | 'lobby' | 'storage' | 'other';
+
+interface RoomTypeConfig {
+  label: string;
+  icon: React.ElementType;
+  color: string;
+  bg: string;
+}
+
+const ROOM_TYPES: Record<RoomTypeKey, RoomTypeConfig> = {
+  exam:      { label: 'Exam Room',  icon: Stethoscope, color: 'var(--brand-green-text)', bg: 'color-mix(in srgb, var(--brand-green-text) 18%, transparent)' },
+  surgery:   { label: 'Surgery',    icon: Scissors,    color: '#EC4899',                  bg: 'color-mix(in srgb, #EC4899 18%, transparent)' },
+  reception: { label: 'Reception',  icon: DoorOpen,    color: '#F4A261',                  bg: 'color-mix(in srgb, #F4A261 18%, transparent)' },
+  lab:       { label: 'Lab',        icon: Microscope,  color: '#8B5CF6',                  bg: 'color-mix(in srgb, #8B5CF6 18%, transparent)' },
+  kennel:    { label: 'Kennel',     icon: Bed,         color: '#06B6D4',                  bg: 'color-mix(in srgb, #06B6D4 18%, transparent)' },
+  office:    { label: 'Office',     icon: Briefcase,   color: '#3B82F6',                  bg: 'color-mix(in srgb, #3B82F6 18%, transparent)' },
+  restroom:  { label: 'Restroom',   icon: Bath,        color: '#6B7280',                  bg: 'color-mix(in srgb, #6B7280 22%, transparent)' },
+  lobby:     { label: 'Lobby',      icon: Coffee,      color: '#F59E0B',                  bg: 'color-mix(in srgb, #F59E0B 18%, transparent)' },
+  storage:   { label: 'Storage',    icon: Sparkles,    color: '#94A3B8',                  bg: 'color-mix(in srgb, #94A3B8 22%, transparent)' },
+  other:     { label: 'Other',      icon: Building2,   color: '#64748B',                  bg: 'color-mix(in srgb, #64748B 22%, transparent)' },
+};
+
+interface ClinicRoom {
+  id: string;
+  clinic_id: string;
+  name: string;
+  type: RoomTypeKey;
+  pos_x: number;
+  pos_y: number;
+  width: number;
+  height: number;
+  color: string | null;
 }
 
 // ─── Glow Card type (for GlowStatCard) ───────────────────────
@@ -518,8 +561,9 @@ export default function AdminDashboardPage() {
   const todayStr = useMemo(() => {
     const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   }, []);
-  const { appointments: supaApptsToday, updateStatus } = useAppointments(todayStr);
+  const { appointments: supaApptsToday, updateStatus, updateStatusWithRoom } = useAppointments(todayStr);
   const { clients: supaClients } = useClients();
+  const db = useTenantDb();
 
   // Map Supabase appointments → TODAY_SCHEDULE shape
   const TODAY_SCHEDULE = useMemo(() =>
@@ -691,7 +735,7 @@ export default function AdminDashboardPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
   const { results: searchResults, loading: searchLoading, totalResults } = useGlobalSearch(searchQuery);
-  const [arrivedToast, setArrivedToast] = useState<{ pet: string; vet: string } | null>(null);
+  const [arrivedToast, setArrivedToast] = useState<{ pet: string; vet: string; room?: string } | null>(null);
   const [billModal, setBillModal] = useState<{ id: number; pet: string; owner: string; service: string; vet: string } | null>(null);
   const [payMethod, setPayMethod] = useState<'card' | 'terminal' | 'cash'>('card');
   const [billPaid, setBillPaid] = useState<Set<number>>(new Set());
@@ -701,6 +745,59 @@ export default function AdminDashboardPage() {
   const [newItemPrice, setNewItemPrice] = useState('');
   const [serviceList, setServiceList] = useState<{ name: string; price: number }[]>([]);
   const [viewModal, setViewModal] = useState<(typeof TODAY_SCHEDULE)[0] | null>(null);
+
+  // ── Room selection dialog state ──────────────────────────────
+  const [clinicRooms, setClinicRooms] = useState<ClinicRoom[]>([]);
+  const [roomsLoading, setRoomsLoading] = useState(false);
+  const [roomSelectOpen, setRoomSelectOpen] = useState(false);
+  const [roomSelectAppt, setRoomSelectAppt] = useState<{ id: number; dbId: string; pet: string; owner: string; service: string; vet: string; time: string } | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        setRoomsLoading(true);
+        const { organizationId, clinicId } = await getOrgContext();
+        let q = db
+          .from('clinic_rooms')
+          .select('id, clinic_id, name, type, pos_x, pos_y, width, height, color')
+          .eq('organization_id', organizationId);
+        if (clinicId) q = q.eq('clinic_id', clinicId);
+        const { data, error } = await q.order('sort_order', { ascending: true });
+        if (!alive) return;
+        if (error) {
+          console.error('[dashboard] clinic_rooms load failed:', error.message);
+          setClinicRooms([]);
+        } else {
+          setClinicRooms((data ?? []) as ClinicRoom[]);
+        }
+      } catch (e) {
+        if (alive) setClinicRooms([]);
+      } finally {
+        if (alive) setRoomsLoading(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, [db]);
+
+  // Busy room map: rooms currently occupied by In Progress appointments
+  const busyRoomMap = useMemo(() => {
+    const map = new Map<string, { petName: string; ownerName: string; reason: 'in_progress' }>();
+    const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+    supaApptsToday.forEach((a) => {
+      if (!a.room_id) return;
+      if (a.status === 'In Progress') {
+        // Skip stale appointments whose end time has passed
+        const start = new Date(a.scheduled_at);
+        const endMin = start.getHours() * 60 + start.getMinutes() + (a.duration_minutes ?? 30);
+        if (endMin < nowMin) return;
+        const petName = a.pets?.name ?? '—';
+        const ownerName = a.clients ? `${a.clients.first_name} ${a.clients.last_name}` : '—';
+        map.set(a.room_id, { petName, ownerName, reason: 'in_progress' });
+      }
+    });
+    return map;
+  }, [supaApptsToday]);
 
   // ── Fetch services from Supabase (same pattern as CheckoutPage) ──
   useEffect(() => {
@@ -850,17 +947,22 @@ export default function AdminDashboardPage() {
     return nowMinutes > apptMinutes;
   }
 
-  async function handleCheckIn(id: number) {
+  function handleCheckIn(id: number) {
     const appt = TODAY_SCHEDULE.find(a => a.id === id);
     if (!appt) return;
-    setCheckedIn(prev => new Set([...prev, id]));
-    setApptStatus(id, 'Waiting for Doctor');
-    // Persist to database (enum: 'In Progress' is the closest valid status for check-in)
-    await updateStatus(appt.dbId, 'In Progress');
-    if (appt) {
-      setArrivedToast({ pet: appt.pet, vet: appt.vet });
-      setTimeout(() => setArrivedToast(null), 4000);
-    }
+    setRoomSelectAppt({ id: appt.id, dbId: appt.dbId, pet: appt.pet, owner: appt.owner, service: appt.service, vet: appt.vet, time: appt.time });
+    setRoomSelectOpen(true);
+  }
+
+  async function handleRoomConfirm(room: { id: string; name: string }) {
+    if (!roomSelectAppt) return;
+    setRoomSelectOpen(false);
+    setCheckedIn(prev => new Set([...prev, roomSelectAppt.id]));
+    setApptStatus(roomSelectAppt.id, 'Waiting for Doctor');
+    await updateStatusWithRoom(roomSelectAppt.dbId, 'In Progress', room.name, undefined, room.id);
+    setArrivedToast({ pet: roomSelectAppt.pet, vet: roomSelectAppt.vet, room: room.name });
+    setTimeout(() => setArrivedToast(null), 5000);
+    setRoomSelectAppt(null);
   }
 
   // ── Search ──────────────────────────────────────────────────
@@ -1782,6 +1884,291 @@ export default function AdminDashboardPage() {
         );
       })()}
 
+      {/* ─── Room Selection Dialog ──────────────────── */}
+      <Dialog open={roomSelectOpen} onOpenChange={(v) => { if (!v) { setRoomSelectOpen(false); setRoomSelectAppt(null); } }}>
+        <DialogContent
+          className="p-0 overflow-hidden gap-0 [&>button]:top-[14px] [&>button]:right-[14px] [&>button]:w-8 [&>button]:h-8 [&>button]:flex [&>button]:items-center [&>button]:justify-center [&>button]:rounded-[8px] [&>button]:!bg-[var(--surface-white)] [&>button]:!text-[var(--text-secondary)] [&>button]:!opacity-100 [&>button]:hover:!bg-[var(--surface-elevated)] [&>button]:!border [&>button]:!border-[var(--border-color)] [&>button]:transition-colors [&>button>svg]:w-4 [&>button>svg]:h-4"
+          style={{
+            maxWidth: 720,
+            width: '95vw',
+            maxHeight: '92vh',
+            display: 'flex',
+            flexDirection: 'column',
+            boxShadow: '0 0 0 1px color-mix(in srgb, var(--brand-green-text) 15%, transparent), 0 8px 32px rgba(0,0,0,0.22)',
+          }}
+        >
+          {roomSelectAppt && (() => {
+            const cols = clinicRooms.reduce((mx, r) => Math.max(mx, r.pos_x + r.width), 0);
+            const rowsCount = clinicRooms.reduce((mx, r) => Math.max(mx, r.pos_y + r.height), 0);
+            const CANVAS_W = 640;
+            const cellPx = cols > 0 ? Math.max(14, Math.min(28, Math.floor(CANVAS_W / Math.max(cols, 12)))) : 22;
+            const canvasW = (cols || 12) * cellPx;
+            const canvasH = (rowsCount || 8) * cellPx;
+            const availableCount = clinicRooms.filter((r) => !busyRoomMap.has(r.id)).length;
+
+            return (
+              <>
+                {/* Header */}
+                <div
+                  style={{
+                    padding: '16px 22px',
+                    borderBottom: '1px solid var(--border-color)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 14,
+                    background: 'linear-gradient(135deg, color-mix(in srgb, var(--brand-green-text) 10%, transparent), transparent 60%)',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 38, height: 38, borderRadius: 10,
+                      backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 14%, transparent)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                    }}
+                  >
+                    <Building2 style={{ width: 18, height: 18, color: 'var(--brand-green-text)' }} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
+                      Assign a Room
+                    </p>
+                    <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '2px 0 0' }}>
+                      Pick any free room — it will be occupied for the visit duration.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Patient strip */}
+                <div
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    padding: '14px 22px',
+                    backgroundColor: 'var(--surface-elevated)',
+                    borderBottom: '1px solid var(--border-color)',
+                  }}
+                >
+                  <Avatar className="w-11 h-11">
+                    <AvatarFallback>{(roomSelectAppt.pet || '').slice(0, 2)}</AvatarFallback>
+                  </Avatar>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
+                      {roomSelectAppt.pet}
+                    </p>
+                    <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '2px 0 0' }}>
+                      {roomSelectAppt.owner} &middot; {roomSelectAppt.service}
+                    </p>
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      padding: '5px 11px',
+                      borderRadius: 9999,
+                      backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)',
+                      border: '1px solid color-mix(in srgb, var(--brand-green-text) 30%, transparent)',
+                    }}
+                  >
+                    <Clock style={{ width: 12, height: 12, color: 'var(--brand-green-text)' }} />
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand-green-text)' }}>
+                      {roomSelectAppt.time}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Body */}
+                <div style={{ padding: '18px 22px 8px', overflowY: 'auto' }}>
+                  {/* Legend */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                    <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>
+                      Floor Plan
+                    </p>
+                    <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-secondary)' }}>
+                        <span style={{ width: 9, height: 9, borderRadius: 2, backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 30%, transparent)', border: '1px solid var(--brand-green-text)' }} />
+                        Available
+                      </span>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-secondary)' }}>
+                        <span style={{ width: 9, height: 9, borderRadius: 2, backgroundColor: 'color-mix(in srgb, #d4183d 22%, transparent)', border: '1px solid #d4183d' }} />
+                        Busy
+                      </span>
+                    </div>
+                  </div>
+
+                  {roomsLoading ? (
+                    <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                      <Loader2 className="animate-spin" style={{ width: 18, height: 18, margin: '0 auto 8px' }} />
+                      <p style={{ fontSize: 12, margin: 0 }}>Loading rooms...</p>
+                    </div>
+                  ) : clinicRooms.length === 0 ? (
+                    <div style={{
+                      padding: '32px 16px', textAlign: 'center', color: 'var(--text-secondary)',
+                      border: '1.5px dashed var(--border-color)', borderRadius: 12,
+                    }}>
+                      <Building2 style={{ width: 32, height: 32, opacity: 0.4, margin: '0 auto 8px' }} />
+                      <p style={{ fontSize: 13, fontWeight: 600, margin: 0 }}>No rooms configured yet</p>
+                      <p style={{ fontSize: 11, margin: '4px 0 0' }}>
+                        Ask a SuperAdmin to set up the floor plan in <b>Clinics &rarr; Floor Plan Builder</b>.
+                      </p>
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        position: 'relative',
+                        width: canvasW,
+                        height: canvasH,
+                        margin: '0 auto',
+                        backgroundColor: 'var(--surface-white)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: 10,
+                        backgroundImage: `
+                          linear-gradient(to right, color-mix(in srgb, var(--border-color) 50%, transparent) 1px, transparent 1px),
+                          linear-gradient(to bottom, color-mix(in srgb, var(--border-color) 50%, transparent) 1px, transparent 1px)
+                        `,
+                        backgroundSize: `${cellPx}px ${cellPx}px`,
+                      }}
+                    >
+                      {clinicRooms.map((room) => {
+                        const cfg = ROOM_TYPES[room.type] ?? ROOM_TYPES.other;
+                        const Icon = cfg.icon;
+                        const busy = busyRoomMap.get(room.id);
+                        const isBusy = !!busy;
+                        const isAssignable = !['restroom', 'storage', 'lobby', 'office', 'reception'].includes(room.type);
+                        const disabled = isBusy || !isAssignable;
+                        const baseColor = disabled ? '#94A3B8' : cfg.color;
+                        const baseBg = isBusy
+                          ? 'color-mix(in srgb, #d4183d 12%, transparent)'
+                          : disabled
+                            ? 'color-mix(in srgb, #94A3B8 12%, transparent)'
+                            : (room.color || cfg.bg);
+                        const borderColor = isBusy
+                          ? '#d4183d'
+                          : disabled
+                            ? 'color-mix(in srgb, #94A3B8 50%, transparent)'
+                            : 'color-mix(in srgb, ' + cfg.color + ' 65%, transparent)';
+
+                        return (
+                          <button
+                            key={room.id}
+                            type="button"
+                            disabled={disabled}
+                            onClick={() => handleRoomConfirm({ id: room.id, name: room.name })}
+                            title={
+                              isBusy
+                                ? `In Use: ${busy?.petName}`
+                                : !isAssignable
+                                  ? `${cfg.label} — not bookable`
+                                  : `Assign ${room.name}`
+                            }
+                            style={{
+                              position: 'absolute',
+                              left: room.pos_x * cellPx,
+                              top: room.pos_y * cellPx,
+                              width: room.width * cellPx,
+                              height: room.height * cellPx,
+                              backgroundColor: baseBg,
+                              border: `2px solid ${borderColor}`,
+                              borderRadius: 6,
+                              cursor: disabled ? 'not-allowed' : 'pointer',
+                              padding: '4px 6px',
+                              display: 'flex', flexDirection: 'column',
+                              alignItems: 'flex-start', justifyContent: 'space-between',
+                              overflow: 'hidden',
+                              transition: 'transform 0.12s, box-shadow 0.12s',
+                              boxShadow: 'none',
+                              opacity: disabled && !isBusy ? 0.55 : 1,
+                            }}
+                            onMouseEnter={(e) => {
+                              if (disabled) return;
+                              e.currentTarget.style.boxShadow = `0 0 0 3px color-mix(in srgb, ${cfg.color} 25%, transparent)`;
+                              e.currentTarget.style.transform = 'translateY(-1px)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.boxShadow = 'none';
+                              e.currentTarget.style.transform = 'none';
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, width: '100%' }}>
+                              <Icon style={{ width: 11, height: 11, color: baseColor, flexShrink: 0 }} />
+                              <span
+                                style={{
+                                  fontSize: 10,
+                                  fontWeight: 700,
+                                  color: 'var(--text-primary)',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                  lineHeight: 1.1,
+                                }}
+                              >
+                                {room.name}
+                              </span>
+                            </div>
+                            {isBusy ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 1, width: '100%' }}>
+                                <span style={{ fontSize: 9, fontWeight: 700, color: '#d4183d', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: 1.1 }}>
+                                  In Use
+                                </span>
+                                <span style={{ fontSize: 9, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.1 }}>
+                                  {busy?.petName}
+                                </span>
+                              </div>
+                            ) : isAssignable ? (
+                              <span style={{ fontSize: 9, fontWeight: 700, color: cfg.color, textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: 1.1 }}>
+                                Free
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em', lineHeight: 1.1 }}>
+                                {cfg.label}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Footer */}
+                <div
+                  style={{
+                    padding: '12px 22px 16px',
+                    borderTop: '1px solid var(--border-color)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    flexWrap: 'wrap',
+                    backgroundColor: 'var(--surface-elevated)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--text-secondary)' }}>
+                    <CheckCircle2 style={{ width: 13, height: 13, color: 'var(--brand-green-text)' }} />
+                    <span>
+                      <b style={{ color: 'var(--text-primary)' }}>{availableCount}</b> of <b style={{ color: 'var(--text-primary)' }}>{clinicRooms.length}</b> rooms available
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setRoomSelectOpen(false); setRoomSelectAppt(null); }}
+                    style={{
+                      padding: '8px 16px',
+                      borderRadius: 8,
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'var(--surface-white)',
+                      color: 'var(--text-primary)',
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+
       {/* ─── Patient Arrived Toast ──────────────────── */}
       {arrivedToast && (
         <div
@@ -1803,7 +2190,7 @@ export default function AdminDashboardPage() {
             <div style={{ flex: 1, minWidth: 0 }}>
               <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 3 }}>Waiting for Doctor</p>
               <p style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                {arrivedToast.pet} is waiting — {arrivedToast.vet} has been notified.
+                {arrivedToast.pet} assigned to {arrivedToast.room ?? 'a room'} — {arrivedToast.vet} has been notified.
               </p>
             </div>
           </div>

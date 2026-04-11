@@ -9,6 +9,7 @@ import {
   ChevronLeft, ChevronRight, ChevronUp, ChevronDown, LayoutList, LayoutGrid, CalendarDays,
   Pencil, Trash2, Bell, LogIn, Stethoscope, Play,
   ClipboardList, DoorOpen, Camera, Star,
+  Scissors, Microscope, Bed, Briefcase, Bath, Coffee, Sparkles, Building2, Loader2,
 } from 'lucide-react';
 import { useAppointments } from '../hooks/useAppointments';
 import type { AppointmentRow } from '../hooks/useAppointments';
@@ -42,7 +43,7 @@ function adaptAppt(a: AppointmentRow): DisplayAppt {
     if (h === 0) h = 12;
     return `${h}:${m.toString().padStart(2, '0')} ${ampm}`;
   };
-  const validStatuses = ['Confirmed', 'Pending', 'Completed', 'Cancelled', 'In Progress'];
+  const validStatuses = ['Scheduled', 'Confirmed', 'Pending', 'Completed', 'Cancelled', 'In Progress', 'No Show'];
   const y = start.getFullYear();
   const mo = (start.getMonth() + 1).toString().padStart(2, '0');
   const da = start.getDate().toString().padStart(2, '0');
@@ -83,11 +84,13 @@ import { Calendar } from '../components/ui/calendar';
 // ─── Status Styles ───────────────────────────────────────────
 
 const statusStyles: Record<string, { bg: string; text: string; icon: typeof CheckCircle2 }> = {
+  Scheduled: { bg: '#06B6D420', text: '#06B6D4', icon: CalendarIcon },
   Confirmed: { bg: '#74C69D20', text: 'var(--brand-green-text)', icon: CheckCircle2 },
   Pending: { bg: '#F4A26120', text: '#F4A261', icon: AlertCircle },
   Completed: { bg: '#6B728020', text: 'var(--text-secondary)', icon: CheckCircle2 },
   Cancelled: { bg: '#d4183d20', text: '#d4183d', icon: XCircle },
   'In Progress': { bg: '#3B82F620', text: '#3B82F6', icon: Stethoscope },
+  'No Show': { bg: '#64748B20', text: '#64748B', icon: XCircle },
 };
 
 const serviceColors: Record<string, string> = {
@@ -111,6 +114,29 @@ const serviceColors: Record<string, string> = {
   'Emergency Triage & Stabilization': '#d4183d',
   Other: 'var(--text-secondary)',
 };
+
+// ─── Floor-plan Room Types ──────────────────────────────────
+type RoomTypeKey =
+  | 'exam' | 'surgery' | 'reception' | 'lab' | 'kennel'
+  | 'office' | 'restroom' | 'lobby' | 'storage' | 'other';
+
+const ROOM_TYPES: Record<RoomTypeKey, { label: string; icon: React.ElementType; color: string; bg: string }> = {
+  exam:      { label: 'Exam Room',  icon: Stethoscope, color: 'var(--brand-green-text)', bg: 'color-mix(in srgb, var(--brand-green-text) 18%, transparent)' },
+  surgery:   { label: 'Surgery',    icon: Scissors,    color: '#EC4899',                  bg: 'color-mix(in srgb, #EC4899 18%, transparent)' },
+  reception: { label: 'Reception',  icon: DoorOpen,    color: '#F4A261',                  bg: 'color-mix(in srgb, #F4A261 18%, transparent)' },
+  lab:       { label: 'Lab',        icon: Microscope,  color: '#8B5CF6',                  bg: 'color-mix(in srgb, #8B5CF6 18%, transparent)' },
+  kennel:    { label: 'Kennel',     icon: Bed,         color: '#06B6D4',                  bg: 'color-mix(in srgb, #06B6D4 18%, transparent)' },
+  office:    { label: 'Office',     icon: Briefcase,   color: '#3B82F6',                  bg: 'color-mix(in srgb, #3B82F6 18%, transparent)' },
+  restroom:  { label: 'Restroom',   icon: Bath,        color: '#6B7280',                  bg: 'color-mix(in srgb, #6B7280 22%, transparent)' },
+  lobby:     { label: 'Lobby',      icon: Coffee,      color: '#F59E0B',                  bg: 'color-mix(in srgb, #F59E0B 18%, transparent)' },
+  storage:   { label: 'Storage',    icon: Sparkles,    color: '#94A3B8',                  bg: 'color-mix(in srgb, #94A3B8 22%, transparent)' },
+  other:     { label: 'Other',      icon: Building2,   color: '#64748B',                  bg: 'color-mix(in srgb, #64748B 22%, transparent)' },
+};
+
+interface ClinicRoom {
+  id: string; clinic_id: string; name: string; type: RoomTypeKey;
+  pos_x: number; pos_y: number; width: number; height: number; color: string | null;
+}
 
 // ─── Helpers ─────────────────────────────────────────────────
 
@@ -229,6 +255,8 @@ export default function AppointmentsPage() {
   const [editNotes, setEditNotes] = useState('');
   const [roomInfoOpen, setRoomInfoOpen] = useState(false);
   const [roomInfoAppt, setRoomInfoAppt] = useState<DisplayAppt | null>(null);
+  const [clinicRooms, setClinicRooms] = useState<ClinicRoom[]>([]);
+  const [roomsLoading, setRoomsLoading] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -294,6 +322,22 @@ export default function AppointmentsPage() {
       } catch {}
     })();
   }, []);
+
+  // ── Load clinic rooms for floor plan in room info dialog ──
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        setRoomsLoading(true);
+        const { organizationId, clinicId } = await getOrgContext();
+        let q = db.from('clinic_rooms').select('id, clinic_id, name, type, pos_x, pos_y, width, height, color').eq('organization_id', organizationId);
+        if (clinicId) q = q.eq('clinic_id', clinicId);
+        const { data } = await q.order('sort_order', { ascending: true });
+        if (alive) setClinicRooms((data ?? []) as ClinicRoom[]);
+      } catch {} finally { if (alive) setRoomsLoading(false); }
+    })();
+    return () => { alive = false; };
+  }, [db]);
 
   // ── Auto-open appointment detail from dashboard navigation ──
   useEffect(() => {
@@ -513,24 +557,13 @@ export default function AppointmentsPage() {
   // stops card's onClick propagation and either opens room info or goes to visit.
   const handleStartVisitFromCard = (appt: DisplayAppt, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (appt.status === 'In Progress') {
-      // Already in progress — jump straight to the visit page without changing status
-      startVisit({
-        apptId: appt.id,
-        petName: appt.petName,
-        petImage: appt.petImage,
-        ownerName: appt.ownerName,
-        service: appt.service,
-        durationMinutes: parseInt(appt.duration) || 30,
-      });
-      navigate(`/appointments/${appt.id}/visit`);
-      return;
-    }
+    // Show room info dialog so doctor knows which room to go to
     if (appt.room) {
       setRoomInfoAppt(appt);
       setRoomInfoOpen(true);
       return;
     }
+    // No room assigned — go directly to visit
     proceedToVisit(appt);
   };
 
@@ -859,7 +892,7 @@ export default function AppointmentsPage() {
                   return (
                     <>
                       {visibleItems.map((appt, idx) => {
-                        const s = statusStyles[appt.status];
+                        const s = statusStyles[appt.status] || statusStyles.Pending;
                         const StatusIcon = s.icon;
                         const serviceColor = serviceColors[appt.service] || serviceColors.Other;
                         const showDateHeader = showAllDates && (idx === 0 || filteredAppointments[idx - 1].date !== appt.date);
@@ -931,7 +964,7 @@ export default function AppointmentsPage() {
                                 <StatusIcon className="w-3 h-3" />
                                 {appt.status}
                               </span>
-                              {currentUserId && appt.vetId === currentUserId && appt.status !== 'Completed' && appt.status !== 'Cancelled' && (
+                              {currentUserId && appt.vetId === currentUserId && appt.status === 'In Progress' && (
                                 <button
                                   type="button"
                                   onClick={(e) => handleStartVisitFromCard(appt, e)}
@@ -947,8 +980,24 @@ export default function AppointmentsPage() {
                                   }}
                                 >
                                   <Play className="w-3 h-3" style={{ fill: 'currentColor' }} />
-                                  {appt.status === 'In Progress' ? 'Resume Visit' : 'Start Visit'}
+                                  {appt.room ? 'Start Visit' : 'Resume Visit'}
                                 </button>
+                              )}
+                              {currentUserId && appt.vetId === currentUserId && appt.status === 'In Progress' && appt.room && (
+                                <span
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 flex-shrink-0"
+                                  style={{
+                                    backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 10%, transparent)',
+                                    border: '1px solid color-mix(in srgb, var(--brand-green-text) 30%, transparent)',
+                                    borderRadius: '8px',
+                                    fontSize: '11px',
+                                    fontWeight: 600,
+                                    color: 'var(--brand-green-text)',
+                                  }}
+                                >
+                                  <DoorOpen className="w-3 h-3" />
+                                  {appt.room}
+                                </span>
                               )}
                             </div>
                             {appt.notes && (
@@ -1170,8 +1219,8 @@ export default function AppointmentsPage() {
                               <span
                                 className="inline-flex items-center gap-1 px-2 py-0.5"
                                 style={{
-                                  backgroundColor: statusStyles[appt.status].bg,
-                                  color: statusStyles[appt.status].text,
+                                  backgroundColor: (statusStyles[appt.status] || statusStyles.Pending).bg,
+                                  color: (statusStyles[appt.status] || statusStyles.Pending).text,
                                   borderRadius: '9999px',
                                   fontSize: '11px',
                                   fontWeight: 600,
@@ -2351,7 +2400,7 @@ export default function AppointmentsPage() {
           }}
         >
           {selectedAppt && (() => {
-            const s = statusStyles[selectedAppt.status];
+            const s = statusStyles[selectedAppt.status] || statusStyles.Pending;
             const StatusIcon = s.icon;
             const svcColor = serviceColors[selectedAppt.service] || 'var(--text-secondary)';
             const durationMin = getDurationMin(selectedAppt.timeStart, selectedAppt.timeEnd);
@@ -2424,6 +2473,12 @@ export default function AppointmentsPage() {
                           <div><p className="text-[var(--text-secondary)]" style={{ fontSize: '11px', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Veterinarian</p><p className="text-[var(--text-primary)]" style={{ fontSize: '13px', fontWeight: 600 }}>{selectedAppt.vet}</p></div>
                         </div>
                       </div>
+                      {selectedAppt.room && (
+                        <div className="flex items-center gap-3 p-3" style={{ borderRadius: '10px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--brand-green-text) 20%, transparent)' }}>
+                          <div style={{ width: 32, height: 32, borderRadius: 8, background: 'color-mix(in srgb, var(--brand-green-text) 15%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><DoorOpen style={{ width: 15, height: 15, color: 'var(--brand-green-text)' }} /></div>
+                          <div><p className="text-[var(--text-secondary)]" style={{ fontSize: '11px', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Assigned Room</p><p style={{ fontSize: '13px', fontWeight: 700, color: 'var(--brand-green-text)' }}>{selectedAppt.room}</p></div>
+                        </div>
+                      )}
                       {selectedAppt.notes && (
                         <div className="p-3 bg-[var(--surface-elevated)]" style={{ borderRadius: '10px' }}>
                           <p className="text-[var(--text-secondary)] mb-1" style={{ fontSize: '11px', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Notes</p>
@@ -2444,11 +2499,6 @@ export default function AppointmentsPage() {
                       </div>
                       <div className="flex gap-2 ml-auto">
                         <Button variant="outline" size="sm" onClick={() => setDetailMode('edit')}><Pencil className="w-3.5 h-3.5 mr-1.5" />Edit</Button>
-                        {canCheckIn && (
-                          <Button size="sm" onClick={handleCheckIn} style={{ background: 'var(--brand-green-text)', color: 'var(--on-brand-green)', border: 'none' }} className="hover:opacity-90">
-                            <LogIn className="w-3.5 h-3.5 mr-1.5" />Check In
-                          </Button>
-                        )}
                         {isActive && (
                           <Button size="sm" onClick={() => {
                             startVisit({
@@ -2528,49 +2578,132 @@ export default function AppointmentsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ─── Room Info Dialog (doctor sees room before starting visit) ─── */}
+      {/* ─── Room Info Dialog with Floor Plan ─── */}
       <Dialog open={roomInfoOpen} onOpenChange={(v) => { if (!v) { setRoomInfoOpen(false); setRoomInfoAppt(null); } }}>
-        <DialogContent style={{ maxWidth: 380 }}>
-          {roomInfoAppt && (
-            <div className="flex flex-col items-center gap-4 py-2">
-              <div
-                className="flex items-center justify-center"
-                style={{
-                  width: 64, height: 64, borderRadius: '50%',
-                  backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)',
-                }}
-              >
-                <DoorOpen style={{ width: 32, height: 32, color: 'var(--brand-green-text)' }} />
-              </div>
-              <div className="text-center">
-                <p className="text-[var(--text-primary)]" style={{ fontSize: 18, fontWeight: 700 }}>
-                  {roomInfoAppt.room}
-                </p>
-                <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: 13 }}>
-                  {roomInfoAppt.petName} ({roomInfoAppt.ownerName}) is waiting
-                </p>
-                <p className="text-[var(--text-secondary)]" style={{ fontSize: 12, marginTop: 4 }}>
-                  {roomInfoAppt.service} · {roomInfoAppt.timeStart}
-                </p>
-              </div>
-              <Button
-                className="w-full hover:opacity-90"
-                onClick={() => proceedToVisit(roomInfoAppt)}
-                style={{
-                  backgroundColor: 'var(--brand-green-text)',
-                  color: 'var(--on-brand-green)',
-                  border: 'none',
-                  height: 42,
-                  fontSize: 14,
-                  fontWeight: 600,
-                  boxShadow: '0 0 16px color-mix(in srgb, var(--brand-green-text) 50%, transparent)',
-                }}
-              >
-                <Stethoscope className="w-4 h-4 mr-2" />
-                Start Visit
-              </Button>
-            </div>
-          )}
+        <DialogContent
+          className="p-0 overflow-hidden gap-0 [&>button]:top-[14px] [&>button]:right-[14px] [&>button]:w-8 [&>button]:h-8 [&>button]:flex [&>button]:items-center [&>button]:justify-center [&>button]:rounded-[8px] [&>button]:!bg-[var(--surface-white)] [&>button]:!text-[var(--text-secondary)] [&>button]:!opacity-100 [&>button]:hover:!bg-[var(--surface-elevated)] [&>button]:!border [&>button]:!border-[var(--border-color)] [&>button]:transition-colors [&>button>svg]:w-4 [&>button>svg]:h-4"
+          style={{ maxWidth: 640, width: '95vw', maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}
+        >
+          {roomInfoAppt && (() => {
+            const cols = clinicRooms.reduce((mx, r) => Math.max(mx, r.pos_x + r.width), 0);
+            const rowsCount = clinicRooms.reduce((mx, r) => Math.max(mx, r.pos_y + r.height), 0);
+            const CANVAS_W = 560;
+            const cellPx = cols > 0 ? Math.max(14, Math.min(28, Math.floor(CANVAS_W / Math.max(cols, 12)))) : 22;
+            const canvasW = (cols || 12) * cellPx;
+            const canvasH = (rowsCount || 8) * cellPx;
+            // Find the target room by name match
+            const targetRoom = clinicRooms.find(r => r.name === roomInfoAppt.room);
+
+            return (
+              <>
+                {/* Header */}
+                <div style={{ padding: '16px 22px', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: 14, background: 'linear-gradient(135deg, color-mix(in srgb, var(--brand-green-text) 10%, transparent), transparent 60%)' }}>
+                  <div style={{ width: 38, height: 38, borderRadius: 10, backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 14%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <DoorOpen style={{ width: 18, height: 18, color: 'var(--brand-green-text)' }} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
+                      Go to <span style={{ color: 'var(--brand-green-text)' }}>{roomInfoAppt.room}</span>
+                    </p>
+                    <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '2px 0 0' }}>
+                      {roomInfoAppt.petName} ({roomInfoAppt.ownerName}) is waiting &middot; {roomInfoAppt.service}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Floor Plan */}
+                <div style={{ padding: '16px 22px', overflowY: 'auto' }}>
+                  <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 10px' }}>
+                    Floor Plan
+                  </p>
+                  {roomsLoading ? (
+                    <div style={{ padding: '30px 0', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                      <Loader2 className="animate-spin" style={{ width: 18, height: 18, margin: '0 auto 8px' }} />
+                      <p style={{ fontSize: 12, margin: 0 }}>Loading rooms...</p>
+                    </div>
+                  ) : clinicRooms.length === 0 ? (
+                    <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-secondary)', border: '1.5px dashed var(--border-color)', borderRadius: 12 }}>
+                      <p style={{ fontSize: 13, fontWeight: 600, margin: 0 }}>No floor plan available</p>
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        position: 'relative', width: canvasW, height: canvasH, margin: '0 auto',
+                        backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)', borderRadius: 10,
+                        backgroundImage: `linear-gradient(to right, color-mix(in srgb, var(--border-color) 50%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in srgb, var(--border-color) 50%, transparent) 1px, transparent 1px)`,
+                        backgroundSize: `${cellPx}px ${cellPx}px`,
+                      }}
+                    >
+                      {clinicRooms.map((room) => {
+                        const cfg = ROOM_TYPES[room.type] ?? ROOM_TYPES.other;
+                        const Icon = cfg.icon;
+                        const isTarget = targetRoom?.id === room.id;
+                        const baseColor = isTarget ? 'var(--brand-green-text)' : '#94A3B8';
+                        const baseBg = isTarget
+                          ? 'color-mix(in srgb, var(--brand-green-text) 18%, transparent)'
+                          : 'color-mix(in srgb, #94A3B8 8%, transparent)';
+                        const borderColor = isTarget
+                          ? 'var(--brand-green-text)'
+                          : 'color-mix(in srgb, #94A3B8 35%, transparent)';
+
+                        return (
+                          <div
+                            key={room.id}
+                            style={{
+                              position: 'absolute',
+                              left: room.pos_x * cellPx, top: room.pos_y * cellPx,
+                              width: room.width * cellPx, height: room.height * cellPx,
+                              backgroundColor: baseBg,
+                              border: `2px solid ${borderColor}`,
+                              borderRadius: 6, padding: '4px 6px',
+                              display: 'flex', flexDirection: 'column',
+                              alignItems: 'flex-start', justifyContent: 'space-between',
+                              overflow: 'hidden',
+                              opacity: isTarget ? 1 : 0.45,
+                              animation: isTarget ? 'roomPulse 1.5s ease-in-out infinite' : 'none',
+                              boxShadow: isTarget ? '0 0 12px color-mix(in srgb, var(--brand-green-text) 40%, transparent)' : 'none',
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, width: '100%' }}>
+                              <Icon style={{ width: 11, height: 11, color: baseColor, flexShrink: 0 }} />
+                              <span style={{ fontSize: 10, fontWeight: 700, color: isTarget ? 'var(--text-primary)' : 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.1 }}>
+                                {room.name}
+                              </span>
+                            </div>
+                            {isTarget ? (
+                              <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--brand-green-text)', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: 1.1 }}>
+                                Go Here
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em', lineHeight: 1.1, opacity: 0.7 }}>
+                                {cfg.label}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Footer */}
+                <div style={{ padding: '14px 22px', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--surface-elevated)' }}>
+                  <Button
+                    className="w-full hover:opacity-90"
+                    onClick={() => proceedToVisit(roomInfoAppt)}
+                    style={{
+                      backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)', border: 'none',
+                      height: 42, fontSize: 14, fontWeight: 600,
+                      boxShadow: '0 0 16px color-mix(in srgb, var(--brand-green-text) 50%, transparent)',
+                    }}
+                  >
+                    <Stethoscope className="w-4 h-4 mr-2" />
+                    Start Visit
+                  </Button>
+                </div>
+              </>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 

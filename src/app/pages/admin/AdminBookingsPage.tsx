@@ -31,11 +31,13 @@ import { supabase } from '../../../lib/supabase';
 // ─── Status Styles ───────────────────────────────────────────
 
 const statusStyles: Record<string, { bg: string; text: string; icon: typeof CheckCircle2 }> = {
+  Scheduled: { bg: '#06B6D420', text: '#06B6D4', icon: CalendarIcon },
   Confirmed: { bg: '#74C69D20', text: 'var(--brand-green-text)', icon: CheckCircle2 },
   Pending: { bg: '#F4A26120', text: '#F4A261', icon: AlertCircle },
+  'In Progress': { bg: '#3B82F620', text: '#3B82F6', icon: Stethoscope },
   Completed: { bg: '#6B728020', text: 'var(--text-secondary)', icon: CheckCircle2 },
   Cancelled: { bg: '#d4183d20', text: '#d4183d', icon: XCircle },
-  'In Progress': { bg: '#3B82F620', text: '#3B82F6', icon: Stethoscope },
+  'No Show': { bg: '#64748B20', text: '#64748B', icon: AlertCircle },
   Paid: { bg: '#74C69D20', text: 'var(--brand-green-text)', icon: CheckCircle2 },
 };
 
@@ -387,8 +389,12 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
     appointments.forEach((a) => {
       if (!a.roomId) return;
       if (a.id === roomSelectAppt.id) return;
-      // (a) An "In Progress" appointment always holds its room.
+      // (a) An "In Progress" appointment holds its room — but only if its end time hasn't passed.
       if (a.status === 'In Progress') {
+        const endMin = toMin(a.timeEnd);
+        const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+        const isToday = a.date === roomSelectAppt.date;
+        if (!isToday || endMin < nowMin) return; // Stale — don't block room
         map.set(a.roomId, {
           petName: a.petName,
           ownerName: a.ownerName,
@@ -441,7 +447,7 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
   // ── New Appointment form state ──────────────────────────────
   const [newApptPet, setNewApptPet] = useState('');
   const [newApptService, setNewApptService] = useState('');
-  const [newApptVetName, setNewApptVetName] = useState('Dr. Chen');
+  const [newApptVetName, setNewApptVetName] = useState('');
   const [newApptDuration, setNewApptDuration] = useState('30 min');
   const [newApptShowAllHours, setNewApptShowAllHours] = useState(false);
   const [hoveredSlotKey, setHoveredSlotKey] = useState<string | null>(null);
@@ -538,6 +544,14 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Reset list pagination whenever user changes filters or date range. Without
+  // this, switching from "All" (lots of rows) to "Cancelled" (few rows) leaves
+  // a stale visibleCount that hides the Load-more button and can leave blank
+  // space at the bottom of the list.
+  useEffect(() => {
+    setVisibleCount(10);
+  }, [activeFilter, selectedVetFilter, searchQuery, selectedDate, showAllDates, viewMode]);
+
   const datesWithAppointments = getDatesWithAppointments(appointments);
 
   const dayAppointments = showAllDates
@@ -552,7 +566,14 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
 
   const filteredByStatus = dayAppointments.filter((a) => {
     if (activeFilter === 'All') return true;
-    if (activeFilter === 'Upcoming') return a.status === 'Confirmed' || a.status === 'Pending';
+    if (activeFilter === 'Upcoming') {
+      return (
+        a.status === 'Scheduled' ||
+        a.status === 'Confirmed' ||
+        a.status === 'Pending' ||
+        a.status === 'In Progress'
+      );
+    }
     return a.status === activeFilter;
   });
 
@@ -574,9 +595,15 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
 
   const totalToday = dayAppointments.length;
   const completedToday = dayAppointments.filter((a) => a.status === 'Completed').length;
-  const cancelledToday = dayAppointments.filter((a) => a.status === 'Cancelled').length;
+  const cancelledToday = dayAppointments.filter((a) => a.status === 'Cancelled' || a.status === 'No Show').length;
   const remainingToday = totalToday - completedToday - cancelledToday;
-  const scheduledCount = dayAppointments.filter((a) => a.status === 'Confirmed' || a.status === 'Pending').length;
+  const scheduledCount = dayAppointments.filter(
+    (a) =>
+      a.status === 'Scheduled' ||
+      a.status === 'Confirmed' ||
+      a.status === 'Pending' ||
+      a.status === 'In Progress',
+  ).length;
   // Group appointments by time slot (multiple doctors can have bookings at same time)
   const appointmentsByTime = new Map<string, typeof dayAppointments>();
   dayAppointments.forEach((a) => {
@@ -1466,7 +1493,7 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
                         )}
 
                         {/* Patient Arrived → open room selection */}
-                        {(appt.status === 'Confirmed' || appt.status === 'Pending') && (
+                        {(appt.status === 'Scheduled' || appt.status === 'Confirmed' || appt.status === 'Pending') && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -2848,12 +2875,18 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
           }}
         >
           {selectedAppt && (() => {
-            const s = statusStyles[selectedAppt.status];
+            const s = statusStyles[selectedAppt.status] || statusStyles.Scheduled;
             const StatusIcon = s.icon;
             const svcColor = serviceColors[selectedAppt.service] || 'var(--text-secondary)';
             const durationMin = getDurationMin(selectedAppt.timeStart, selectedAppt.timeEnd);
-            const canCheckIn = selectedAppt.status === 'Confirmed' || selectedAppt.status === 'Pending';
-            const isDone = selectedAppt.status === 'Completed' || selectedAppt.status === 'Cancelled';
+            const canCheckIn =
+              selectedAppt.status === 'Scheduled' ||
+              selectedAppt.status === 'Confirmed' ||
+              selectedAppt.status === 'Pending';
+            const isDone =
+              selectedAppt.status === 'Completed' ||
+              selectedAppt.status === 'Cancelled' ||
+              selectedAppt.status === 'No Show';
 
             return (
               <>
@@ -2932,6 +2965,19 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
                         {!isDone && (
                           <Button variant="outline" size="sm" onClick={handleCancelAppt} className="text-[#d4183d] border-[#d4183d] hover:bg-[#d4183d10] hover:text-[#d4183d]">
                             <XCircle className="w-3.5 h-3.5 mr-1.5" />Cancel
+                          </Button>
+                        )}
+                        {canCheckIn && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={async () => {
+                              await updateApptStatus(selectedAppt.id, 'No Show');
+                              setDetailOpen(false);
+                            }}
+                            className="text-[#64748B] border-[#64748B] hover:bg-[#64748B10] hover:text-[#64748B]"
+                          >
+                            <AlertCircle className="w-3.5 h-3.5 mr-1.5" />No Show
                           </Button>
                         )}
                         <Button variant="outline" size="sm" onClick={handleDeleteAppt} className="text-[#d4183d] border-[#d4183d] hover:bg-[#d4183d10] hover:text-[#d4183d]">

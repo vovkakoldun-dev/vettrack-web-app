@@ -543,7 +543,7 @@ export default function NotificationsPage() {
 
         // Apply persisted read/dismissed state (do NOT auto-mark as read)
         const { organizationId } = await getOrgContext();
-        const { data: stateRows } = await db.from('notification_state').select('notification_id, status').eq('organization_id', organizationId);
+        const { data: stateRows } = await db.from('notification_state').select('notification_id, status').eq('organization_id', organizationId).eq('user_id', user?.id);
         const readSet = new Set<string>();
         const dismissedSet = new Set<string>();
         for (const row of (stateRows || [])) {
@@ -560,7 +560,7 @@ export default function NotificationsPage() {
           // Auto-mark all unread as read when the user visits the page (clears sidebar badge)
           const unreadIds = afterPersist.filter(n => !n.read).map(n => n.id);
           if (unreadIds.length > 0) {
-            const readRows = unreadIds.map(id => ({ notification_id: id, status: 'read' as const, updated_at: new Date().toISOString(), organization_id: organizationId }));
+            const readRows = unreadIds.map(id => ({ notification_id: id, status: 'read' as const, updated_at: new Date().toISOString(), organization_id: organizationId, user_id: user?.id }));
             db.from('notification_state').upsert(readRows).then(() => {
               // Also mark sidebar-generated IDs (completed appts, vax, etc.)
               const todayStr = `${new Date().getFullYear()}-${(new Date().getMonth() + 1).toString().padStart(2, '0')}-${new Date().getDate().toString().padStart(2, '0')}`;
@@ -589,7 +589,7 @@ export default function NotificationsPage() {
                 (clients.data || []).forEach(c => extraIds.push(`client-${c.id}`));
                 (notifEvts.data || []).forEach(e => extraIds.push(e.id));
                 const allToMark = [...new Set([...unreadIds, ...extraIds])];
-                const markRows = allToMark.map(id => ({ notification_id: id, status: 'read' as const, updated_at: new Date().toISOString(), organization_id: organizationId }));
+                const markRows = allToMark.map(id => ({ notification_id: id, status: 'read' as const, updated_at: new Date().toISOString(), organization_id: organizationId, user_id: user?.id }));
                 if (markRows.length > 0) db.from('notification_state').upsert(markRows);
               });
             });
@@ -618,15 +618,17 @@ export default function NotificationsPage() {
 
   const saveReadState = async (ids: string[]) => {
     try {
+      if (!user?.id) return;
       const { organizationId } = await getOrgContext();
-      const rows = ids.map(id => ({ notification_id: id, status: 'read', updated_at: new Date().toISOString(), organization_id: organizationId }));
+      const rows = ids.map(id => ({ notification_id: id, status: 'read', updated_at: new Date().toISOString(), organization_id: organizationId, user_id: user.id }));
       if (rows.length > 0) await db.from('notification_state').upsert(rows);
     } catch {}
   };
   const saveDismissedState = async (ids: string[]) => {
     try {
+      if (!user?.id) return;
       const { organizationId } = await getOrgContext();
-      const rows = ids.map(id => ({ notification_id: id, status: 'dismissed', updated_at: new Date().toISOString(), organization_id: organizationId }));
+      const rows = ids.map(id => ({ notification_id: id, status: 'dismissed', updated_at: new Date().toISOString(), organization_id: organizationId, user_id: user.id }));
       if (rows.length > 0) await db.from('notification_state').upsert(rows);
     } catch {}
   };
@@ -676,15 +678,16 @@ export default function NotificationsPage() {
       (vacs.data || []).forEach(v => sidebarIds.push(`vax-${v.id}`));
       (clients.data || []).forEach(c => sidebarIds.push(`client-${c.id}`));
       (notifEvts.data || []).forEach(e => sidebarIds.push(e.id));
-      if (sidebarIds.length > 0) {
+      if (sidebarIds.length > 0 && user?.id) {
         const { data: existing } = await db.from('notification_state')
-          .select('notification_id').eq('organization_id', organizationId)
+          .select('notification_id').eq('organization_id', organizationId).eq('user_id', user.id)
           .in('notification_id', sidebarIds);
         const existingSet = new Set((existing || []).map(r => r.notification_id));
         const toMark = sidebarIds.filter(id => !existingSet.has(id));
         if (toMark.length > 0) await saveReadState(toMark);
       }
     } catch {}
+    window.dispatchEvent(new CustomEvent('notifCountChanged', { detail: { count: 0 } }));
   };
 
   const dismiss = (id: string) => {
@@ -693,12 +696,42 @@ export default function NotificationsPage() {
       saveDismissedState([id]);
       return updated;
     });
+    window.dispatchEvent(new Event('notifCountChanged'));
   };
 
-  const dismissAll = () => {
+  const dismissAll = async () => {
     const allIds = notifications.map(n => n.id);
     saveDismissedState(allIds);
     setNotifications([]);
+    // Also dismiss all synthetic sidebar IDs so the badge clears
+    try {
+      const { organizationId } = await getOrgContext();
+      const now = new Date();
+      const todayStr = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}`;
+      const weekAgo = new Date(Date.now() - 7 * 86400000);
+      const weekAgoStr = `${weekAgo.getFullYear()}-${(weekAgo.getMonth() + 1).toString().padStart(2, '0')}-${weekAgo.getDate().toString().padStart(2, '0')}`;
+      const [apptToday, completed, cancelled, vacs, clients] = await Promise.all([
+        db.from('appointments').select('id').eq('organization_id', organizationId)
+          .gte('scheduled_at', `${todayStr}T00:00:00`).lte('scheduled_at', `${todayStr}T23:59:59`)
+          .in('status', ['Scheduled', 'Confirmed']),
+        db.from('appointments').select('id').eq('organization_id', organizationId)
+          .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Completed'),
+        db.from('appointments').select('id').eq('organization_id', organizationId)
+          .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Cancelled'),
+        db.from('vaccinations').select('id, pets!inner(organization_id)')
+          .eq('pets.organization_id', organizationId).lte('next_due_date', todayStr),
+        db.from('clients').select('id').eq('organization_id', organizationId)
+          .gte('created_at', `${weekAgoStr}T00:00:00`),
+      ]);
+      const sidebarIds: string[] = [];
+      (apptToday.data || []).forEach(a => sidebarIds.push(`appt-today-${a.id}`));
+      (completed.data || []).forEach(a => sidebarIds.push(`appt-done-${a.id}`));
+      (cancelled.data || []).forEach(a => sidebarIds.push(`appt-cancel-${a.id}`));
+      (vacs.data || []).forEach(v => sidebarIds.push(`vax-${v.id}`));
+      (clients.data || []).forEach(c => sidebarIds.push(`client-${c.id}`));
+      if (sidebarIds.length > 0) await saveDismissedState(sidebarIds);
+    } catch {}
+    window.dispatchEvent(new CustomEvent('notifCountChanged', { detail: { count: 0 } }));
   };
 
   // ── Create Follow-up Task for front desk ──────────────────

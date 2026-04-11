@@ -816,15 +816,48 @@ export default function CheckoutPage() {
               try { sessionStorage.removeItem(`visit_draft_${id}`); } catch {}
               try { sessionStorage.removeItem(`checkout_draft_${id}`); } catch {}
               setApptStatus(parseInt(id!) || 0, 'Ready for Billing');
-              const { organizationId } = await getOrgContext();
+              const { organizationId, clinicId } = await getOrgContext();
               // Update Supabase status for real appointments
               if (id && id.includes('-')) {
-                await db.from('appointments').update({ status: 'Completed' }).eq('id', id).eq('organization_id', organizationId);
+                await db.from('appointments').update({ status: 'Completed', room: null, room_id: null }).eq('id', id).eq('organization_id', organizationId);
               }
 
               // Persist pet health status to client profile
               if (apptIds.clientId) {
                 await db.from('clients').update({ health_status: petHealthStatus }).eq('id', apptIds.clientId).eq('organization_id', organizationId);
+              }
+
+              // Create invoice in Supabase
+              if (apptIds.clientId && id && id.includes('-')) {
+                try {
+                  const invNum = `INV-${Date.now().toString(36).toUpperCase()}`;
+                  const invSubtotal = items.reduce((s, i) => s + i.qty * i.unitPrice, 0) + meds.reduce((s, m) => s + m.qty * m.unitPrice, 0);
+                  const invTax = parseFloat((invSubtotal * 0.08).toFixed(2));
+                  const invTotal = invSubtotal + invTax;
+                  const { data: inv } = await db.from('invoices').insert({
+                    invoice_number: invNum,
+                    organization_id: organizationId,
+                    clinic_id: clinicId,
+                    client_id: apptIds.clientId,
+                    appointment_id: id,
+                    status: 'Sent',
+                    subtotal: invSubtotal,
+                    tax_amount: invTax,
+                    discount_amount: 0,
+                    total: invTotal,
+                    amount_paid: 0,
+                    due_date: new Date().toISOString().split('T')[0],
+                    notes: `Visit invoice for ${appt?.petName ?? 'patient'}`,
+                    created_by: apptIds.staffId || null,
+                  }).select('id').single();
+                  if (inv) {
+                    const lineItems = [
+                      ...items.map(i => ({ invoice_id: inv.id, description: i.service, quantity: i.qty, unit_price: i.unitPrice, tax_rate: 0.08, total: i.qty * i.unitPrice, organization_id: organizationId })),
+                      ...meds.map(m => ({ invoice_id: inv.id, description: `${m.name} (${m.dosage})`, quantity: m.qty, unit_price: m.unitPrice, tax_rate: 0.08, total: m.qty * m.unitPrice, organization_id: organizationId })),
+                    ];
+                    if (lineItems.length > 0) await db.from('invoice_line_items').insert(lineItems);
+                  }
+                } catch {}
               }
 
               // Create a "Ready for Billing" front-desk task

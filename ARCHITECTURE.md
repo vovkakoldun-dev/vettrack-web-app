@@ -232,7 +232,7 @@ const ADMIN_ROLES  = ['front_desk_manager', 'receptionist', 'clinic_manager', 's
 |-------|---------|-------------|
 | `tasks` | Front-desk tasks | `id`, `organization_id`, `type`, `priority`, `status`, `due_date`, `due_time`, `pet_name`, `owner_name`, `assigned_by`, `doctor_notes`, `tags[]`, `completed_at` |
 | `notification_events` | Notification triggers | `id` (text PK), `type`, `timestamp`, `data` (jsonb), `organization_id` |
-| `notification_state` | Read/dismissed state | `notification_id` (text PK), `status` (read/dismissed), `updated_at` |
+| `notification_state` | Per-user read/dismissed state | `notification_id` (text), `user_id` (uuid FK auth.users, NOT NULL), `status` (read/dismissed), `updated_at`, `organization_id` — PK: (notification_id, user_id) |
 | `staff_time_blocks` | Staff scheduling | `id`, `staff_id`, `block_type`, `date_from`, `date_to`, `time_start`, `time_end` |
 | `staff_ratings` | Performance | `id`, `staff_id`, `rating`, `review` |
 | `staff_specializations` | Expertise | `id`, `staff_id`, `specialization` |

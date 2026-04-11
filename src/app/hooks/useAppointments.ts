@@ -106,12 +106,16 @@ export function useAppointments(dateFilter?: string) {
   }, [fetchAppointments])
 
   const updateStatus = useCallback(async (id: string, status: string) => {
+    // Free the room when appointment ends
+    const freeRoom = ['Completed', 'Cancelled', 'No Show'].includes(status);
     // Optimistic update — instant UI feedback
-    setAppointments(prev => prev.map(a => a.id === id ? { ...a, status } : a));
+    setAppointments(prev => prev.map(a => a.id === id ? { ...a, status, ...(freeRoom ? { room: null, room_id: null } : {}) } : a));
     const { organizationId } = await getOrgContext()
+    const updatePayload: Record<string, unknown> = { status };
+    if (freeRoom) { updatePayload.room = null; updatePayload.room_id = null; }
     const { error: err } = await db
       .from('appointments')
-      .update({ status })
+      .update(updatePayload)
       .eq('id', id)
       .eq('organization_id', organizationId)
     if (err) {

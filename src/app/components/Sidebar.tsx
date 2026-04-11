@@ -147,7 +147,8 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
       const { data: stateRows } = await db
         .from('notification_state')
         .select('notification_id, status')
-        .eq('organization_id', organizationId);
+        .eq('organization_id', organizationId)
+        .eq('user_id', uid);
       const readSet = new Set<string>();
       const dismissedSet = new Set<string>();
       for (const row of (stateRows || [])) {

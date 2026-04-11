@@ -94,7 +94,7 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
             .eq('pets.organization_id', organizationId).lte('next_due_date', today),
           db.from('notification_events').select('id, data').eq('organization_id', organizationId)
             .gte('timestamp', sevenDaysAgoISO),
-          db.from('notification_state').select('notification_id, status').eq('organization_id', organizationId),
+          db.from('notification_state').select('notification_id, status').eq('organization_id', organizationId).eq('user_id', user.id),
         ]);
 
         const allIds: string[] = [];
