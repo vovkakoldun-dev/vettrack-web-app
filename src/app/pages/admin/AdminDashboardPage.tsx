@@ -16,7 +16,7 @@ import {
 } from '../../components/ui/select';
 import { useDashboardStats } from '../../hooks/useDashboardStats';
 import { useAppointments } from '../../hooks/useAppointments';
-import { useClients } from '../../hooks/useClients';
+// useClients removed — Dashboard uses useGlobalSearch for search, no need to load all clients on mount
 import { supabase } from '../../../lib/supabase';
 import { useProfile } from '../../hooks/useProfile';
 import { ConnectionStatusBadge } from '../../components/ConnectionStatusBadge';
@@ -634,7 +634,7 @@ export default function AdminDashboardPage() {
     const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   }, []);
   const { appointments: supaApptsToday, updateStatus, updateStatusWithRoom } = useAppointments(todayStr);
-  const { clients: supaClients } = useClients();
+  // useClients() removed — was loading all clients on mount but only used for ALL_CLIENTS which is dead code
   const db = useTenantDb();
 
   // Load actually-paid appointment IDs (only invoices with status 'Paid')
@@ -680,28 +680,7 @@ export default function AdminDashboardPage() {
     [supaApptsToday],
   );
 
-  // Map Supabase clients → ALL_CLIENTS shape for search
-  const ALL_CLIENTS = useMemo(() =>
-    supaClients.map((c, idx) => {
-      const pet = c.pets?.[0];
-      return {
-        id: idx + 1,
-        clientId: c.id,
-        name: `${c.first_name} ${c.last_name}`,
-        pet: pet?.name ?? '—',
-        petType: pet?.breed ?? pet?.species ?? '—',
-        petPhoto: pet?.photo_url || '',
-        phone: c.phone ?? '—',
-        balance: '$0',
-      };
-    }),
-    [supaClients],
-  );
-
-  const ALL_BOOKINGS = useMemo(() =>
-    TODAY_SCHEDULE.map((a) => ({ ...a, phone: a.phone, date: 'Today' })),
-    [TODAY_SCHEDULE],
-  );
+  // ALL_CLIENTS and ALL_BOOKINGS removed — dead code, search uses useGlobalSearch instead
 
   // Generate 7-day date labels for sparkline hover
   const dayLabels = useMemo(() => Array.from({ length: 7 }, (_, i) => {
@@ -926,9 +905,11 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     (async () => {
       try {
+        const { organizationId } = await getOrgContext();
         const { data } = await supabase
           .from('payments')
           .select('id, amount, method, paid_at, invoices!inner(id, status, client_id, clients!inner(first_name, last_name, pets(name, photo_url)))')
+          .eq('organization_id', organizationId)
           .order('paid_at', { ascending: false })
           .limit(5);
         if (data) {
@@ -968,6 +949,7 @@ export default function AdminDashboardPage() {
     (async () => {
       try {
         const { organizationId: orgId } = await getOrgContext();
+        // Step 1: Get all conversations this admin participates in (single query)
         const { data: parts } = await supabase
           .from('conversation_participants')
           .select('conversation_id, last_read_at')
@@ -975,33 +957,44 @@ export default function AdminDashboardPage() {
           .eq('profile_id', adminProfile.id);
         if (!parts || parts.length === 0) { setUnreadCount(0); return; }
 
-        let allUnread: UnreadMsg[] = [];
-        for (const part of parts) {
-          const lastRead = part.last_read_at || '1970-01-01T00:00:00Z';
-          const { data: msgs } = await supabase
-            .from('messages')
-            .select('id, content, created_at, sender_id, profiles:profiles!messages_sender_id_fkey(first_name, last_name)')
-            .eq('organization_id', orgId)
-            .eq('conversation_id', part.conversation_id)
-            .gt('created_at', lastRead)
-            .neq('sender_id', adminProfile.id)
-            .order('created_at', { ascending: false })
-            .limit(3);
-          if (msgs) {
-            for (const m of msgs) {
-              const sender = m.profiles as any;
-              const name = sender ? `${sender.first_name} ${sender.last_name}` : 'Unknown';
-              const initials = sender ? `${(sender.first_name?.[0] || '')}${(sender.last_name?.[0] || '')}` : '??';
-              const created = new Date(m.created_at);
-              const diffMin = Math.floor((Date.now() - created.getTime()) / 60000);
-              let time = '';
-              if (diffMin < 1) time = 'Just now';
-              else if (diffMin < 60) time = `${diffMin}m ago`;
-              else if (diffMin < 1440) time = `${Math.floor(diffMin / 60)}h ago`;
-              else time = created.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-              allUnread.push({ id: m.id, name, initials, preview: m.content || '', time, conversationId: part.conversation_id });
-            }
-          }
+        // Step 2: Single batched query for unread messages across ALL conversations
+        const convIds = parts.map(p => p.conversation_id);
+        const oldestLastRead = parts.reduce((oldest, p) => {
+          const lr = p.last_read_at || '1970-01-01T00:00:00Z';
+          return lr < oldest ? lr : oldest;
+        }, new Date().toISOString());
+
+        const { data: allMsgs } = await supabase
+          .from('messages')
+          .select('id, content, created_at, sender_id, conversation_id, profiles:profiles!messages_sender_id_fkey(first_name, last_name)')
+          .eq('organization_id', orgId)
+          .in('conversation_id', convIds)
+          .gt('created_at', oldestLastRead)
+          .neq('sender_id', adminProfile.id)
+          .order('created_at', { ascending: false })
+          .limit(20);
+
+        if (!allMsgs) { setUnreadCount(0); return; }
+
+        // Build a map of conversation_id → last_read_at for filtering
+        const lastReadMap = new Map(parts.map(p => [p.conversation_id, p.last_read_at || '1970-01-01T00:00:00Z']));
+
+        // Filter messages to only those actually unread per-conversation
+        const allUnread: UnreadMsg[] = [];
+        for (const m of allMsgs) {
+          const convLastRead = lastReadMap.get(m.conversation_id) || '1970-01-01T00:00:00Z';
+          if (m.created_at <= convLastRead) continue;
+          const sender = m.profiles as any;
+          const name = sender ? `${sender.first_name} ${sender.last_name}` : 'Unknown';
+          const initials = sender ? `${(sender.first_name?.[0] || '')}${(sender.last_name?.[0] || '')}` : '??';
+          const created = new Date(m.created_at);
+          const diffMin = Math.floor((Date.now() - created.getTime()) / 60000);
+          let time = '';
+          if (diffMin < 1) time = 'Just now';
+          else if (diffMin < 60) time = `${diffMin}m ago`;
+          else if (diffMin < 1440) time = `${Math.floor(diffMin / 60)}h ago`;
+          else time = created.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+          allUnread.push({ id: m.id, name, initials, preview: m.content || '', time, conversationId: m.conversation_id });
         }
         setUnreadMessages(allUnread.slice(0, 5));
         setUnreadCount(allUnread.length);

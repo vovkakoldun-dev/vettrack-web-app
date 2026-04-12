@@ -14,6 +14,10 @@ export interface DashboardStats {
   loading: boolean
 }
 
+/**
+ * Fetches all dashboard stats via a single Supabase RPC call
+ * (`get_dashboard_stats`) instead of 8 separate count queries.
+ */
 export function useDashboardStats(): DashboardStats {
   const [stats, setStats] = useState<DashboardStats>({
     totalClients: 0,
@@ -30,82 +34,30 @@ export function useDashboardStats(): DashboardStats {
   const load = useCallback(async () => {
     try {
       const { organizationId } = await getOrgContext()
-      const n = new Date()
-      const today = `${n.getFullYear()}-${(n.getMonth() + 1).toString().padStart(2, '0')}-${n.getDate().toString().padStart(2, '0')}`
-      const w = new Date(Date.now() + 7 * 86400000)
-      const weekEnd = `${w.getFullYear()}-${(w.getMonth() + 1).toString().padStart(2, '0')}-${w.getDate().toString().padStart(2, '0')}`
 
-      const y = new Date(n)
-      y.setDate(y.getDate() - 1)
-      const yesterday = `${y.getFullYear()}-${(y.getMonth() + 1).toString().padStart(2, '0')}-${y.getDate().toString().padStart(2, '0')}`
-      const lm = new Date(n)
-      lm.setMonth(lm.getMonth() - 1)
-      const lastMonth = `${lm.getFullYear()}-${(lm.getMonth() + 1).toString().padStart(2, '0')}-${lm.getDate().toString().padStart(2, '0')}`
-      const lw = new Date(Date.now() - 7 * 86400000)
-      const lastWeekStart = `${lw.getFullYear()}-${(lw.getMonth() + 1).toString().padStart(2, '0')}-${lw.getDate().toString().padStart(2, '0')}`
-
-      const [clientsRes, apptRes, vacRes, petsRes, apptYestRes, clientsLmRes, petsLmRes, vacLwRes] = await Promise.all([
-        supabase
-          .from('clients')
-          .select('id', { count: 'exact', head: true })
-          .eq('organization_id', organizationId),
-        supabase
-          .from('appointments')
-          .select('id', { count: 'exact', head: true })
-          .eq('organization_id', organizationId)
-          .gte('scheduled_at', new Date(`${today}T00:00:00`).toISOString())
-          .lte('scheduled_at', new Date(`${today}T23:59:59`).toISOString())
-          .not('status', 'eq', 'Cancelled'),
-        supabase
-          .from('vaccinations')
-          .select('id, pets!inner(organization_id)', { count: 'exact', head: true })
-          .eq('pets.organization_id', organizationId)
-          .lte('next_due_date', weekEnd),
-        supabase
-          .from('pets')
-          .select('id', { count: 'exact', head: true })
-          .eq('organization_id', organizationId)
-          .eq('is_active', true),
-        // Comparison: yesterday's appointments
-        supabase
-          .from('appointments')
-          .select('id', { count: 'exact', head: true })
-          .eq('organization_id', organizationId)
-          .gte('scheduled_at', new Date(`${yesterday}T00:00:00`).toISOString())
-          .lte('scheduled_at', new Date(`${yesterday}T23:59:59`).toISOString())
-          .not('status', 'eq', 'Cancelled'),
-        // Comparison: clients created before last month
-        supabase
-          .from('clients')
-          .select('id', { count: 'exact', head: true })
-          .eq('organization_id', organizationId)
-          .lte('created_at', `${lastMonth}T23:59:59`),
-        // Comparison: pets active last month
-        supabase
-          .from('pets')
-          .select('id', { count: 'exact', head: true })
-          .eq('organization_id', organizationId)
-          .eq('is_active', true)
-          .lte('created_at', `${lastMonth}T23:59:59`),
-        // Comparison: vaccines due last week
-        supabase
-          .from('vaccinations')
-          .select('id, pets!inner(organization_id)', { count: 'exact', head: true })
-          .eq('pets.organization_id', organizationId)
-          .lte('next_due_date', lastWeekStart),
-      ])
-
-      setStats({
-        totalClients: clientsRes.count ?? 0,
-        appointmentsToday: apptRes.count ?? 0,
-        vaccinesDueThisWeek: vacRes.count ?? 0,
-        activePets: petsRes.count ?? 0,
-        appointmentsYesterday: apptYestRes.count ?? 0,
-        clientsLastMonth: clientsLmRes.count ?? 0,
-        petsLastMonth: petsLmRes.count ?? 0,
-        vaccinesLastWeek: vacLwRes.count ?? 0,
-        loading: false,
+      const { data, error } = await supabase.rpc('get_dashboard_stats', {
+        p_org_id: organizationId,
       })
+
+      if (error) {
+        console.error('[useDashboardStats] RPC error:', error.message)
+        setStats(prev => ({ ...prev, loading: false }))
+        return
+      }
+
+      if (data) {
+        setStats({
+          totalClients: data.total_clients ?? 0,
+          appointmentsToday: data.appointments_today ?? 0,
+          vaccinesDueThisWeek: data.vaccines_due_this_week ?? 0,
+          activePets: data.active_pets ?? 0,
+          appointmentsYesterday: data.appointments_yesterday ?? 0,
+          clientsLastMonth: data.clients_last_month ?? 0,
+          petsLastMonth: data.pets_last_month ?? 0,
+          vaccinesLastWeek: data.vaccines_last_week ?? 0,
+          loading: false,
+        })
+      }
     } catch {
       setStats(prev => ({ ...prev, loading: false }))
     }
