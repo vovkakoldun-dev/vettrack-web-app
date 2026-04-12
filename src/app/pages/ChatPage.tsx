@@ -381,8 +381,8 @@ export default function ChatPage() {
 
     const convIds = parts.map(p => p.conversation_id);
 
-    // Batch all queries in parallel instead of sequential per-conversation loop
-    const [convMetaRes, allPartsRes, myPartsRes, lastMsgsRes, unreadRes] = await Promise.all([
+    // Step 1: Fetch metadata, participants, and last messages in parallel
+    const [convMetaRes, allPartsRes, myPartsRes, lastMsgsRes] = await Promise.all([
       // 1. All conversation metadata
       db.from('conversations').select('id, type, title').eq('organization_id', organizationId).in('id', convIds),
       // 2. All other participants with profiles
@@ -398,11 +398,19 @@ export default function ChatPage() {
         .select('conversation_id, content, sender_id, created_at')
         .eq('organization_id', organizationId).in('conversation_id', convIds)
         .order('created_at', { ascending: false }).limit(convIds.length * 2),
-      // 5. All unread messages (not from me) — count client-side per conversation
-      db.from('messages')
-        .select('conversation_id, created_at')
-        .eq('organization_id', organizationId).in('conversation_id', convIds).neq('sender_id', user.id),
     ]);
+
+    // Step 2: Compute cutoff from last_read_at, then only fetch actually-unread messages
+    const myParts = myPartsRes.data || [];
+    const earliestLastRead = myParts.reduce((min: string, p: any) => {
+      if (!p.last_read_at) return '1970-01-01T00:00:00Z';
+      return p.last_read_at < min ? p.last_read_at : min;
+    }, new Date().toISOString());
+
+    const unreadRes = await db.from('messages')
+      .select('conversation_id, created_at')
+      .eq('organization_id', organizationId).in('conversation_id', convIds).neq('sender_id', user.id)
+      .gt('created_at', earliestLastRead);
 
     // Index results by conversation_id
     const metaMap = new Map((convMetaRes.data || []).map(c => [c.id, c]));
