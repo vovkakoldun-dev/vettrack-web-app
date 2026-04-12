@@ -258,14 +258,56 @@ export default function ChatPage() {
   async function handleStartConversation(staff: StaffResult) {
     if (!user) return;
     const { organizationId } = await getOrgContext();
-    // Create conversation
+
+    // Check if a direct conversation already exists between these two users
+    const { data: myConvs } = await db
+      .from('conversation_participants')
+      .select('conversation_id')
+      .eq('organization_id', organizationId)
+      .eq('profile_id', user.id);
+    const { data: theirConvs } = await db
+      .from('conversation_participants')
+      .select('conversation_id')
+      .eq('organization_id', organizationId)
+      .eq('profile_id', staff.id);
+
+    let existingConvId: string | null = null;
+    if (myConvs && theirConvs) {
+      const theirSet = new Set(theirConvs.map(c => c.conversation_id));
+      const shared = myConvs.filter(c => theirSet.has(c.conversation_id));
+      if (shared.length > 0) {
+        const { data: convMeta } = await db
+          .from('conversations')
+          .select('id, type')
+          .in('id', shared.map(s => s.conversation_id))
+          .eq('type', 'direct')
+          .limit(1)
+          .single();
+        if (convMeta) existingConvId = convMeta.id;
+      }
+    }
+
+    if (existingConvId) {
+      // Un-hide if it was previously hidden by this user
+      await db.from('conversation_participants')
+        .update({ hidden_at: null })
+        .eq('organization_id', organizationId)
+        .eq('conversation_id', existingConvId)
+        .eq('profile_id', user.id);
+      setSearchQuery('');
+      setStaffResults([]);
+      await fetchConversations();
+      setSelectedId(existingConvId);
+      return;
+    }
+
+    // No existing conversation — create a new one
     const { data: conv } = await db
       .from('conversations')
       .insert({ organization_id: organizationId, type: 'direct', created_by: user.id })
       .select('id')
       .single();
     if (!conv) return;
-    // Add participants
     await db.from('conversation_participants').insert([
       { organization_id: organizationId, conversation_id: conv.id, profile_id: user.id },
       { organization_id: organizationId, conversation_id: conv.id, profile_id: staff.id },
@@ -333,7 +375,8 @@ export default function ChatPage() {
       .from('conversation_participants')
       .select('conversation_id')
       .eq('organization_id', organizationId)
-      .eq('profile_id', user.id);
+      .eq('profile_id', user.id)
+      .is('hidden_at', null);
     if (!parts || parts.length === 0) { setLoadingConvs(false); return; }
 
     const convIds = parts.map(p => p.conversation_id);
@@ -641,10 +684,12 @@ export default function ChatPage() {
   async function handleDeleteConversation(convId: string) {
     if (!user) return;
     const { organizationId } = await getOrgContext();
-    // Delete messages first, then participants, then conversation
-    await db.from('messages').delete().eq('organization_id', organizationId).eq('conversation_id', convId);
-    await db.from('conversation_participants').delete().eq('organization_id', organizationId).eq('conversation_id', convId);
-    await db.from('conversations').delete().eq('organization_id', organizationId).eq('id', convId);
+    // Soft-delete: hide conversation for current user only (other participant still sees it)
+    await db.from('conversation_participants')
+      .update({ hidden_at: new Date().toISOString() })
+      .eq('organization_id', organizationId)
+      .eq('conversation_id', convId)
+      .eq('profile_id', user.id);
     // Update local state
     setConversations(prev => prev.filter(c => c.id !== convId));
     if (selectedId === convId) {
@@ -1585,7 +1630,7 @@ export default function ChatPage() {
           <div style={{ backgroundColor: 'var(--surface-white)', borderRadius: '12px', padding: '24px', width: '400px', maxWidth: '90vw', boxShadow: '0 16px 48px rgba(0,0,0,0.18)' }} onClick={(e) => e.stopPropagation()}>
             <h3 style={{ margin: '0 0 8px', fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>Delete conversation?</h3>
             <p style={{ margin: '0 0 20px', fontSize: '14px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-              This will permanently delete all messages in this conversation for both participants. This action cannot be undone.
+              This will remove this conversation from your chat list. The other participant will still be able to see it.
             </p>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
               <button onClick={() => setDeleteConfirmId(null)} style={{ padding: '8px 16px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-white)', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: 'var(--text-primary)' }}>

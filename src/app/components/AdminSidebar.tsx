@@ -467,9 +467,10 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
                           <span className="flex-1 whitespace-nowrap">{item.name}</span>
                           {item.badge != null && item.badge > 0 && (
                             <span
-                              className="inline-flex items-center justify-center text-white flex-shrink-0"
+                              className="inline-flex items-center justify-center flex-shrink-0"
                               style={{
                                 backgroundColor: isActive ? 'var(--brand-green-text)' : '#d4183d',
+                                color: isActive ? '#000' : '#fff',
                                 borderRadius: '9999px', fontSize: '11px', fontWeight: 700,
                                 minWidth: '20px', height: '20px', padding: '0 6px',
                               }}
