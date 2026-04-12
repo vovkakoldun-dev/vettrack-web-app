@@ -123,7 +123,7 @@ async function fetchNotificationsFromSupabase(db: any, isAdmin: boolean, userId?
       let q = db.from('appointments')
         .select('id, scheduled_at, duration_minutes, status, reason, pets(id, name, species, breed), clients(id, first_name, last_name), staff(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
         .eq('organization_id', organizationId)
-        .gte('scheduled_at', `${today}T00:00:00`).lte('scheduled_at', `${today}T23:59:59`)
+        .gte('scheduled_at', new Date(`${today}T00:00:00`).toISOString()).lte('scheduled_at', new Date(`${today}T23:59:59`).toISOString())
         .in('status', ['Scheduled', 'Confirmed']).order('scheduled_at', { ascending: true });
       if (!isAdmin && userId) q = q.eq('vet_id', userId);
       return q;
@@ -489,6 +489,21 @@ async function fetchNotificationsFromSupabase(db: any, isAdmin: boolean, userId?
         actionLabel: 'View Lab Results',
         actionPath: '/lab',
         urgent: false,
+      });
+    } else if (evt.type === 'patient_arrived') {
+      notifications.push({
+        id: evt.id,
+        category: 'Appointment',
+        title: `Patient arrived — ${d.petName}`,
+        description: `${d.petName} (owner: ${d.ownerName}) has checked in and is waiting in ${d.room || 'the clinic'}. Service: ${d.service || 'General visit'}. Scheduled at ${d.timeStart || 'N/A'}.`,
+        time: formatRelativeTime(evt.timestamp),
+        timeISO: evt.timestamp,
+        read: false,
+        petName: d.petName,
+        ownerName: d.ownerName,
+        actionLabel: 'Start Visit',
+        actionPath: `/appointments`,
+        urgent: true,
       });
     } else if (evt.type === 'task_reminder') {
       // Only show reminder if the snooze time has arrived

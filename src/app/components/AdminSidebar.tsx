@@ -82,7 +82,7 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
         // Parallel: appointments, clients, vaccines, notification_events, notification_state
         const [apptTodayRes, completedRes, cancelledRes, clientRes, vacRes, notifEvtRes, stateRes] = await Promise.all([
           db.from('appointments').select('id').eq('organization_id', organizationId)
-            .gte('scheduled_at', `${today}T00:00:00`).lte('scheduled_at', `${today}T23:59:59`)
+            .gte('scheduled_at', new Date(`${today}T00:00:00`).toISOString()).lte('scheduled_at', new Date(`${today}T23:59:59`).toISOString())
             .in('status', ['Scheduled', 'Confirmed']),
           db.from('appointments').select('id').eq('organization_id', organizationId)
             .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Completed'),

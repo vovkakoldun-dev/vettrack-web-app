@@ -92,7 +92,7 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
         (() => {
           let q = db.from('appointments').select('id, scheduled_at')
             .eq('organization_id', organizationId)
-            .gte('scheduled_at', `${today}T00:00:00`).lte('scheduled_at', `${today}T23:59:59`)
+            .gte('scheduled_at', new Date(`${today}T00:00:00`).toISOString()).lte('scheduled_at', new Date(`${today}T23:59:59`).toISOString())
             .in('status', ['Scheduled', 'Confirmed']);
           if (uid) q = q.eq('vet_id', uid);
           return q;

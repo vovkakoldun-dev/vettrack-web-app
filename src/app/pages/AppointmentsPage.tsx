@@ -7,7 +7,7 @@ import {
   Plus, Search, Clock, User, Calendar as CalendarIcon,
   CheckCircle2, AlertCircle, XCircle, Filter,
   ChevronLeft, ChevronRight, ChevronUp, ChevronDown, LayoutList, LayoutGrid, CalendarDays,
-  Pencil, Trash2, Bell, LogIn, Stethoscope, Play,
+  Pencil, Trash2, Bell, LogIn, Stethoscope, Play, UserCheck,
   ClipboardList, DoorOpen, Camera, Star,
   Scissors, Microscope, Bed, Briefcase, Bath, Coffee, Sparkles, Building2, Loader2,
 } from 'lucide-react';
@@ -25,7 +25,7 @@ import { supabase } from '../../lib/supabase';
 type DisplayAppt = {
   id: string; petName: string; ownerName: string; petImage: string;
   service: string; vet: string; vetId: string; date: string; timeStart: string; timeEnd: string;
-  status: 'Confirmed' | 'Pending' | 'Completed' | 'Cancelled' | 'In Progress';
+  status: 'Confirmed' | 'Pending' | 'Completed' | 'Cancelled' | 'Checked In' | 'In Progress';
   petHealth: 'Healthy' | 'Follow-up' | 'Critical'; duration: string;
   priority: string; room: string; confirmMethod: string; reminderMethod: string;
   reminderTiming: string; notes: string;
@@ -43,7 +43,7 @@ function adaptAppt(a: AppointmentRow): DisplayAppt {
     if (h === 0) h = 12;
     return `${h}:${m.toString().padStart(2, '0')} ${ampm}`;
   };
-  const validStatuses = ['Scheduled', 'Confirmed', 'Pending', 'Completed', 'Cancelled', 'In Progress', 'No Show'];
+  const validStatuses = ['Scheduled', 'Confirmed', 'Pending', 'Completed', 'Cancelled', 'Checked In', 'In Progress', 'No Show'];
   const y = start.getFullYear();
   const mo = (start.getMonth() + 1).toString().padStart(2, '0');
   const da = start.getDate().toString().padStart(2, '0');
@@ -87,11 +87,19 @@ const statusStyles: Record<string, { bg: string; text: string; icon: typeof Chec
   Scheduled: { bg: '#06B6D420', text: '#06B6D4', icon: CalendarIcon },
   Confirmed: { bg: '#74C69D20', text: 'var(--brand-green-text)', icon: CheckCircle2 },
   Pending: { bg: '#F4A26120', text: '#F4A261', icon: AlertCircle },
+  'Checked In': { bg: '#F59E0B20', text: '#F59E0B', icon: UserCheck },
+  'Waiting for Doctor': { bg: '#F59E0B20', text: '#F59E0B', icon: UserCheck },
   Completed: { bg: '#6B728020', text: 'var(--text-secondary)', icon: CheckCircle2 },
   Cancelled: { bg: '#d4183d20', text: '#d4183d', icon: XCircle },
   'In Progress': { bg: '#3B82F620', text: '#3B82F6', icon: Stethoscope },
   'No Show': { bg: '#64748B20', text: '#64748B', icon: XCircle },
 };
+
+/** Map DB status → user-friendly label */
+function displayStatusLabel(status: string): string {
+  if (status === 'Checked In') return 'Waiting for Doctor';
+  return status;
+}
 
 const serviceColors: Record<string, string> = {
   // Legacy / short names
@@ -192,9 +200,9 @@ function getDurationMin(start: string, end: string): number {
   return toMin(end) - toMin(start);
 }
 
-// Generate 30-min slots from 8:00 AM to 5:30 PM
-const SCHEDULE_SLOTS = Array.from({ length: 20 }, (_, i) => {
-  const totalMin = 8 * 60 + i * 30;
+// Generate 30-min slots for the full 24-hour day (12:00 AM – 11:30 PM)
+const SCHEDULE_SLOTS = Array.from({ length: 48 }, (_, i) => {
+  const totalMin = i * 30;
   const h = Math.floor(totalMin / 60);
   const m = totalMin % 60;
   const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
@@ -391,7 +399,7 @@ export default function AppointmentsPage() {
   // Apply status filter
   const filteredByStatus = dayAppointments.filter((a) => {
     if (activeFilter === 'All') return true;
-    if (activeFilter === 'Upcoming') return a.status === 'Confirmed' || a.status === 'Pending';
+    if (activeFilter === 'Upcoming') return a.status === 'Confirmed' || a.status === 'Pending' || a.status === 'Checked In';
     return a.status === activeFilter;
   });
 
@@ -962,9 +970,9 @@ export default function AppointmentsPage() {
                                 }}
                               >
                                 <StatusIcon className="w-3 h-3" />
-                                {appt.status}
+                                {displayStatusLabel(appt.status)}
                               </span>
-                              {currentUserId && appt.vetId === currentUserId && appt.status === 'In Progress' && (
+                              {currentUserId && appt.vetId === currentUserId && (appt.status === 'Checked In' || appt.status === 'In Progress') && (
                                 <button
                                   type="button"
                                   onClick={(e) => handleStartVisitFromCard(appt, e)}
@@ -980,10 +988,10 @@ export default function AppointmentsPage() {
                                   }}
                                 >
                                   <Play className="w-3 h-3" style={{ fill: 'currentColor' }} />
-                                  {appt.room ? 'Start Visit' : 'Resume Visit'}
+                                  {appt.status === 'In Progress' ? 'Resume Visit' : 'Start Visit'}
                                 </button>
                               )}
-                              {currentUserId && appt.vetId === currentUserId && appt.status === 'In Progress' && appt.room && (
+                              {currentUserId && appt.vetId === currentUserId && (appt.status === 'Checked In' || appt.status === 'In Progress') && appt.room && (
                                 <span
                                   className="inline-flex items-center gap-1.5 px-2.5 py-1 flex-shrink-0"
                                   style={{
@@ -1226,7 +1234,7 @@ export default function AppointmentsPage() {
                                   fontWeight: 600,
                                 }}
                               >
-                                {appt.status}
+                                {displayStatusLabel(appt.status)}
                               </span>
                             </div>
                           ))}
@@ -2366,7 +2374,7 @@ export default function AppointmentsPage() {
                               fontWeight: 600,
                             }}
                           >
-                            {appt.status}
+                            {displayStatusLabel(appt.status)}
                           </span>
                         </div>
                       </div>
@@ -2404,8 +2412,8 @@ export default function AppointmentsPage() {
             const StatusIcon = s.icon;
             const svcColor = serviceColors[selectedAppt.service] || 'var(--text-secondary)';
             const durationMin = getDurationMin(selectedAppt.timeStart, selectedAppt.timeEnd);
-            const canCheckIn = selectedAppt.status === 'Confirmed' || selectedAppt.status === 'Pending';
-            const isActive = selectedAppt.status === 'In Progress';
+            const canCheckIn = selectedAppt.status === 'Confirmed' || selectedAppt.status === 'Pending' || selectedAppt.status === 'Checked In';
+            const isActive = selectedAppt.status === 'Checked In' || selectedAppt.status === 'In Progress';
             const isDone = selectedAppt.status === 'Completed' || selectedAppt.status === 'Cancelled';
 
             return (
@@ -2447,7 +2455,7 @@ export default function AppointmentsPage() {
                     }}
                   >
                     <StatusIcon className="w-3 h-3" />
-                    {selectedAppt.status}
+                    {displayStatusLabel(selectedAppt.status)}
                   </span>
                 </div>
 
@@ -2559,7 +2567,7 @@ export default function AppointmentsPage() {
                         <Select value={editVet} onValueChange={setEditVet}>
                           <SelectTrigger><SelectValue /></SelectTrigger>
                           <SelectContent>
-                            {['Dr. Chen','Dr. Patel','Dr. Garcia'].map((v) => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+                            {staffList.map((s) => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}
                           </SelectContent>
                         </Select>
                       </div>

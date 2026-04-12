@@ -49,9 +49,13 @@ export function useAppointments(dateFilter?: string) {
         .order('scheduled_at', { ascending: true })
 
       if (dateFilter) {
+        // Convert local date boundaries to UTC so timezone-aware queries work correctly.
+        // e.g. "2026-04-11" in UTC-7 → start = 2026-04-11T07:00:00Z, end = 2026-04-12T06:59:59Z
+        const startOfDay = new Date(`${dateFilter}T00:00:00`);
+        const endOfDay = new Date(`${dateFilter}T23:59:59`);
         query = query
-          .gte('scheduled_at', `${dateFilter}T00:00:00`)
-          .lte('scheduled_at', `${dateFilter}T23:59:59`)
+          .gte('scheduled_at', startOfDay.toISOString())
+          .lte('scheduled_at', endOfDay.toISOString())
       }
 
       const { data, error: err } = await query

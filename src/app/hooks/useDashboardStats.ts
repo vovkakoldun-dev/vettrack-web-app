@@ -53,8 +53,8 @@ export function useDashboardStats(): DashboardStats {
           .from('appointments')
           .select('id', { count: 'exact', head: true })
           .eq('organization_id', organizationId)
-          .gte('scheduled_at', `${today}T00:00:00`)
-          .lte('scheduled_at', `${today}T23:59:59`)
+          .gte('scheduled_at', new Date(`${today}T00:00:00`).toISOString())
+          .lte('scheduled_at', new Date(`${today}T23:59:59`).toISOString())
           .not('status', 'eq', 'Cancelled'),
         supabase
           .from('vaccinations')
@@ -71,8 +71,8 @@ export function useDashboardStats(): DashboardStats {
           .from('appointments')
           .select('id', { count: 'exact', head: true })
           .eq('organization_id', organizationId)
-          .gte('scheduled_at', `${yesterday}T00:00:00`)
-          .lte('scheduled_at', `${yesterday}T23:59:59`)
+          .gte('scheduled_at', new Date(`${yesterday}T00:00:00`).toISOString())
+          .lte('scheduled_at', new Date(`${yesterday}T23:59:59`).toISOString())
           .not('status', 'eq', 'Cancelled'),
         // Comparison: clients created before last month
         supabase

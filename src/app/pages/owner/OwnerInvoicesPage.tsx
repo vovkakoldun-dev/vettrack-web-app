@@ -1,23 +1,30 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Receipt, Search, Download, CreditCard, DollarSign,
   Clock, AlertCircle, CheckCircle2, X, Smartphone,
-  ChevronRight, FileText,
+  ChevronRight, FileText, Loader2,
 } from 'lucide-react';
+import { supabase } from '../../../lib/supabase';
+import { useAuth } from '../../context/AuthContext';
+import { useOwnerClient } from '../../hooks/useOwnerClient';
+import { getOrgContext } from '../../hooks/useOrgContext';
+import { loadStripe } from '@stripe/stripe-js';
+
+const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || '');
 
 // ─── Types ────────────────────────────────────────────────────
 
-type InvoiceStatus = 'Paid' | 'Pending' | 'Overdue';
+type InvoiceStatus = 'Paid' | 'Pending' | 'Overdue' | 'Sent' | 'Partial';
 
 interface LineItem {
-  service: string;
   description: string;
   qty: number;
   unitPrice: number;
 }
 
 interface OwnerInvoice {
-  id: string;
+  id: string;          // supabase UUID
+  invoiceNumber: string;
   petName: string;
   petImage: string;
   petBreed: string;
@@ -27,26 +34,15 @@ interface OwnerInvoice {
   vet: string;
   status: InvoiceStatus;
   subtotal: number;
-  taxRate: number;
+  taxAmount: number;
+  total: number;
   items: LineItem[];
   paidDate?: string;
   dueDate: string;
   notes?: string;
 }
 
-// ─── Mock Data ────────────────────────────────────────────────
-
-const MAX_IMAGE = 'https://images.unsplash.com/photo-1734966213753-1b361564bab4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxnb2xkZW4lMjByZXRyaWV2ZXIlMjBkb2clMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyNDMxMzB8MA&ixlib=rb-4.1.0&q=80&w=400';
-const HUGO_IMAGE = 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=400';
-
-const OWNER_INVOICES: OwnerInvoice[] = []
-
 // ─── Helpers ──────────────────────────────────────────────────
-
-function calcTotal(inv: OwnerInvoice) {
-  const tax = inv.subtotal * inv.taxRate;
-  return inv.subtotal + tax;
-}
 
 function fmt(n: number) {
   return `$${n.toFixed(2)}`;
@@ -54,16 +50,25 @@ function fmt(n: number) {
 
 // ─── Status Config ────────────────────────────────────────────
 
-const STATUS_CFG: Record<InvoiceStatus, { bg: string; color: string; label: string; Icon: typeof CheckCircle2 }> = {
+type DisplayStatus = 'Paid' | 'Pending' | 'Overdue';
+
+const STATUS_CFG: Record<DisplayStatus, { bg: string; color: string; label: string; Icon: typeof CheckCircle2 }> = {
   Paid:    { bg: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)', color: 'var(--brand-green-text)', label: 'Paid',    Icon: CheckCircle2 },
   Pending: { bg: '#F4A26115', color: '#D97706', label: 'Pending', Icon: Clock },
   Overdue: { bg: '#d4183d15', color: '#d4183d', label: 'Overdue', Icon: AlertCircle },
 };
 
+function getDisplayStatus(s: InvoiceStatus): DisplayStatus {
+  if (s === 'Paid') return 'Paid';
+  if (s === 'Overdue') return 'Overdue';
+  return 'Pending'; // Sent, Partial, Pending all show as "Pending"
+}
+
 // ─── Status Badge ─────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: InvoiceStatus }) {
-  const c = STATUS_CFG[status];
+  const ds = getDisplayStatus(status);
+  const c = STATUS_CFG[ds];
   const Icon = c.Icon;
   return (
     <span style={{
@@ -80,12 +85,49 @@ function StatusBadge({ status }: { status: InvoiceStatus }) {
 
 // ─── Invoice Detail Modal ─────────────────────────────────────
 
-function InvoiceModal({ inv, onClose }: { inv: OwnerInvoice; onClose: () => void }) {
+function InvoiceModal({ inv, onClose, onPaid }: { inv: OwnerInvoice; onClose: () => void; onPaid: () => void }) {
   const [payMethod, setPayMethod] = useState<'card' | 'terminal' | 'cash'>('card');
-  const [paid, setPaid] = useState(false);
+  const [paying, setPaying] = useState(false);
+  const [paid, setPaid] = useState(inv.status === 'Paid');
 
-  const tax   = inv.subtotal * inv.taxRate;
-  const total = inv.subtotal + tax;
+  const total = inv.total;
+
+  const handleStripeCheckout = async () => {
+    setPaying(true);
+    try {
+      const { data: { session: authSession } } = await supabase.auth.getSession();
+      const token = authSession?.access_token;
+      if (!token) { alert('Please log in to pay.'); setPaying(false); return; }
+
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-checkout-session`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+          },
+          body: JSON.stringify({
+            invoice_id: inv.id,
+            success_url: `${window.location.origin}/owner/invoices?payment=success&invoice=${inv.id}`,
+            cancel_url: `${window.location.origin}/owner/invoices?payment=cancelled`,
+          }),
+        }
+      );
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        alert(data.error || 'Failed to create checkout session');
+      }
+    } catch (err) {
+      console.error('Stripe checkout error:', err);
+      alert('Payment failed. Please try again.');
+    } finally {
+      setPaying(false);
+    }
+  };
 
   if (paid) {
     return (
@@ -112,13 +154,13 @@ function InvoiceModal({ inv, onClose }: { inv: OwnerInvoice; onClose: () => void
               Payment Successful
             </p>
             <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
-              {fmt(total)} charged to card on file
+              {fmt(total)} paid via Stripe
             </p>
             <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '28px' }}>
               A receipt has been sent to your email
             </p>
             <button
-              onClick={onClose}
+              onClick={() => { onPaid(); onClose(); }}
               style={{
                 padding: '12px 32px', borderRadius: '10px',
                 backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)',
@@ -172,7 +214,7 @@ function InvoiceModal({ inv, onClose }: { inv: OwnerInvoice; onClose: () => void
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <p style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                  Invoice {inv.id}
+                  Invoice {inv.invoiceNumber}
                 </p>
                 <StatusBadge status={inv.status} />
               </div>
@@ -205,10 +247,12 @@ function InvoiceModal({ inv, onClose }: { inv: OwnerInvoice; onClose: () => void
             backgroundColor: 'var(--surface-elevated)',
             marginBottom: '20px',
           }}>
-            <img
-              src={inv.petImage} alt={inv.petName}
-              style={{ width: '40px', height: '40px', borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }}
-            />
+            {inv.petImage && (
+              <img
+                src={inv.petImage} alt={inv.petName}
+                style={{ width: '40px', height: '40px', borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }}
+              />
+            )}
             <div>
               <p style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{inv.petName}</p>
               <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{inv.petBreed}</p>
@@ -274,12 +318,13 @@ function InvoiceModal({ inv, onClose }: { inv: OwnerInvoice; onClose: () => void
               >
                 <div>
                   <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>
-                    {item.service}
-                  </p>
-                  <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
                     {item.description}
-                    {item.qty > 1 && ` × ${item.qty}`}
                   </p>
+                  {item.qty > 1 && (
+                    <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                      × {item.qty}
+                    </p>
+                  )}
                 </div>
                 <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
                   {fmt(item.unitPrice * item.qty)}
@@ -294,8 +339,8 @@ function InvoiceModal({ inv, onClose }: { inv: OwnerInvoice; onClose: () => void
                 <span style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{fmt(inv.subtotal)}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-                <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Tax ({(inv.taxRate * 100).toFixed(0)}%)</span>
-                <span style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{fmt(tax)}</span>
+                <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Tax</span>
+                <span style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{fmt(inv.taxAmount)}</span>
               </div>
               <div style={{
                 display: 'flex', justifyContent: 'space-between',
@@ -317,7 +362,7 @@ function InvoiceModal({ inv, onClose }: { inv: OwnerInvoice; onClose: () => void
             }}>
               <CheckCircle2 style={{ width: '16px', height: '16px', color: 'var(--brand-green-text)', flexShrink: 0 }} />
               <p style={{ fontSize: '13px', color: 'var(--brand-green-text)', fontWeight: 600 }}>
-                Paid on {inv.paidDate}
+                Paid{inv.paidDate ? ` on ${inv.paidDate}` : ''}
               </p>
             </div>
           )}
@@ -330,7 +375,7 @@ function InvoiceModal({ inv, onClose }: { inv: OwnerInvoice; onClose: () => void
               </p>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '16px' }}>
                 {([
-                  { id: 'card' as const,     label: 'Card on File',      Icon: CreditCard },
+                  { id: 'card' as const,     label: 'Pay Online',          Icon: CreditCard },
                   { id: 'terminal' as const, label: 'Use Card Machine',   Icon: Smartphone },
                   { id: 'cash' as const,     label: 'Cash',              Icon: DollarSign },
                 ] as { id: 'card' | 'terminal' | 'cash'; label: string; Icon: typeof CreditCard }[]).map(({ id, label, Icon }) => (
@@ -410,17 +455,28 @@ function InvoiceModal({ inv, onClose }: { inv: OwnerInvoice; onClose: () => void
 
           {inv.status !== 'Paid' && payMethod === 'card' && (
             <button
-              onClick={() => setPaid(true)}
+              onClick={handleStripeCheckout}
+              disabled={paying}
               style={{
                 padding: '10px 22px', borderRadius: '9px',
                 backgroundColor: '#8B5CF6', color: '#fff',
-                border: 'none', cursor: 'pointer',
+                border: 'none', cursor: paying ? 'not-allowed' : 'pointer',
+                opacity: paying ? 0.7 : 1,
                 fontSize: '14px', fontWeight: 700,
                 display: 'flex', alignItems: 'center', gap: '6px',
               }}
             >
-              <CreditCard style={{ width: '14px', height: '14px' }} />
-              Pay {fmt(total)}
+              {paying ? (
+                <>
+                  <Loader2 style={{ width: '14px', height: '14px', animation: 'spin 1s linear infinite' }} />
+                  Redirecting…
+                </>
+              ) : (
+                <>
+                  <CreditCard style={{ width: '14px', height: '14px' }} />
+                  Pay {fmt(total)}
+                </>
+              )}
             </button>
           )}
           {inv.status !== 'Paid' && payMethod !== 'card' && (
@@ -445,17 +501,83 @@ function InvoiceModal({ inv, onClose }: { inv: OwnerInvoice; onClose: () => void
 // ─── Page ─────────────────────────────────────────────────────
 
 export default function OwnerInvoicesPage() {
+  const { user } = useAuth();
+  const { clientId } = useOwnerClient();
   const [search, setSearch]             = useState('');
-  const [petFilter, setPetFilter]       = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedInv, setSelectedInv]   = useState<OwnerInvoice | null>(null);
+  const [invoices, setInvoices]         = useState<OwnerInvoice[]>([]);
+  const [loading, setLoading]           = useState(true);
 
-  const filtered = OWNER_INVOICES.filter(inv => {
+  // Check for payment success from Stripe redirect
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('payment') === 'success') {
+      // Clean URL
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
+
+  const loadInvoices = useCallback(async () => {
+    if (!clientId) { setLoading(false); return; }
+    try {
+      const { organizationId } = await getOrgContext();
+      const { data } = await supabase
+        .from('invoices')
+        .select(`
+          id, invoice_number, subtotal, tax_amount, total, status, created_at, due_date, paid_at, notes,
+          appointments(id, reason, scheduled_at, pets(id, name, species, breed, image_url), staff:staff!appointments_vet_id_fkey(profiles!staff_profile_id_fkey(first_name, last_name))),
+          invoice_line_items(id, description, quantity, unit_price)
+        `)
+        .eq('organization_id', organizationId)
+        .eq('client_id', clientId)
+        .order('created_at', { ascending: false });
+
+      if (data) {
+        const mapped: OwnerInvoice[] = data.map((inv: any) => {
+          const appt = inv.appointments;
+          const pet = appt?.pets;
+          const vetProfile = appt?.staff?.profiles;
+          const vetName = vetProfile ? `Dr. ${vetProfile.first_name} ${vetProfile.last_name}`.trim() : '—';
+          return {
+            id: inv.id,
+            invoiceNumber: inv.invoice_number || `INV-${inv.id.substring(0, 8)}`,
+            petName: pet?.name || '—',
+            petImage: pet?.image_url || '',
+            petBreed: pet?.breed || pet?.species || '',
+            service: appt?.reason || inv.notes || '—',
+            date: new Date(inv.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+            dateISO: inv.created_at,
+            vet: vetName,
+            status: (inv.status || 'Pending') as InvoiceStatus,
+            subtotal: Number(inv.subtotal || 0),
+            taxAmount: Number(inv.tax_amount || 0),
+            total: Number(inv.total || 0),
+            items: (inv.invoice_line_items || []).map((li: any) => ({
+              description: li.description,
+              qty: li.quantity || 1,
+              unitPrice: Number(li.unit_price || 0),
+            })),
+            paidDate: inv.paid_at ? new Date(inv.paid_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : undefined,
+            dueDate: inv.due_date ? new Date(inv.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—',
+            notes: inv.notes || undefined,
+          };
+        });
+        setInvoices(mapped);
+      }
+    } catch (err) {
+      console.error('loadInvoices error:', err);
+    }
+    setLoading(false);
+  }, [clientId]);
+
+  useEffect(() => { loadInvoices(); }, [loadInvoices]);
+
+  const filtered = invoices.filter(inv => {
     const q = search.toLowerCase();
-    const matchQ = !q || inv.petName.toLowerCase().includes(q) || inv.id.toLowerCase().includes(q) || inv.service.toLowerCase().includes(q);
-    const matchP = petFilter === 'all' || inv.petName === petFilter;
-    const matchS = statusFilter === 'all' || inv.status === statusFilter;
-    return matchQ && matchP && matchS;
+    const matchQ = !q || inv.petName.toLowerCase().includes(q) || inv.invoiceNumber.toLowerCase().includes(q) || inv.service.toLowerCase().includes(q);
+    const matchS = statusFilter === 'all' || getDisplayStatus(inv.status) === statusFilter;
+    return matchQ && matchS;
   });
 
   const inputStyle: React.CSSProperties = {
@@ -475,7 +597,7 @@ export default function OwnerInvoicesPage() {
           My Invoices
         </h1>
         <p style={{ fontSize: '15px', color: 'var(--text-secondary)' }}>
-          Billing history for Max &amp; Hugo
+          View and pay your veterinary invoices
         </p>
       </div>
 
@@ -497,34 +619,13 @@ export default function OwnerInvoicesPage() {
           />
         </div>
 
-        {/* Pet filter */}
-        <select value={petFilter} onChange={e => setPetFilter(e.target.value)} style={inputStyle}>
-          <option value="all">All Pets</option>
-          <option value="Max">🐕 Max</option>
-          <option value="Hugo">🐈 Hugo</option>
-        </select>
-
         {/* Status filter */}
         <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={inputStyle}>
           <option value="all">All Statuses</option>
-          <option value="Paid">✅ Paid</option>
-          <option value="Pending">⏳ Pending</option>
-          <option value="Overdue">🚨 Overdue</option>
+          <option value="Paid">Paid</option>
+          <option value="Pending">Pending</option>
+          <option value="Overdue">Overdue</option>
         </select>
-
-        {/* Download all */}
-        <button style={{
-          padding: '8px 16px', borderRadius: '8px',
-          border: '1px solid var(--border-color)',
-          backgroundColor: 'var(--surface-elevated)',
-          color: 'var(--text-secondary)',
-          fontSize: '13px', fontWeight: 600, cursor: 'pointer',
-          display: 'flex', alignItems: 'center', gap: '6px',
-          marginLeft: 'auto',
-        }}>
-          <Download style={{ width: '14px', height: '14px' }} />
-          Export All
-        </button>
       </div>
 
       {/* ── Invoice list ── */}
@@ -552,17 +653,21 @@ export default function OwnerInvoicesPage() {
           ))}
         </div>
 
-        {filtered.length === 0 && (
+        {loading ? (
+          <div style={{ padding: '48px', textAlign: 'center' }}>
+            <div className="w-6 h-6 border-2 border-[var(--border-color)] border-t-[var(--brand-green-text)] rounded-full animate-spin mx-auto mb-3" />
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Loading invoices…</p>
+          </div>
+        ) : filtered.length === 0 ? (
           <div style={{ padding: '48px', textAlign: 'center' }}>
             <FileText style={{ width: '32px', height: '32px', color: 'var(--text-secondary)', margin: '0 auto 12px' }} />
             <p style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>No invoices found</p>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>Try adjusting your filters</p>
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+              {invoices.length === 0 ? 'You have no invoices yet' : 'Try adjusting your filters'}
+            </p>
           </div>
-        )}
-
-        {filtered.map((inv, idx) => {
-          const total = calcTotal(inv);
-          return (
+        ) : (
+          filtered.map((inv, idx) => (
             <div
               key={inv.id}
               onClick={() => setSelectedInv(inv)}
@@ -578,15 +683,26 @@ export default function OwnerInvoicesPage() {
               onMouseLeave={e => (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'}
             >
               {/* Pet avatar */}
-              <img
-                src={inv.petImage} alt={inv.petName}
-                style={{ width: '36px', height: '36px', borderRadius: '50%', objectFit: 'cover' }}
-              />
+              {inv.petImage ? (
+                <img
+                  src={inv.petImage} alt={inv.petName}
+                  style={{ width: '36px', height: '36px', borderRadius: '50%', objectFit: 'cover' }}
+                />
+              ) : (
+                <div style={{
+                  width: '36px', height: '36px', borderRadius: '50%',
+                  backgroundColor: 'var(--surface-elevated)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: '14px', fontWeight: 700, color: 'var(--text-secondary)',
+                }}>
+                  {inv.petName.charAt(0)}
+                </div>
+              )}
 
               {/* Invoice # */}
               <div>
                 <p style={{ fontSize: '13px', fontWeight: 700, color: '#8B5CF6', fontFamily: 'monospace' }}>
-                  {inv.id}
+                  {inv.invoiceNumber}
                 </p>
                 <StatusBadge status={inv.status} />
               </div>
@@ -611,11 +727,10 @@ export default function OwnerInvoicesPage() {
               {/* Amount + arrow */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div style={{ textAlign: 'right' }}>
-                  <p style={{ fontSize: '15px', fontWeight: 800, color: 'var(--text-primary)' }}>{fmt(total)}</p>
-                  {inv.status === 'Paid' && (
+                  <p style={{ fontSize: '15px', fontWeight: 800, color: 'var(--text-primary)' }}>{fmt(inv.total)}</p>
+                  {inv.status === 'Paid' ? (
                     <p style={{ fontSize: '11px', color: 'var(--brand-green-text)', fontWeight: 600 }}>Paid</p>
-                  )}
-                  {inv.status !== 'Paid' && (
+                  ) : (
                     <p style={{ fontSize: '11px', color: inv.status === 'Overdue' ? '#d4183d' : '#D97706', fontWeight: 600 }}>
                       Due {inv.dueDate}
                     </p>
@@ -624,8 +739,8 @@ export default function OwnerInvoicesPage() {
                 <ChevronRight style={{ width: '16px', height: '16px', color: 'var(--text-secondary)', flexShrink: 0 }} />
               </div>
             </div>
-          );
-        })}
+          ))
+        )}
 
         {/* Footer */}
         <div style={{
@@ -634,7 +749,7 @@ export default function OwnerInvoicesPage() {
         }}>
           <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
             Showing <strong style={{ color: 'var(--text-primary)' }}>{filtered.length}</strong> of{' '}
-            <strong style={{ color: 'var(--text-primary)' }}>{OWNER_INVOICES.length}</strong> invoices
+            <strong style={{ color: 'var(--text-primary)' }}>{invoices.length}</strong> invoices
           </p>
           {filtered.some(i => i.status !== 'Paid') && (
             <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
@@ -646,8 +761,11 @@ export default function OwnerInvoicesPage() {
 
       {/* ── Invoice Detail Modal ── */}
       {selectedInv && (
-        <InvoiceModal inv={selectedInv} onClose={() => setSelectedInv(null)} />
+        <InvoiceModal inv={selectedInv} onClose={() => setSelectedInv(null)} onPaid={loadInvoices} />
       )}
+
+      {/* Spinner animation */}
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }

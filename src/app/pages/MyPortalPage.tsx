@@ -738,7 +738,7 @@ export default function MyPortalPage() {
               petImage: a.pets?.photo_url ?? '',
               ownerName: a.clients ? `${a.clients.first_name} ${a.clients.last_name}` : '—',
               service: a.reason ?? '—',
-              clientArrived: a.status === 'In Progress',
+              clientArrived: a.status === 'Checked In' || a.status === 'In Progress',
               durationMinutes: a.duration_minutes ?? 30,
             };
           });

@@ -27,6 +27,75 @@ import { useClients } from '../../hooks/useClients';
 import { usePets } from '../../hooks/usePets';
 import { WeightPicker, US_STATES, CA_PROVINCES } from '../../components/AddClientDialog';
 import { supabase } from '../../../lib/supabase';
+import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
+import { stripePromise, isStripeConfigured } from '../../../lib/stripe';
+
+// ─── Stripe Card Form (inner component for Elements context) ──
+function BookingsStripeCardForm() {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [succeeded, setSucceeded] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!stripe || !elements) return;
+    setProcessing(true);
+    setError(null);
+    const result = await stripe.confirmPayment({
+      elements,
+      confirmParams: {},
+      redirect: 'if_required',
+    });
+    if (result.error) {
+      setError(result.error.message || 'Payment failed');
+      setProcessing(false);
+    } else {
+      setSucceeded(true);
+      setProcessing(false);
+      window.dispatchEvent(new CustomEvent('stripePaymentSuccess', { detail: { paymentIntent: result.paymentIntent } }));
+    }
+  };
+
+  if (succeeded) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 0' }}>
+        <CheckCircle2 style={{ width: 18, height: 18, color: '#22C55E' }} />
+        <span style={{ fontSize: 14, fontWeight: 600, color: '#22C55E' }}>Card payment successful!</span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ padding: '12px', borderRadius: 8, border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-white)' }}>
+        <PaymentElement options={{ layout: 'tabs' }} />
+      </div>
+      {error && (
+        <div style={{ padding: '8px 12px', borderRadius: 8, backgroundColor: '#d4183d15', border: '1px solid #d4183d30' }}>
+          <p style={{ fontSize: 12, color: '#d4183d', margin: 0 }}>{error}</p>
+        </div>
+      )}
+      <button
+        onClick={handleSubmit}
+        disabled={!stripe || processing}
+        style={{
+          width: '100%', padding: '12px', borderRadius: 8, border: 'none',
+          cursor: processing ? 'not-allowed' : 'pointer',
+          backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)', fontSize: 14, fontWeight: 700,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          opacity: processing ? 0.7 : 1, transition: 'opacity 0.15s',
+        }}
+      >
+        {processing ? (
+          <><Loader2 style={{ width: 16, height: 16, animation: 'spin 1s linear infinite' }} /> Processing...</>
+        ) : (
+          <><CreditCard style={{ width: 16, height: 16 }} /> Pay with Card</>
+        )}
+      </button>
+    </div>
+  );
+}
 
 // ─── Status Styles ───────────────────────────────────────────
 
@@ -34,6 +103,8 @@ const statusStyles: Record<string, { bg: string; text: string; icon: typeof Chec
   Scheduled: { bg: '#06B6D420', text: '#06B6D4', icon: CalendarIcon },
   Confirmed: { bg: '#74C69D20', text: 'var(--brand-green-text)', icon: CheckCircle2 },
   Pending: { bg: '#F4A26120', text: '#F4A261', icon: AlertCircle },
+  'Checked In': { bg: '#F59E0B20', text: '#F59E0B', icon: UserCheck },
+  'Waiting for Doctor': { bg: '#F59E0B20', text: '#F59E0B', icon: UserCheck },
   'In Progress': { bg: '#3B82F620', text: '#3B82F6', icon: Stethoscope },
   Completed: { bg: '#6B728020', text: 'var(--text-secondary)', icon: CheckCircle2 },
   Cancelled: { bg: '#d4183d20', text: '#d4183d', icon: XCircle },
@@ -173,9 +244,9 @@ function getDurationMin(start: string, end: string): number {
   return toMin(end) - toMin(start);
 }
 
-// Generate 30-min slots from 8:00 AM to 5:30 PM (business hours)
-const SCHEDULE_SLOTS = Array.from({ length: 20 }, (_, i) => {
-  const totalMin = 8 * 60 + i * 30;
+// Generate 30-min slots for the full 24-hour day (12:00 AM – 11:30 PM)
+const SCHEDULE_SLOTS = Array.from({ length: 48 }, (_, i) => {
+  const totalMin = i * 30;
   const h = Math.floor(totalMin / 60);
   const m = totalMin % 60;
   const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
@@ -274,18 +345,17 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
     [supaAppts],
   );
 
-  // Load already-paid appointment IDs (appointments with existing invoices)
+  // Load actually-paid appointment IDs (only invoices with status 'Paid')
   useEffect(() => {
     (async () => {
       const completedIds = supaAppts.filter((a) => a.status === 'Completed').map((a) => a.id);
-      if (completedIds.length === 0) return;
+      if (completedIds.length === 0) { setPaidApptIds(new Set()); return; }
       const { data } = await db
         .from('invoices')
         .select('appointment_id')
-        .in('appointment_id', completedIds);
-      if (data && data.length > 0) {
-        setPaidApptIds(new Set(data.map((d: any) => d.appointment_id)));
-      }
+        .in('appointment_id', completedIds)
+        .eq('status', 'Paid');
+      setPaidApptIds(new Set((data || []).map((d: any) => d.appointment_id)));
     })();
   }, [supaAppts]);
 
@@ -318,6 +388,10 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'cash' | 'insurance'>('card');
   const [paymentProcessing, setPaymentProcessing] = useState(false);
   const [paymentDone, setPaymentDone] = useState(false);
+  const [showCardForm, setShowCardForm] = useState(false);
+  const [stripeClientSecret, setStripeClientSecret] = useState<string | null>(null);
+  const [stripeLoading, setStripeLoading] = useState(false);
+  const [stripeError, setStripeError] = useState<string | null>(null);
   const [paidApptIds, setPaidApptIds] = useState<Set<string>>(new Set());
   const [detailMode, setDetailMode] = useState<'view' | 'edit'>('view');
   const [selectedAppt, setSelectedAppt] = useState<Record<string, unknown> | null>(null);
@@ -389,8 +463,8 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
     appointments.forEach((a) => {
       if (!a.roomId) return;
       if (a.id === roomSelectAppt.id) return;
-      // (a) An "In Progress" appointment holds its room — but only if its end time hasn't passed.
-      if (a.status === 'In Progress') {
+      // (a) A "Checked In" or "In Progress" appointment holds its room — but only if its end time hasn't passed.
+      if (a.status === 'In Progress' || a.status === 'Checked In') {
         const endMin = toMin(a.timeEnd);
         const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
         const isToday = a.date === roomSelectAppt.date;
@@ -492,7 +566,7 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
   const [changeTimeReq, setChangeTimeReq] = useState<PortalRequest | null>(null);
   const [changeTimeDate, setChangeTimeDate] = useState('');
   const [changeTimeTime, setChangeTimeTime] = useState('');
-  const [changeTimeVet, setChangeTimeVet] = useState('Dr. Chen');
+  const [changeTimeVet, setChangeTimeVet] = useState('');
   const [contactReq, setContactReq] = useState<PortalRequest | null>(null);
   const [contactMsg, setContactMsg] = useState('');
 
@@ -571,6 +645,7 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
         a.status === 'Scheduled' ||
         a.status === 'Confirmed' ||
         a.status === 'Pending' ||
+        a.status === 'Checked In' ||
         a.status === 'In Progress'
       );
     }
@@ -602,6 +677,7 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
       a.status === 'Scheduled' ||
       a.status === 'Confirmed' ||
       a.status === 'Pending' ||
+      a.status === 'Checked In' ||
       a.status === 'In Progress',
   ).length;
   // Group appointments by time slot (multiple doctors can have bookings at same time)
@@ -722,19 +798,41 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
     setRoomSelectOpen(false);
 
     // Update local override — keep the original scheduled time intact.
-    // The appointment was booked for X o'clock; the patient arriving doesn't
-    // rewrite the schedule, it just moves the status to "In Progress".
+    // The patient arriving sets status to "Checked In" (waiting for doctor).
+    // Only the doctor clicking "Start Visit" moves it to "In Progress".
     setAppointments((prev) =>
       prev.map((a) =>
         a.id === roomSelectAppt.id
-          ? { ...a, status: 'In Progress' as const, room: room.name, roomId: room.id }
+          ? { ...a, status: 'Checked In' as const, room: room.name, roomId: room.id }
           : a,
       ),
     );
-    // Persist: we pass the room name (for legacy display callers) AND room.id
-    // so the busy lookup can disambiguate rooms that share the same name.
-    // We do NOT pass scheduledAt — the time stays as scheduled.
-    await updateStatusWithRoom(roomSelectAppt.id, 'In Progress', room.name, undefined, room.id);
+    await updateStatusWithRoom(roomSelectAppt.id, 'Checked In', room.name, undefined, room.id);
+
+    // Send notification to the assigned doctor
+    if (roomSelectAppt.vetId) {
+      try {
+        const { organizationId } = await getOrgContext();
+        await db.from('notification_events').insert({
+          id: `patient-arrived-${roomSelectAppt.id}-${Date.now()}`,
+          organization_id: organizationId,
+          type: 'patient_arrived',
+          timestamp: new Date().toISOString(),
+          data: {
+            vetId: roomSelectAppt.vetId,
+            petName: roomSelectAppt.petName,
+            ownerName: roomSelectAppt.ownerName,
+            room: room.name,
+            service: roomSelectAppt.service,
+            timeStart: roomSelectAppt.timeStart,
+            appointmentId: roomSelectAppt.id,
+          },
+        });
+      } catch (err) {
+        console.error('Failed to send arrival notification:', err);
+      }
+    }
+
     setArrivedToast(`${roomSelectAppt.petName} (${roomSelectAppt.ownerName}) has arrived → assigned to ${room.name}. ${roomSelectAppt.vet || 'Vet'} has been notified.`);
     setTimeout(() => setArrivedToast(null), 5000);
     setRoomSelectAppt(null);
@@ -964,11 +1062,10 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
 
       {/* ─── Change Time Dialog ─────────────────────── */}
       {changeTimeReq && (() => {
-        const VET_OPTIONS = [
-          { name: 'Dr. Chen',   initials: 'DC', color: 'var(--brand-green-text)' },
-          { name: 'Dr. Patel',  initials: 'SP', color: '#3B82F6' },
-          { name: 'Dr. Garcia', initials: 'MG', color: '#8B5CF6' },
-        ];
+        const VET_OPTIONS = staffList.map((s, i) => {
+          const colors = ['var(--brand-green-text)', '#3B82F6', '#8B5CF6', '#F59E0B', '#06B6D4', '#EC4899'];
+          return { name: s.name, initials: s.initials, color: colors[i % colors.length], id: s.id };
+        });
         const slots = changeTimeDate ? getSlotAvailability(changeTimeDate) : [];
         return (
           <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.45)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }} onClick={() => setChangeTimeReq(null)}>
@@ -1392,7 +1489,7 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
                     <>
                       {visibleItems.map((appt, idx) => {
                   const isPaid = paidApptIds.has(appt.id);
-                  const displayStatus = isPaid ? 'Paid' : appt.status;
+                  const displayStatus = isPaid ? 'Paid' : appt.status === 'Checked In' ? 'Waiting for Doctor' : appt.status;
                   const s = statusStyles[displayStatus] || statusStyles.Completed;
                   const StatusIcon = s.icon;
                   const serviceColor = serviceColors[appt.service] || serviceColors.Other;
@@ -1476,7 +1573,7 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
                         </span>
 
                         {/* Room badge */}
-                        {appt.room && appt.status === 'In Progress' && (
+                        {appt.room && (appt.status === 'Checked In' || appt.status === 'In Progress') && (
                           <span
                             className="inline-flex items-center gap-1 px-2 py-0.5 flex-shrink-0"
                             style={{
@@ -1522,6 +1619,9 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
                               setPaymentAppt(appt);
                               setPaymentMethod('card');
                               setPaymentDone(false);
+                              setShowCardForm(false);
+                              setStripeClientSecret(null);
+                              setStripeError(null);
                               setPaymentOpen(true);
                             }}
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 flex-shrink-0 hover:opacity-90 transition-opacity"
@@ -2161,14 +2261,12 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
               <div>
                 <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Veterinarian</p>
                 <div className="flex gap-2 flex-wrap">
-                  {[
-                    { name: 'Dr. Chen',   initials: 'SC', color: 'var(--brand-green-text)' },
-                    { name: 'Dr. Patel',  initials: 'RP', color: '#3B82F6' },
-                    { name: 'Dr. Garcia', initials: 'MG', color: '#8B5CF6' },
-                  ].map(v => {
-                    const active = newApptVetName === v.name;
+                  {staffList.map((s, i) => {
+                    const colors = ['var(--brand-green-text)', '#3B82F6', '#8B5CF6', '#F59E0B', '#06B6D4', '#EC4899'];
+                    const v = { name: s.name, initials: s.initials, color: colors[i % colors.length], id: s.id };
+                    const active = newApptVetId === v.id;
                     return (
-                      <button key={v.name} onClick={() => setNewApptVetName(v.name)} style={{
+                      <button key={v.id} onClick={() => { setNewApptVetId(v.id); setNewApptVetName(v.name); }} style={{
                         padding: '7px 14px', borderRadius: '8px', fontSize: '13px',
                         fontWeight: active ? 700 : 500,
                         border: `1.5px solid ${active ? v.color : 'var(--border-color)'}`,
@@ -2414,7 +2512,7 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
                 <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>Payment Method</p>
                 <div className="grid grid-cols-3 gap-2">
                   {([
-                    { key: 'card' as const, icon: CreditCard, label: 'Card' },
+                    { key: 'card' as const, icon: CreditCard, label: 'Credit Card' },
                     { key: 'cash' as const, icon: Banknote, label: 'Cash' },
                     { key: 'insurance' as const, icon: Receipt, label: 'Insurance' },
                   ]).map(({ key, icon: Icon, label }) => (
@@ -2436,6 +2534,81 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
                   ))}
                 </div>
               </div>
+
+              {/* Stripe card entry toggle + form */}
+              {paymentMethod === 'card' && isStripeConfigured() && (
+                <div>
+                  <button
+                    onClick={async () => {
+                      if (showCardForm) { setShowCardForm(false); setStripeClientSecret(null); return; }
+                      setShowCardForm(true);
+                      setStripeLoading(true);
+                      setStripeError(null);
+                      try {
+                        const { data: { session } } = await supabase.auth.getSession();
+                        const resp = await fetch(
+                          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-payment-intent`,
+                          {
+                            method: 'POST',
+                            headers: {
+                              'Content-Type': 'application/json',
+                              'Authorization': `Bearer ${session?.access_token}`,
+                            },
+                            body: JSON.stringify({
+                              amount: 70.20,
+                              currency: 'usd',
+                              description: paymentAppt ? `${paymentAppt.service} — ${paymentAppt.petName} (${paymentAppt.ownerName})` : 'VetTrack Payment',
+                              metadata: paymentAppt ? { appointment_id: paymentAppt.id, pet: paymentAppt.petName, owner: paymentAppt.ownerName } : {},
+                            }),
+                          },
+                        );
+                        const result = await resp.json();
+                        if (result.clientSecret) {
+                          setStripeClientSecret(result.clientSecret);
+                        } else {
+                          setStripeError(result.error || 'Failed to initialize payment');
+                        }
+                      } catch (e: any) {
+                        setStripeError(e.message || 'Connection error');
+                      }
+                      setStripeLoading(false);
+                    }}
+                    style={{
+                      width: '100%', padding: '9px 14px', borderRadius: 8, cursor: 'pointer',
+                      border: showCardForm ? '1.5px solid var(--brand-green-text)' : '1.5px dashed color-mix(in srgb, var(--brand-green-text) 50%, transparent)',
+                      backgroundColor: showCardForm ? 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)' : 'transparent',
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    <Plus style={{ width: 14, height: 14, color: 'var(--brand-green-text)', transform: showCardForm ? 'rotate(45deg)' : 'none', transition: 'transform 0.2s' }} />
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--brand-green-text)' }}>
+                      {showCardForm ? 'Hide Card Details' : 'Enter Card Details'}
+                    </span>
+                  </button>
+
+                  {showCardForm && (
+                    <div style={{ marginTop: 10, padding: 14, borderRadius: 10, border: '1.5px solid color-mix(in srgb, var(--brand-green-text) 30%, transparent)', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 4%, transparent)' }}>
+                      {stripeLoading && (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 16 }}>
+                          <Loader2 style={{ width: 16, height: 16, color: 'var(--brand-green-text)', animation: 'spin 1s linear infinite' }} />
+                          <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Initializing secure payment...</span>
+                        </div>
+                      )}
+                      {stripeError && (
+                        <div style={{ padding: '10px 14px', borderRadius: 8, backgroundColor: '#d4183d15', border: '1px solid #d4183d30', marginBottom: 8 }}>
+                          <p style={{ fontSize: 12, color: '#d4183d', margin: 0 }}>{stripeError}</p>
+                        </div>
+                      )}
+                      {stripeClientSecret && stripePromise && (
+                        <Elements stripe={stripePromise} options={{ clientSecret: stripeClientSecret, appearance: { theme: 'night', variables: { colorPrimary: '#2D6A4F', colorBackground: 'var(--surface-white)', colorText: 'var(--text-primary)', borderRadius: '8px', fontFamily: 'inherit' } } }}>
+                          <BookingsStripeCardForm />
+                        </Elements>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Summary */}
               <div className="space-y-2 pt-1" style={{ borderTop: '1px solid var(--border-color)', paddingTop: 12 }}>
@@ -3035,7 +3208,7 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
                         <Select value={editVet} onValueChange={setEditVet}>
                           <SelectTrigger><SelectValue /></SelectTrigger>
                           <SelectContent>
-                            {['Dr. Chen','Dr. Patel','Dr. Garcia'].map((v) => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+                            {staffList.map((s) => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}
                           </SelectContent>
                         </Select>
                       </div>

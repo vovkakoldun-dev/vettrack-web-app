@@ -20,6 +20,8 @@ import { useClients } from '../../hooks/useClients';
 import { supabase } from '../../../lib/supabase';
 import { useProfile } from '../../hooks/useProfile';
 import { ConnectionStatusBadge } from '../../components/ConnectionStatusBadge';
+import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
+import { stripePromise, isStripeConfigured } from '../../../lib/stripe';
 
 // ─── Global Search ───────────────────────────────────────────
 
@@ -132,7 +134,7 @@ function useGlobalSearch(query: string, debounceMs = 300) {
 
 // ─── Types ────────────────────────────────────────────────────
 
-type ApptStatus = 'Scheduled' | 'Confirmed' | 'Patient Arrived' | 'Waiting for Doctor' | 'In Progress' | 'Ready for Billing' | 'Completed' | 'Cancelled' | 'Pending' | 'No Show' | 'Late';
+type ApptStatus = 'Scheduled' | 'Confirmed' | 'Patient Arrived' | 'Checked In' | 'Waiting for Doctor' | 'In Progress' | 'Ready for Billing' | 'Completed' | 'Cancelled' | 'Pending' | 'No Show' | 'Late' | 'Paid';
 type PaymentStatus = 'Paid' | 'Pending' | 'Overdue';
 
 // (Recent payments & unread messages are fetched from Supabase inside the component)
@@ -143,10 +145,12 @@ const STATUS_STYLES: Record<ApptStatus, { bg: string; color: string }> = {
   'Scheduled':          { bg: '#06B6D415', color: '#06B6D4' },
   'Confirmed':          { bg: 'rgba(34,197,94,0.12)', color: '#22C55E' },
   'Patient Arrived':    { bg: 'rgba(34,197,94,0.12)', color: '#22C55E' },
+  'Checked In':         { bg: '#F4A26115', color: '#D97706' },
   'Waiting for Doctor': { bg: '#F4A26115', color: '#D97706' },
   'In Progress':        { bg: '#3B82F615', color: '#3B82F6' },
   'Ready for Billing':  { bg: '#8B5CF615', color: '#8B5CF6' },
   'Completed':          { bg: '#6B728015', color: '#6B7280' },
+  'Paid':               { bg: 'rgba(34,197,94,0.12)', color: '#22C55E' },
   'Cancelled':          { bg: '#d4183d15', color: '#d4183d' },
   'Pending':            { bg: '#F4A26115', color: '#F4A261' },
   'No Show':            { bg: '#64748B15', color: '#64748B' },
@@ -547,6 +551,74 @@ function GlowStatCard({
 
 // ─── Search-matched types ─────────────────────────────────────
 
+// ─── Stripe Card Form (inner component for Elements context) ──
+function DashboardStripeCardForm() {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [succeeded, setSucceeded] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!stripe || !elements) return;
+    setProcessing(true);
+    setError(null);
+    const result = await stripe.confirmPayment({
+      elements,
+      confirmParams: {},
+      redirect: 'if_required',
+    });
+    if (result.error) {
+      setError(result.error.message || 'Payment failed');
+      setProcessing(false);
+    } else {
+      setSucceeded(true);
+      setProcessing(false);
+      // Dispatch event so the parent bill modal knows payment succeeded
+      window.dispatchEvent(new CustomEvent('stripePaymentSuccess', { detail: { paymentIntent: result.paymentIntent } }));
+    }
+  };
+
+  if (succeeded) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 0' }}>
+        <CheckCircle2 style={{ width: 18, height: 18, color: '#22C55E' }} />
+        <span style={{ fontSize: 14, fontWeight: 600, color: '#22C55E' }}>Card payment successful!</span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ padding: '12px', borderRadius: 8, border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-white)' }}>
+        <PaymentElement options={{ layout: 'tabs' }} />
+      </div>
+      {error && (
+        <div style={{ padding: '8px 12px', borderRadius: 8, backgroundColor: '#d4183d15', border: '1px solid #d4183d30' }}>
+          <p style={{ fontSize: 12, color: '#d4183d', margin: 0 }}>{error}</p>
+        </div>
+      )}
+      <button
+        onClick={handleSubmit}
+        disabled={!stripe || processing}
+        style={{
+          width: '100%', padding: '12px', borderRadius: 8, border: 'none',
+          cursor: processing ? 'not-allowed' : 'pointer',
+          backgroundColor: '#8B5CF6', color: '#fff', fontSize: 14, fontWeight: 700,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          opacity: processing ? 0.7 : 1, transition: 'opacity 0.15s',
+        }}
+      >
+        {processing ? (
+          <><Loader2 style={{ width: 16, height: 16, animation: 'spin 1s linear infinite' }} /> Processing...</>
+        ) : (
+          <><CreditCard style={{ width: 16, height: 16 }} /> Pay with Card</>
+        )}
+      </button>
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────
 
 export default function AdminDashboardPage() {
@@ -565,6 +637,21 @@ export default function AdminDashboardPage() {
   const { clients: supaClients } = useClients();
   const db = useTenantDb();
 
+  // Load actually-paid appointment IDs (only invoices with status 'Paid')
+  const [paidApptIds, setPaidApptIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    (async () => {
+      const completedIds = supaApptsToday.filter((a) => a.status === 'Completed').map((a) => a.id);
+      if (completedIds.length === 0) { setPaidApptIds(new Set()); return; }
+      const { data } = await db
+        .from('invoices')
+        .select('appointment_id')
+        .in('appointment_id', completedIds)
+        .eq('status', 'Paid');
+      setPaidApptIds(new Set((data || []).map((d: any) => d.appointment_id)));
+    })();
+  }, [supaApptsToday]);
+
   // Map Supabase appointments → TODAY_SCHEDULE shape
   const TODAY_SCHEDULE = useMemo(() =>
     supaApptsToday.map((a, idx) => {
@@ -580,11 +667,14 @@ export default function AdminDashboardPage() {
         dbId: a.id,
         time,
         pet: a.pets?.name ?? '—',
+        petId: a.pets?.id ?? '',
         owner: a.clients ? `${a.clients.first_name} ${a.clients.last_name}` : '—',
+        clientId: a.clients?.id ?? '',
         phone: a.clients?.phone ?? '—',
         service: a.services?.name ?? a.reason ?? '—',
         vet: a.staff?.profiles ? `Dr. ${a.staff.profiles.last_name}` : '—',
-        status: (a.status as ApptStatus) || 'Pending',
+        vetId: a.staff?.id ?? '',
+        status: (a.status === 'Checked In' ? 'Waiting for Doctor' : a.status as ApptStatus) || 'Pending',
       };
     }),
     [supaApptsToday],
@@ -736,8 +826,13 @@ export default function AdminDashboardPage() {
   const searchRef = useRef<HTMLInputElement>(null);
   const { results: searchResults, loading: searchLoading, totalResults } = useGlobalSearch(searchQuery);
   const [arrivedToast, setArrivedToast] = useState<{ pet: string; vet: string; room?: string } | null>(null);
-  const [billModal, setBillModal] = useState<{ id: number; pet: string; owner: string; service: string; vet: string } | null>(null);
+  const [billModal, setBillModal] = useState<{ id: number; dbId: string; pet: string; petId: string; owner: string; clientId: string; service: string; vet: string } | null>(null);
   const [payMethod, setPayMethod] = useState<'card' | 'terminal' | 'cash'>('card');
+  const [showCardForm, setShowCardForm] = useState(false);
+  const [stripeClientSecret, setStripeClientSecret] = useState<string | null>(null);
+  const [stripeLoading, setStripeLoading] = useState(false);
+  const [stripeError, setStripeError] = useState<string | null>(null);
+  const [paymentProcessing, setPaymentProcessing] = useState(false);
   const [billPaid, setBillPaid] = useState<Set<number>>(new Set());
   const [invoiceEditing, setInvoiceEditing] = useState(false);
   const [invoiceItems, setInvoiceItems] = useState<{ id: number; label: string; desc: string; price: number }[]>([]);
@@ -750,7 +845,7 @@ export default function AdminDashboardPage() {
   const [clinicRooms, setClinicRooms] = useState<ClinicRoom[]>([]);
   const [roomsLoading, setRoomsLoading] = useState(false);
   const [roomSelectOpen, setRoomSelectOpen] = useState(false);
-  const [roomSelectAppt, setRoomSelectAppt] = useState<{ id: number; dbId: string; pet: string; owner: string; service: string; vet: string; time: string } | null>(null);
+  const [roomSelectAppt, setRoomSelectAppt] = useState<{ id: number; dbId: string; pet: string; owner: string; service: string; vet: string; vetId: string; time: string } | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -935,8 +1030,58 @@ export default function AdminDashboardPage() {
       setNewItemLabel('');
       setNewItemPrice('');
       setPayMethod('card');
+      setShowCardForm(false);
+      setStripeClientSecret(null);
+      setStripeError(null);
+      setPaymentProcessing(false);
     }
   }, [billModal?.id]);
+
+  // Listen for Stripe card payment success
+  useEffect(() => {
+    const handler = async (e: Event) => {
+      const { paymentIntent } = (e as CustomEvent).detail;
+      if (!billModal) return;
+      try {
+        const orgCtx = await getOrgContext();
+        const now = new Date();
+        const invNum = `INV-${now.getFullYear()}-${String(now.getTime()).slice(-6)}`;
+        const subtotal = invoiceItems.reduce((s, item) => s + item.price, 0);
+        const tax = parseFloat((subtotal * 0.08).toFixed(2));
+        const total = subtotal + tax;
+        const { data: invData } = await db.from('invoices').insert({
+          invoice_number: invNum,
+          client_id: billModal.clientId || null,
+          clinic_id: orgCtx.clinicId,
+          appointment_id: billModal.dbId,
+          organization_id: orgCtx.organizationId,
+          subtotal, tax_amount: tax, total,
+          discount_amount: 0, amount_paid: total,
+          status: 'Paid',
+          paid_at: now.toISOString(),
+          notes: `${billModal.service} — ${billModal.pet}`,
+        }).select('id').single();
+        if (invData) {
+          await db.from('payments').insert({
+            invoice_id: invData.id,
+            amount: total,
+            method: 'Credit Card',
+            paid_at: now.toISOString(),
+            organization_id: orgCtx.organizationId,
+            reference_no: paymentIntent?.id || null,
+            notes: `Stripe Payment ${paymentIntent?.id || ''}`,
+          });
+        }
+        setPaidApptIds(prev => new Set(prev).add(billModal.dbId));
+      } catch (err) {
+        console.error('Post-payment record error:', err);
+      }
+      setBillPaid(prev => new Set([...prev, billModal.id]));
+      setTimeout(() => setBillModal(null), 1500); // Brief delay so user sees success message
+    };
+    window.addEventListener('stripePaymentSuccess', handler);
+    return () => window.removeEventListener('stripePaymentSuccess', handler);
+  }, [billModal, invoiceItems]);
 
   function isApptLate(timeStr: string): boolean {
     const [timePart, period] = timeStr.split(' ');
@@ -950,7 +1095,7 @@ export default function AdminDashboardPage() {
   function handleCheckIn(id: number) {
     const appt = TODAY_SCHEDULE.find(a => a.id === id);
     if (!appt) return;
-    setRoomSelectAppt({ id: appt.id, dbId: appt.dbId, pet: appt.pet, owner: appt.owner, service: appt.service, vet: appt.vet, time: appt.time });
+    setRoomSelectAppt({ id: appt.id, dbId: appt.dbId, pet: appt.pet, owner: appt.owner, service: appt.service, vet: appt.vet, vetId: appt.vetId, time: appt.time });
     setRoomSelectOpen(true);
   }
 
@@ -959,7 +1104,32 @@ export default function AdminDashboardPage() {
     setRoomSelectOpen(false);
     setCheckedIn(prev => new Set([...prev, roomSelectAppt.id]));
     setApptStatus(roomSelectAppt.id, 'Waiting for Doctor');
-    await updateStatusWithRoom(roomSelectAppt.dbId, 'In Progress', room.name, undefined, room.id);
+    await updateStatusWithRoom(roomSelectAppt.dbId, 'Checked In', room.name, undefined, room.id);
+
+    // Send notification to the assigned doctor
+    if (roomSelectAppt.vetId) {
+      try {
+        const { organizationId } = await getOrgContext();
+        await db.from('notification_events').insert({
+          id: `patient-arrived-${roomSelectAppt.dbId}-${Date.now()}`,
+          organization_id: organizationId,
+          type: 'patient_arrived',
+          timestamp: new Date().toISOString(),
+          data: {
+            vetId: roomSelectAppt.vetId,
+            petName: roomSelectAppt.pet,
+            ownerName: roomSelectAppt.owner,
+            room: room.name,
+            service: roomSelectAppt.service,
+            timeStart: roomSelectAppt.time,
+            appointmentId: roomSelectAppt.dbId,
+          },
+        });
+      } catch (err) {
+        console.error('Failed to send arrival notification:', err);
+      }
+    }
+
     setArrivedToast({ pet: roomSelectAppt.pet, vet: roomSelectAppt.vet, room: room.name });
     setTimeout(() => setArrivedToast(null), 5000);
     setRoomSelectAppt(null);
@@ -1278,9 +1448,14 @@ export default function AdminDashboardPage() {
             <tbody>
               {TODAY_SCHEDULE.map((appt, idx) => {
                 const contextStatus = overrides[appt.id] as ApptStatus | undefined;
+                const isPaid = paidApptIds.has(appt.dbId) || billPaid.has(appt.id);
+                // Ignore stale context overrides when DB has advanced to a later state
+                // (e.g. override says 'Waiting for Doctor' but DB now says 'Completed')
+                const advancedStatuses: ApptStatus[] = ['Completed', 'In Progress', 'Cancelled', 'No Show'];
+                const resolvedOverride = contextStatus && !advancedStatuses.includes(appt.status) ? contextStatus : undefined;
                 const effectiveStatus: ApptStatus =
-                  billPaid.has(appt.id) ? 'Completed'
-                  : contextStatus ?? (
+                  isPaid ? 'Paid'
+                  : resolvedOverride ?? (
                       appt.status === 'Confirmed' && isApptLate(appt.time) ? 'Late'
                       : appt.status
                     );
@@ -1347,7 +1522,7 @@ export default function AdminDashboardPage() {
                         </button>
                       ) : effectiveStatus === 'Ready for Billing' ? (
                         <button
-                          onClick={() => setBillModal({ id: appt.id, pet: appt.pet, owner: appt.owner, service: appt.service, vet: appt.vet })}
+                          onClick={() => setBillModal({ id: appt.id, dbId: appt.dbId, pet: appt.pet, petId: appt.petId, owner: appt.owner, clientId: appt.clientId, service: appt.service, vet: appt.vet })}
                           style={{
                             padding: '6px 12px', borderRadius: '7px',
                             backgroundColor: '#8B5CF6', color: '#fff',
@@ -1363,6 +1538,23 @@ export default function AdminDashboardPage() {
                           Show Bill
                         </button>
                       ) : effectiveStatus === 'Completed' ? (
+                        <button
+                          onClick={() => setBillModal({ id: appt.id, dbId: appt.dbId, pet: appt.pet, petId: appt.petId, owner: appt.owner, clientId: appt.clientId, service: appt.service, vet: appt.vet })}
+                          style={{
+                            padding: '6px 12px', borderRadius: '7px',
+                            backgroundColor: '#8B5CF6', color: '#fff',
+                            border: 'none', cursor: 'pointer',
+                            fontSize: '13px', fontWeight: 600,
+                            display: 'flex', alignItems: 'center', gap: '5px',
+                            transition: 'opacity 0.15s', whiteSpace: 'nowrap',
+                          }}
+                          onMouseEnter={e => (e.currentTarget.style.opacity = '0.85')}
+                          onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
+                        >
+                          <CreditCard style={{ width: '13px', height: '13px' }} />
+                          Checkout
+                        </button>
+                      ) : effectiveStatus === 'Paid' ? (
                         <button
                           onClick={() => setViewModal(appt)}
                           style={{
@@ -1836,7 +2028,7 @@ export default function AdminDashboardPage() {
                 <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Payment Method</p>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 16 }}>
                   {([
-                    { key: 'card' as const,     label: 'Card on File', Icon: CreditCard },
+                    { key: 'card' as const,     label: 'Credit Card', Icon: CreditCard },
                     { key: 'terminal' as const,  label: 'Card Machine', Icon: Terminal },
                     { key: 'cash' as const,      label: 'Cash',         Icon: Banknote },
                   ]).map(({ key, label, Icon }) => {
@@ -1860,23 +2052,137 @@ export default function AdminDashboardPage() {
                   })}
                 </div>
 
+                {/* Stripe card entry toggle + form */}
+                {payMethod === 'card' && isStripeConfigured() && (
+                  <div style={{ marginBottom: 16 }}>
+                    <button
+                      onClick={async () => {
+                        if (showCardForm) { setShowCardForm(false); setStripeClientSecret(null); return; }
+                        setShowCardForm(true);
+                        setStripeLoading(true);
+                        setStripeError(null);
+                        try {
+                          const { data: { session } } = await supabase.auth.getSession();
+                          const resp = await fetch(
+                            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-payment-intent`,
+                            {
+                              method: 'POST',
+                              headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${session?.access_token}`,
+                              },
+                              body: JSON.stringify({
+                                amount: total,
+                                currency: 'usd',
+                                description: `${billModal.service} — ${billModal.pet} (${billModal.owner})`,
+                                metadata: { appointment_id: billModal.dbId, pet: billModal.pet, owner: billModal.owner },
+                              }),
+                            },
+                          );
+                          const result = await resp.json();
+                          if (result.clientSecret) {
+                            setStripeClientSecret(result.clientSecret);
+                          } else {
+                            setStripeError(result.error || 'Failed to initialize payment');
+                          }
+                        } catch (e: any) {
+                          setStripeError(e.message || 'Connection error');
+                        }
+                        setStripeLoading(false);
+                      }}
+                      style={{
+                        width: '100%', padding: '9px 14px', borderRadius: 8, cursor: 'pointer',
+                        border: showCardForm ? '1.5px solid #8B5CF6' : '1.5px dashed #8B5CF650',
+                        backgroundColor: showCardForm ? '#8B5CF610' : 'transparent',
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      <Plus style={{ width: 14, height: 14, color: '#8B5CF6', transform: showCardForm ? 'rotate(45deg)' : 'none', transition: 'transform 0.2s' }} />
+                      <span style={{ fontSize: 13, fontWeight: 600, color: '#8B5CF6' }}>
+                        {showCardForm ? 'Hide Card Details' : 'Enter Card Details'}
+                      </span>
+                    </button>
+
+                    {showCardForm && (
+                      <div style={{ marginTop: 10, padding: 14, borderRadius: 10, border: '1.5px solid #8B5CF630', backgroundColor: '#8B5CF608' }}>
+                        {stripeLoading && (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 16 }}>
+                            <Loader2 style={{ width: 16, height: 16, color: '#8B5CF6', animation: 'spin 1s linear infinite' }} />
+                            <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Initializing secure payment...</span>
+                          </div>
+                        )}
+                        {stripeError && (
+                          <div style={{ padding: '10px 14px', borderRadius: 8, backgroundColor: '#d4183d15', border: '1px solid #d4183d30', marginBottom: 8 }}>
+                            <p style={{ fontSize: 12, color: '#d4183d', margin: 0 }}>{stripeError}</p>
+                          </div>
+                        )}
+                        {stripeClientSecret && stripePromise && (
+                          <Elements stripe={stripePromise} options={{ clientSecret: stripeClientSecret, appearance: { theme: 'night', variables: { colorPrimary: '#8B5CF6', colorBackground: 'var(--surface-white)', colorText: 'var(--text-primary)', borderRadius: '8px', fontFamily: 'inherit' } } }}>
+                            <DashboardStripeCardForm />
+                          </Elements>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Process button */}
                 <button
-                  onClick={() => {
+                  disabled={paymentProcessing || (payMethod === 'card' && showCardForm)}
+                  onClick={async () => {
+                    if (payMethod === 'card' && showCardForm) return; // Card payments handled by Stripe form
+                    setPaymentProcessing(true);
+                    try {
+                      const orgCtx = await getOrgContext();
+                      const now = new Date();
+                      const invNum = `INV-${now.getFullYear()}-${String(now.getTime()).slice(-6)}`;
+                      const { data: invData } = await db.from('invoices').insert({
+                        invoice_number: invNum,
+                        client_id: billModal.clientId || null,
+                        clinic_id: orgCtx.clinicId,
+                        appointment_id: billModal.dbId,
+                        organization_id: orgCtx.organizationId,
+                        subtotal,
+                        tax_amount: tax,
+                        total,
+                        discount_amount: 0,
+                        amount_paid: total,
+                        status: 'Paid',
+                        paid_at: now.toISOString(),
+                        notes: `${billModal.service} — ${billModal.pet}`,
+                      }).select('id').single();
+                      if (invData) {
+                        const methodMap: Record<string, string> = { card: 'Credit Card', terminal: 'Card Machine', cash: 'Cash' };
+                        await db.from('payments').insert({
+                          invoice_id: invData.id,
+                          amount: total,
+                          method: methodMap[payMethod] || 'Credit Card',
+                          paid_at: now.toISOString(),
+                          organization_id: orgCtx.organizationId,
+                        });
+                      }
+                      setPaidApptIds(prev => new Set(prev).add(billModal.dbId));
+                    } catch (e) {
+                      console.error('Payment error:', e);
+                    }
+                    setPaymentProcessing(false);
                     setBillPaid(prev => new Set([...prev, billModal.id]));
                     setBillModal(null);
                   }}
                   style={{
-                    width: '100%', padding: '13px', borderRadius: 10, border: 'none', cursor: 'pointer',
-                    backgroundColor: '#8B5CF6', color: '#fff', fontSize: 14, fontWeight: 700,
+                    width: '100%', padding: '13px', borderRadius: 10, border: 'none',
+                    cursor: (paymentProcessing || (payMethod === 'card' && showCardForm)) ? 'not-allowed' : 'pointer',
+                    backgroundColor: (payMethod === 'card' && showCardForm) ? '#8B5CF680' : '#8B5CF6',
+                    color: '#fff', fontSize: 14, fontWeight: 700,
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
                     transition: 'opacity 0.15s',
                   }}
-                  onMouseEnter={e => (e.currentTarget.style.opacity = '0.88')}
+                  onMouseEnter={e => { if (!paymentProcessing) e.currentTarget.style.opacity = '0.88'; }}
                   onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
                 >
-                  <CheckCircle2 style={{ width: 16, height: 16 }} />
-                  Process Payment · ${total.toFixed(2)}
+                  {paymentProcessing ? <Loader2 style={{ width: 16, height: 16, animation: 'spin 1s linear infinite' }} /> : <CheckCircle2 style={{ width: 16, height: 16 }} />}
+                  {paymentProcessing ? 'Processing...' : (payMethod === 'card' && showCardForm) ? 'Use Stripe Card Form Above' : `Process Payment · $${total.toFixed(2)}`}
                 </button>
               </div>
             </div>

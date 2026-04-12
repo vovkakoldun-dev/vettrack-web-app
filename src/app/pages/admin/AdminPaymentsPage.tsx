@@ -1,15 +1,16 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   TrendingUp, Clock, AlertCircle, CheckCircle2,
-  Search, Download, Eye, Bell, FileText,
+  Search, Download, Eye, Bell, FileText, Plus, Trash2,
 } from 'lucide-react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../../components/ui/dialog';
 import { supabase } from '../../../lib/supabase';
+import { useAuth } from '../../context/AuthContext';
 import { getOrgContext } from '../../hooks/useOrgContext';
 
 // ─── Types ────────────────────────────────────────────────────
 
-type InvoiceStatus = 'Paid' | 'Pending' | 'Overdue' | 'Partial';
+type InvoiceStatus = 'Paid' | 'Pending' | 'Sent' | 'Draft' | 'Overdue' | 'Partial' | 'Cancelled';
 
 interface Invoice {
   id: string;
@@ -41,15 +42,18 @@ interface InvoiceDetail {
 
 // ─── Status Badge ─────────────────────────────────────────────
 
-const STATUS_STYLES: Record<InvoiceStatus, { bg: string; color: string }> = {
-  Paid:    { bg: 'rgba(34,197,94,0.12)', color: '#16a34a' },
-  Pending: { bg: '#F4A26115', color: '#D97706' },
-  Overdue: { bg: '#d4183d15', color: '#d4183d' },
-  Partial: { bg: '#3B82F615', color: '#3B82F6' },
+const STATUS_STYLES: Record<string, { bg: string; color: string }> = {
+  Paid:      { bg: 'rgba(34,197,94,0.12)', color: '#16a34a' },
+  Pending:   { bg: '#F4A26115', color: '#D97706' },
+  Sent:      { bg: '#F4A26115', color: '#D97706' },
+  Draft:     { bg: '#6B728015', color: '#6B7280' },
+  Overdue:   { bg: '#d4183d15', color: '#d4183d' },
+  Partial:   { bg: '#3B82F615', color: '#3B82F6' },
+  Cancelled: { bg: '#6B728015', color: '#6B7280' },
 };
 
-function StatusBadge({ status }: { status: InvoiceStatus }) {
-  const s = STATUS_STYLES[status];
+function StatusBadge({ status }: { status: string }) {
+  const s = STATUS_STYLES[status] || STATUS_STYLES['Pending'];
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center',
@@ -131,6 +135,7 @@ interface MethodBreakdown {
 // ─── Page ─────────────────────────────────────────────────────
 
 export default function AdminPaymentsPage() {
+  const { user } = useAuth();
   const [search, setSearch]   = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [dateFrom, setDateFrom] = useState('');
@@ -140,6 +145,108 @@ export default function AdminPaymentsPage() {
   const [methods, setMethods] = useState<MethodBreakdown[]>([]);
   const [totalProcessed, setTotalProcessed] = useState(0);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
+
+  // ─── Create Invoice ────────────────────────────────────────
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createSubmitting, setCreateSubmitting] = useState(false);
+  const [clientsList, setClientsList] = useState<{ id: string; name: string }[]>([]);
+  const [newInvClientId, setNewInvClientId] = useState('');
+  const [clientSearch, setClientSearch] = useState('');
+  const [clientDropdownOpen, setClientDropdownOpen] = useState(false);
+  const [newInvDueDate, setNewInvDueDate] = useState('');
+  const [newInvNotes, setNewInvNotes] = useState('');
+  const [newInvItems, setNewInvItems] = useState<{ description: string; qty: number; unitPrice: number }[]>([
+    { description: '', qty: 1, unitPrice: 0 },
+  ]);
+
+  const openCreateDialog = async () => {
+    const { organizationId } = await getOrgContext();
+    const { data } = await supabase
+      .from('clients')
+      .select('id, first_name, last_name')
+      .eq('organization_id', organizationId)
+      .order('first_name');
+    setClientsList((data || []).map((c: any) => ({ id: c.id, name: `${c.first_name} ${c.last_name}`.trim() })));
+    setNewInvClientId('');
+    setClientSearch('');
+    setClientDropdownOpen(false);
+    const due = new Date();
+    due.setDate(due.getDate() + 30);
+    setNewInvDueDate(due.toISOString().split('T')[0]);
+    setNewInvNotes('');
+    setNewInvItems([{ description: '', qty: 1, unitPrice: 0 }]);
+    setCreateOpen(true);
+  };
+
+  const addLineItem = () => setNewInvItems(prev => [...prev, { description: '', qty: 1, unitPrice: 0 }]);
+  const removeLineItem = (idx: number) => setNewInvItems(prev => prev.filter((_, i) => i !== idx));
+  const updateLineItem = (idx: number, field: string, value: string | number) => {
+    setNewInvItems(prev => prev.map((item, i) => i === idx ? { ...item, [field]: value } : item));
+  };
+
+  const submitCreateInvoice = async () => {
+    if (!user || !newInvClientId || newInvItems.length === 0) return;
+    setCreateSubmitting(true);
+    try {
+      const { organizationId, clinicId } = await getOrgContext();
+
+      // Get staff id for created_by
+      const { data: staffRow } = await supabase
+        .from('staff')
+        .select('id')
+        .eq('profile_id', user.id)
+        .eq('organization_id', organizationId)
+        .limit(1)
+        .single();
+
+      const subtotal = newInvItems.reduce((sum, li) => sum + (li.qty * li.unitPrice), 0);
+      const taxRate = 0.08;
+      const taxAmount = subtotal * taxRate;
+      const total = subtotal + taxAmount;
+      const invoiceNumber = `INV-${Date.now().toString(36).toUpperCase()}`;
+
+      const { data: inv } = await supabase
+        .from('invoices')
+        .insert({
+          invoice_number: invoiceNumber,
+          organization_id: organizationId,
+          clinic_id: clinicId,
+          client_id: newInvClientId,
+          subtotal,
+          tax_amount: taxAmount,
+          total,
+          status: 'Sent',
+          due_date: newInvDueDate,
+          notes: newInvNotes || null,
+          created_by: staffRow?.id || null,
+        })
+        .select('id')
+        .single();
+
+      if (inv) {
+        const lineItemsToInsert = newInvItems
+          .filter(li => li.description.trim())
+          .map(li => ({
+            invoice_id: inv.id,
+            description: li.description,
+            quantity: li.qty,
+            unit_price: li.unitPrice,
+            total: li.qty * li.unitPrice,
+            tax_rate: taxRate,
+          }));
+        if (lineItemsToInsert.length > 0) {
+          await supabase.from('invoice_line_items').insert(lineItemsToInsert);
+        }
+      }
+
+      setCreateOpen(false);
+      loadData();
+    } catch (err) {
+      console.error('Create invoice error:', err);
+    } finally {
+      setCreateSubmitting(false);
+    }
+  };
 
   const loadData = useCallback(async () => {
     const { organizationId } = await getOrgContext();
@@ -332,6 +439,7 @@ export default function AdminPaymentsPage() {
           </p>
         </div>
         <button
+          onClick={openCreateDialog}
           style={{
             padding: '10px 20px', borderRadius: '9px',
             backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)',
@@ -642,14 +750,221 @@ export default function AdminPaymentsPage() {
 
       </div>
 
+      {/* ── Create Invoice Dialog ── */}
+      <Dialog open={createOpen} onOpenChange={(open) => { setCreateOpen(open); if (!open) setClientDropdownOpen(false); }}>
+        <DialogContent className="max-w-lg" style={{ maxHeight: '90vh', overflowY: 'auto' }}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText style={{ width: 16, height: 16, color: 'var(--brand-green-text)' }} />
+              Create Invoice
+            </DialogTitle>
+            <DialogDescription>Create a new invoice and send it to a client</DialogDescription>
+          </DialogHeader>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* Client (searchable) */}
+            <div style={{ position: 'relative' }}>
+              <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Client *</label>
+              <div style={{ position: 'relative' }}>
+                <Search style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', width: 14, height: 14, color: 'var(--text-secondary)', pointerEvents: 'none' }} />
+                <input
+                  type="text"
+                  placeholder="Search clients…"
+                  value={clientSearch}
+                  onChange={e => {
+                    setClientSearch(e.target.value);
+                    setClientDropdownOpen(true);
+                    if (!e.target.value) setNewInvClientId('');
+                  }}
+                  onFocus={() => setClientDropdownOpen(true)}
+                  style={{ ...inputStyle, paddingLeft: 32, width: '100%', boxSizing: 'border-box' as const }}
+                />
+                {newInvClientId && (
+                  <button
+                    onClick={() => { setNewInvClientId(''); setClientSearch(''); }}
+                    style={{
+                      position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                      width: 20, height: 20, borderRadius: '50%', border: 'none',
+                      backgroundColor: 'var(--surface-elevated)', color: 'var(--text-secondary)',
+                      cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 12, padding: 0,
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+              {clientDropdownOpen && !newInvClientId && (
+                <div style={{
+                  position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
+                  marginTop: 4, maxHeight: 200, overflowY: 'auto',
+                  backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)',
+                  borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                }}>
+                  {clientsList
+                    .filter(c => !clientSearch || c.name.toLowerCase().includes(clientSearch.toLowerCase()))
+                    .map(c => (
+                      <button
+                        key={c.id}
+                        onClick={() => {
+                          setNewInvClientId(c.id);
+                          setClientSearch(c.name);
+                          setClientDropdownOpen(false);
+                        }}
+                        style={{
+                          width: '100%', padding: '8px 12px', border: 'none',
+                          backgroundColor: 'transparent', textAlign: 'left',
+                          fontSize: 14, color: 'var(--text-primary)', cursor: 'pointer',
+                          borderBottom: '1px solid var(--border-color)',
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'var(--surface-elevated)')}
+                        onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
+                      >
+                        {c.name}
+                      </button>
+                    ))}
+                  {clientsList.filter(c => !clientSearch || c.name.toLowerCase().includes(clientSearch.toLowerCase())).length === 0 && (
+                    <div style={{ padding: '12px', textAlign: 'center', fontSize: 13, color: 'var(--text-secondary)' }}>
+                      No clients found
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Due Date */}
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Due Date</label>
+              <input
+                type="date"
+                value={newInvDueDate}
+                onChange={e => setNewInvDueDate(e.target.value)}
+                style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' as const }}
+              />
+            </div>
+
+            {/* Line Items */}
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Line Items</label>
+                <button onClick={addLineItem} style={{
+                  padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border-color)',
+                  backgroundColor: 'var(--surface-elevated)', color: 'var(--text-secondary)',
+                  cursor: 'pointer', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4,
+                }}>
+                  <Plus style={{ width: 12, height: 12 }} /> Add Item
+                </button>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {newInvItems.map((item, idx) => (
+                  <div key={idx} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      placeholder="Description"
+                      value={item.description}
+                      onChange={e => updateLineItem(idx, 'description', e.target.value)}
+                      style={{ ...inputStyle, flex: '1 1 0' }}
+                    />
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="Qty"
+                      value={item.qty}
+                      onChange={e => updateLineItem(idx, 'qty', parseInt(e.target.value) || 1)}
+                      style={{ ...inputStyle, width: '60px', textAlign: 'center' as const }}
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="Price"
+                      value={item.unitPrice || ''}
+                      onChange={e => updateLineItem(idx, 'unitPrice', parseFloat(e.target.value) || 0)}
+                      style={{ ...inputStyle, width: '90px', textAlign: 'right' as const }}
+                    />
+                    {newInvItems.length > 1 && (
+                      <button onClick={() => removeLineItem(idx)} style={{
+                        width: 28, height: 28, borderRadius: 6, border: 'none',
+                        backgroundColor: '#d4183d15', color: '#d4183d',
+                        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                      }}>
+                        <Trash2 style={{ width: 13, height: 13 }} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Notes */}
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Notes (optional)</label>
+              <textarea
+                value={newInvNotes}
+                onChange={e => setNewInvNotes(e.target.value)}
+                rows={2}
+                style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' as const, resize: 'vertical' as const }}
+                placeholder="Internal notes…"
+              />
+            </div>
+
+            {/* Totals preview */}
+            {(() => {
+              const sub = newInvItems.reduce((s, li) => s + li.qty * li.unitPrice, 0);
+              const tax = sub * 0.08;
+              return (
+                <div className="border-t border-[var(--border-color)]" style={{ paddingTop: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Subtotal</span>
+                    <span style={{ fontSize: 13, color: 'var(--text-primary)' }}>${sub.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Tax (8%)</span>
+                    <span style={{ fontSize: 13, color: 'var(--text-primary)' }}>${tax.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>Total</span>
+                    <span style={{ fontSize: 20, fontWeight: 800, color: 'var(--brand-green-text)' }}>${(sub + tax).toFixed(2)}</span>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Actions */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button onClick={() => setCreateOpen(false)} style={{
+                padding: '10px 18px', borderRadius: 9, border: '1px solid var(--border-color)',
+                backgroundColor: 'var(--surface-white)', color: 'var(--text-secondary)',
+                cursor: 'pointer', fontSize: 14, fontWeight: 600,
+              }}>
+                Cancel
+              </button>
+              <button
+                onClick={submitCreateInvoice}
+                disabled={createSubmitting || !newInvClientId || newInvItems.every(li => !li.description.trim())}
+                style={{
+                  padding: '10px 22px', borderRadius: 9, border: 'none',
+                  backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)',
+                  cursor: createSubmitting || !newInvClientId ? 'not-allowed' : 'pointer',
+                  opacity: createSubmitting || !newInvClientId ? 0.6 : 1,
+                  fontSize: 14, fontWeight: 700,
+                }}
+              >
+                {createSubmitting ? 'Creating…' : 'Create & Send'}
+              </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* ── Invoice Detail Dialog ── */}
       <Dialog open={viewOpen} onOpenChange={setViewOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg" style={{ maxHeight: '90vh', overflowY: 'auto' }}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FileText style={{ width: 16, height: 16, color: 'var(--brand-green-text)' }} />
               {viewDetail?.invoiceNumber || 'Invoice'}
             </DialogTitle>
+            <DialogDescription>Invoice details and payment history</DialogDescription>
           </DialogHeader>
           {viewLoading ? (
             <div style={{ padding: '32px 0', textAlign: 'center' }}>

@@ -250,9 +250,9 @@ const INITIAL_BLOCKS: TimeBlock[] = [
   { id: 8, type: 'Sick Day',    date: '2026-03-05', timeStart: '8:00 AM',  timeEnd: '5:00 PM',  notes: 'Flu — stayed home',         status: 'Approved'  },
 ];
 
-// Schedule slots: 8:00 AM → 6:00 PM in 30-min increments (20 slots)
-const SCHEDULE_SLOTS = Array.from({ length: 20 }, (_, i) => {
-  const totalMin = 8 * 60 + i * 30;
+// Schedule slots: full 24-hour day (12:00 AM → 11:30 PM) in 30-min increments (48 slots)
+const SCHEDULE_SLOTS = Array.from({ length: 48 }, (_, i) => {
+  const totalMin = i * 30;
   const h = Math.floor(totalMin / 60);
   const m = totalMin % 60;
   const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
@@ -376,7 +376,7 @@ export default function AdminMyPortalPage() {
         // Tasks
         db.from('tasks').select('id, type, priority, status, due_date, doctor_notes, pet:pets!tasks_pet_id_fkey(name), client:clients!tasks_client_id_fkey(first_name, last_name)').eq('organization_id', organizationId).order('due_date', { ascending: true }).limit(10),
         // Today's check-ins
-        db.from('appointments').select('id, scheduled_at, status, reason, pets!inner(name, clients!inner(first_name, last_name)), services(name)').eq('organization_id', organizationId).gte('scheduled_at', `${today}T00:00:00`).lte('scheduled_at', `${today}T23:59:59`).order('scheduled_at', { ascending: true }).limit(8),
+        db.from('appointments').select('id, scheduled_at, status, reason, pets!inner(name, clients!inner(first_name, last_name)), services(name)').eq('organization_id', organizationId).gte('scheduled_at', new Date(`${today}T00:00:00`).toISOString()).lte('scheduled_at', new Date(`${today}T23:59:59`).toISOString()).order('scheduled_at', { ascending: true }).limit(8),
         // Recent payments
         db.from('payments').select('id, amount, method, paid_at, invoices!inner(id, client_id, clients!inner(first_name, last_name, pets(name)))').gte('paid_at', weekAgoStr).order('paid_at', { ascending: false }).limit(3),
         // Recent appointments
