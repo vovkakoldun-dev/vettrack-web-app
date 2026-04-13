@@ -2601,7 +2601,7 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
                         </div>
                       )}
                       {stripeClientSecret && stripePromise && (
-                        <Elements stripe={stripePromise} options={{ clientSecret: stripeClientSecret, appearance: { theme: 'night', variables: { colorPrimary: '#2D6A4F', colorBackground: 'var(--surface-white)', colorText: 'var(--text-primary)', borderRadius: '8px', fontFamily: 'inherit' } } }}>
+                        <Elements stripe={stripePromise} options={{ clientSecret: stripeClientSecret, appearance: { theme: document.documentElement.classList.contains('dark') ? 'night' : 'stripe', variables: { colorPrimary: '#2D6A4F', colorBackground: document.documentElement.classList.contains('dark') ? '#1a1a2e' : '#ffffff', colorText: document.documentElement.classList.contains('dark') ? '#e2e8f0' : '#1a1a2e', colorTextSecondary: document.documentElement.classList.contains('dark') ? '#94a3b8' : '#64748b', borderRadius: '8px', fontFamily: 'system-ui, -apple-system, sans-serif', fontSizeBase: '15px' } } }}>
                           <BookingsStripeCardForm />
                         </Elements>
                       )}
