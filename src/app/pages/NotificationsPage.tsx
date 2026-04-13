@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation } from 'react-router';
 import {
   Bell, Calendar, FlaskConical, User, Syringe, AlertTriangle,
@@ -547,6 +547,8 @@ export default function NotificationsPage() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
   const [loading, setLoading] = useState(true);
+  const [visibleCount, setVisibleCount] = useState(10);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -630,6 +632,23 @@ export default function NotificationsPage() {
     if (activeFilter === 'unread') return !n.read;
     return n.category === activeFilter;
   });
+
+  const visibleNotifs = filtered.slice(0, visibleCount);
+  const hasMore = visibleCount < filtered.length;
+
+  // Reset visible count when filter changes
+  useEffect(() => { setVisibleCount(10); }, [activeFilter]);
+
+  // Auto-load more when sentinel comes into view
+  useEffect(() => {
+    if (!hasMore || !loadMoreRef.current) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) setVisibleCount(prev => prev + 10); },
+      { rootMargin: '200px' },
+    );
+    observer.observe(loadMoreRef.current);
+    return () => observer.disconnect();
+  }, [hasMore, visibleCount]);
 
   const saveReadState = async (ids: string[]) => {
     try {
@@ -935,7 +954,7 @@ export default function NotificationsPage() {
               </p>
             </div>
           ) : (
-            filtered.map((notif) => {
+            visibleNotifs.map((notif) => {
               const config = categoryConfig[notif.category];
               const CategoryIcon = config.icon;
 
@@ -1117,13 +1136,21 @@ export default function NotificationsPage() {
               );
             })
           )}
+
+          {/* Auto-load sentinel */}
+          {hasMore && (
+            <div ref={loadMoreRef} className="flex items-center justify-center py-6">
+              <Loader2 className="w-5 h-5 animate-spin text-[var(--text-secondary)]" />
+              <span className="ml-2 text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>Loading more...</span>
+            </div>
+          )}
         </div>
       )}
 
       {/* Footer count */}
       {!loading && filtered.length > 0 && (
         <p className="text-center text-[var(--text-secondary)] mt-6" style={{ fontSize: '13px' }}>
-          Showing {filtered.length} notification{filtered.length !== 1 ? 's' : ''}
+          Showing {visibleNotifs.length} of {filtered.length} notification{filtered.length !== 1 ? 's' : ''}
           {activeFilter !== 'all' && ` · ${FILTER_TABS.find(t => t.value === activeFilter)?.label}`}
         </p>
       )}
