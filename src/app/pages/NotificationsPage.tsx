@@ -729,19 +729,18 @@ export default function NotificationsPage() {
     window.dispatchEvent(new CustomEvent('notifCountChanged', { detail: { count: 0 } }));
   };
 
-  const dismiss = (id: string) => {
-    setNotifications((prev) => {
-      const updated = prev.filter((n) => n.id !== id);
-      saveDismissedState([id]);
-      return updated;
-    });
+  const dismiss = async (id: string) => {
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+    await saveDismissedState([id]);
     window.dispatchEvent(new Event('notifCountChanged'));
   };
 
   const dismissAll = async () => {
     const allIds = notifications.map(n => n.id);
-    saveDismissedState(allIds);
+    // Clear UI immediately
     setNotifications([]);
+    // Save dismissed state to Supabase — MUST complete before any re-fetch
+    await saveDismissedState(allIds);
     // Also dismiss all synthetic sidebar IDs so the badge clears
     try {
       const { organizationId } = await getOrgContext();
