@@ -133,7 +133,7 @@ async function fetchNotificationsFromSupabase(db: any, isAdmin: boolean, userId?
         .select('id, scheduled_at, status, reason, pets(id, name, species, breed), clients(id, first_name, last_name)')
         .eq('organization_id', organizationId)
         .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`).lt('scheduled_at', `${today}T00:00:00`)
-        .eq('status', 'Completed').order('scheduled_at', { ascending: false }).limit(50);
+        .eq('status', 'Completed').order('scheduled_at', { ascending: false }).limit(15);
       if (!isAdmin && userId) q = q.eq('vet_id', userId);
       return q;
     })(),
@@ -142,7 +142,7 @@ async function fetchNotificationsFromSupabase(db: any, isAdmin: boolean, userId?
         .select('id, scheduled_at, reason, pets(id, name), clients(id, first_name, last_name)')
         .eq('organization_id', organizationId)
         .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`).eq('status', 'Cancelled')
-        .order('scheduled_at', { ascending: false }).limit(50);
+        .order('scheduled_at', { ascending: false }).limit(15);
       if (!isAdmin && userId) q = q.eq('vet_id', userId);
       return q;
     })(),
@@ -150,18 +150,18 @@ async function fetchNotificationsFromSupabase(db: any, isAdmin: boolean, userId?
       .select('id, vaccine_name, next_due_date, administered_date, pets!inner(id, name, species, breed, organization_id, client_id, clients:clients!pets_client_id_fkey(id, first_name, last_name, phone))')
       .eq('pets.organization_id', organizationId)
       .not('next_due_date', 'is', null).lte('next_due_date', thirtyDaysFromNowStr)
-      .order('next_due_date', { ascending: true }).limit(50),
+      .order('next_due_date', { ascending: true }).limit(15),
     db.from('clients')
       .select('id, first_name, last_name, created_at')
       .eq('organization_id', organizationId)
       .gte('created_at', `${sevenDaysAgoStr}T00:00:00`)
-      .order('created_at', { ascending: false }).limit(50),
+      .order('created_at', { ascending: false }).limit(15),
     (() => {
       let q = db.from('appointments')
         .select('id, scheduled_at, reason, pets(id, name), clients(id, first_name, last_name)')
         .eq('organization_id', organizationId)
         .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`).eq('status', 'No Show')
-        .order('scheduled_at', { ascending: false }).limit(50);
+        .order('scheduled_at', { ascending: false }).limit(15);
       if (!isAdmin && userId) q = q.eq('vet_id', userId);
       return q;
     })(),
@@ -553,70 +553,72 @@ export default function NotificationsPage() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    (async () => {
-      try {
-        const data = await fetchNotificationsFromSupabase(db, isAdmin, user?.id);
-        if (cancelled) return;
 
-        // Apply persisted read/dismissed state (do NOT auto-mark as read)
-        const { organizationId } = await getOrgContext();
-        const { data: stateRows } = await db.from('notification_state').select('notification_id, status').eq('organization_id', organizationId).eq('user_id', user?.id);
-        const readSet = new Set<string>();
-        const dismissedSet = new Set<string>();
-        for (const row of (stateRows || [])) {
-          if (row.status === 'read') readSet.add(row.notification_id);
-          if (row.status === 'dismissed') dismissedSet.add(row.notification_id);
-        }
-        const afterPersist = data
-          .filter(n => !dismissedSet.has(n.id))
-          .map(n => readSet.has(n.id) ? { ...n, read: true } : n);
+    // Fetch notifications and persisted state in parallel
+    const loadAll = async () => {
+      const { organizationId } = await getOrgContext();
+      const [data, stateRes] = await Promise.all([
+        fetchNotificationsFromSupabase(db, isAdmin, user?.id),
+        db.from('notification_state').select('notification_id, status').eq('organization_id', organizationId).eq('user_id', user?.id),
+      ]);
+      if (cancelled) return;
 
-        if (!cancelled) {
-          setNotifications(afterPersist);
+      // Apply persisted read/dismissed state
+      const readSet = new Set<string>();
+      const dismissedSet = new Set<string>();
+      for (const row of (stateRes.data || [])) {
+        if (row.status === 'read') readSet.add(row.notification_id);
+        if (row.status === 'dismissed') dismissedSet.add(row.notification_id);
+      }
+      const afterPersist = data
+        .filter(n => !dismissedSet.has(n.id))
+        .map(n => readSet.has(n.id) ? { ...n, read: true } : n);
 
-          // Auto-mark all unread as read when the user visits the page (clears sidebar badge)
-          const unreadIds = afterPersist.filter(n => !n.read).map(n => n.id);
-          if (unreadIds.length > 0) {
-            const readRows = unreadIds.map(id => ({ notification_id: id, status: 'read' as const, updated_at: new Date().toISOString(), organization_id: organizationId, user_id: user?.id }));
-            db.from('notification_state').upsert(readRows).then(() => {
-              // Also mark sidebar-generated IDs (completed appts, vax, etc.)
-              const todayStr = `${new Date().getFullYear()}-${(new Date().getMonth() + 1).toString().padStart(2, '0')}-${new Date().getDate().toString().padStart(2, '0')}`;
-              const weekAgoDate = new Date(Date.now() - 7 * 86400000);
-              const weekAgoStr = `${weekAgoDate.getFullYear()}-${(weekAgoDate.getMonth() + 1).toString().padStart(2, '0')}-${weekAgoDate.getDate().toString().padStart(2, '0')}`;
-              Promise.all([
-                db.from('appointments').select('id').eq('organization_id', organizationId)
-                  .gte('scheduled_at', `${todayStr}T00:00:00`).lte('scheduled_at', `${todayStr}T23:59:59`)
-                  .in('status', ['Scheduled', 'Confirmed']),
-                db.from('appointments').select('id').eq('organization_id', organizationId)
-                  .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Completed'),
-                db.from('appointments').select('id').eq('organization_id', organizationId)
-                  .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Cancelled'),
-                db.from('vaccinations').select('id, pets!inner(organization_id)')
-                  .eq('pets.organization_id', organizationId).lte('next_due_date', todayStr),
-                db.from('clients').select('id').eq('organization_id', organizationId)
-                  .gte('created_at', `${weekAgoStr}T00:00:00`),
-                db.from('notification_events').select('id').eq('organization_id', organizationId)
-                  .gte('timestamp', weekAgoDate.toISOString()),
-              ]).then(([apptToday, completed, cancelled, vacs, clients, notifEvts]) => {
-                const extraIds: string[] = [];
-                (apptToday.data || []).forEach(a => extraIds.push(`appt-today-${a.id}`));
-                (completed.data || []).forEach(a => extraIds.push(`appt-done-${a.id}`));
-                (cancelled.data || []).forEach(a => extraIds.push(`appt-cancel-${a.id}`));
-                (vacs.data || []).forEach(v => extraIds.push(`vax-${v.id}`));
-                (clients.data || []).forEach(c => extraIds.push(`client-${c.id}`));
-                (notifEvts.data || []).forEach(e => extraIds.push(e.id));
-                const allToMark = [...new Set([...unreadIds, ...extraIds])];
-                const markRows = allToMark.map(id => ({ notification_id: id, status: 'read' as const, updated_at: new Date().toISOString(), organization_id: organizationId, user_id: user?.id }));
-                if (markRows.length > 0) db.from('notification_state').upsert(markRows);
-              });
-            });
-            // Update local state to show as read
-            setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-          }
-        }
-      } catch {}
-      if (!cancelled) setLoading(false);
-    })();
+      // Show results immediately
+      setNotifications(afterPersist);
+      setLoading(false);
+
+      // Background: mark all as read (fire-and-forget, don't block UI)
+      const unreadIds = afterPersist.filter(n => !n.read).map(n => n.id);
+      if (unreadIds.length > 0) {
+        setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+        const nowISO = new Date().toISOString();
+        const readRows = unreadIds.map(id => ({ notification_id: id, status: 'read' as const, updated_at: nowISO, organization_id: organizationId, user_id: user?.id }));
+        db.from('notification_state').upsert(readRows).then(() => {
+          const todayStr = `${new Date().getFullYear()}-${(new Date().getMonth() + 1).toString().padStart(2, '0')}-${new Date().getDate().toString().padStart(2, '0')}`;
+          const weekAgoDate = new Date(Date.now() - 7 * 86400000);
+          const weekAgoStr = `${weekAgoDate.getFullYear()}-${(weekAgoDate.getMonth() + 1).toString().padStart(2, '0')}-${weekAgoDate.getDate().toString().padStart(2, '0')}`;
+          Promise.all([
+            db.from('appointments').select('id').eq('organization_id', organizationId)
+              .gte('scheduled_at', `${todayStr}T00:00:00`).lte('scheduled_at', `${todayStr}T23:59:59`)
+              .in('status', ['Scheduled', 'Confirmed']),
+            db.from('appointments').select('id').eq('organization_id', organizationId)
+              .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Completed'),
+            db.from('appointments').select('id').eq('organization_id', organizationId)
+              .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Cancelled'),
+            db.from('vaccinations').select('id, pets!inner(organization_id)')
+              .eq('pets.organization_id', organizationId).lte('next_due_date', todayStr),
+            db.from('clients').select('id').eq('organization_id', organizationId)
+              .gte('created_at', `${weekAgoStr}T00:00:00`),
+            db.from('notification_events').select('id').eq('organization_id', organizationId)
+              .gte('timestamp', weekAgoDate.toISOString()),
+          ]).then(([apptToday, completed, cancelledAppts, vacs, clients, notifEvts]) => {
+            const extraIds: string[] = [];
+            (apptToday.data || []).forEach(a => extraIds.push(`appt-today-${a.id}`));
+            (completed.data || []).forEach(a => extraIds.push(`appt-done-${a.id}`));
+            (cancelledAppts.data || []).forEach(a => extraIds.push(`appt-cancel-${a.id}`));
+            (vacs.data || []).forEach(v => extraIds.push(`vax-${v.id}`));
+            (clients.data || []).forEach(c => extraIds.push(`client-${c.id}`));
+            (notifEvts.data || []).forEach(e => extraIds.push(e.id));
+            const allToMark = [...new Set([...unreadIds, ...extraIds])];
+            const markRows = allToMark.map(id => ({ notification_id: id, status: 'read' as const, updated_at: nowISO, organization_id: organizationId, user_id: user?.id }));
+            if (markRows.length > 0) db.from('notification_state').upsert(markRows);
+          });
+        });
+      }
+    };
+
+    loadAll().catch(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
 
