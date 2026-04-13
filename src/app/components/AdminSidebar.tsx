@@ -128,7 +128,12 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
       } catch {}
     }
 
-    computeNotifCount();
+    // If user is on the notifications page, assume all are read — skip heavy recomputation
+    if (pathname === '/admin/notifications') {
+      setNotifUnread(0);
+    } else {
+      computeNotifCount();
+    }
     // Also listen for explicit broadcasts from NotificationsPage
     const handler = (e: Event) => {
       const count = (e as CustomEvent).detail?.count;
@@ -158,44 +163,44 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
         .eq('profile_id', user!.id);
       if (!parts || parts.length === 0) { if (mounted) setChatUnread(0); return; }
 
+      // Compute cutoff from earliest last_read_at — single batched query instead of N loops
+      const convIds = parts.map(p => p.conversation_id);
+      const earliestLastRead = parts.reduce((min, p) => {
+        const lr = p.last_read_at || '1970-01-01T00:00:00Z';
+        return lr < min ? lr : min;
+      }, new Date().toISOString());
+
+      const { data: unreadMsgs } = await supabase
+        .from('messages')
+        .select('id, conversation_id, created_at, sender_id, content, profiles:profiles!messages_sender_id_fkey(first_name, last_name)')
+        .eq('organization_id', chatOrgId)
+        .in('conversation_id', convIds)
+        .neq('sender_id', user!.id)
+        .gt('created_at', earliestLastRead)
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      // Build per-conversation last_read_at map and count truly unread
+      const lastReadMap = new Map(parts.map(p => [p.conversation_id, p.last_read_at || '1970-01-01T00:00:00Z']));
       let totalUnread = 0;
-      for (const part of parts) {
-        const readAt = part.last_read_at || '1970-01-01T00:00:00Z';
-        const { count } = await supabase
-          .from('messages')
-          .select('id', { count: 'exact', head: true })
-          .eq('organization_id', chatOrgId)
-          .eq('conversation_id', part.conversation_id)
-          .neq('sender_id', user!.id)
-          .gt('created_at', readAt);
-        totalUnread += (count || 0);
+      for (const m of (unreadMsgs || [])) {
+        const convLastRead = lastReadMap.get(m.conversation_id) || '1970-01-01T00:00:00Z';
+        if (m.created_at > convLastRead) totalUnread++;
       }
 
       const c = totalUnread > 0 ? totalUnread : 0;
       if (mounted && c > 0 && prevChatCountRef.current === 0 && pathname !== '/admin/chat') {
-        for (const part of parts) {
-          const readAt = part.last_read_at || '1970-01-01T00:00:00Z';
-          const { data: latest } = await supabase
-            .from('messages')
-            .select('sender_id, content, profiles:profiles!messages_sender_id_fkey(first_name, last_name)')
-            .eq('organization_id', chatOrgId)
-            .eq('conversation_id', part.conversation_id)
-            .neq('sender_id', user!.id)
-            .gt('created_at', readAt)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .single();
-          if (latest && mounted) {
-            const p = (latest as any).profiles;
-            const senderName = p ? `${p.first_name || ''} ${p.last_name || ''}`.trim() : 'New message';
-            showToast({
-              type: 'chat',
-              title: senderName,
-              message: latest.content || 'Sent a message',
-              link: '/admin/chat',
-            });
-            break;
-          }
+        // Show toast for the most recent unread message
+        const newest = (unreadMsgs || [])[0];
+        if (newest && mounted) {
+          const p = (newest as any).profiles;
+          const senderName = p ? `${p.first_name || ''} ${p.last_name || ''}`.trim() : 'New message';
+          showToast({
+            type: 'chat',
+            title: senderName,
+            message: newest.content || 'Sent a message',
+            link: '/admin/chat',
+          });
         }
       }
       if (mounted) { prevChatCountRef.current = c; setChatUnread(c); }

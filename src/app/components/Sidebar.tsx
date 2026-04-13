@@ -205,7 +205,6 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
     async function checkChatUnread() {
       if (!mounted) return;
       const { organizationId: chatOrgId } = await getOrgContext();
-      // Get all conversations where user is a participant
       const { data: parts } = await db
         .from('conversation_participants')
         .select('conversation_id, last_read_at')
@@ -213,46 +212,42 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
         .eq('profile_id', user!.id);
       if (!parts || parts.length === 0) { if (mounted) setChatUnread(0); return; }
 
+      // Single batched query instead of N+1 per-conversation loops
+      const convIds = parts.map(p => p.conversation_id);
+      const earliestLastRead = parts.reduce((min, p) => {
+        const lr = p.last_read_at || '1970-01-01T00:00:00Z';
+        return lr < min ? lr : min;
+      }, new Date().toISOString());
+
+      const { data: unreadMsgs } = await db
+        .from('messages')
+        .select('id, conversation_id, created_at, sender_id, content, profiles:profiles!messages_sender_id_fkey(first_name, last_name)')
+        .eq('organization_id', chatOrgId)
+        .in('conversation_id', convIds)
+        .neq('sender_id', user!.id)
+        .gt('created_at', earliestLastRead)
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      const lastReadMap = new Map(parts.map(p => [p.conversation_id, p.last_read_at || '1970-01-01T00:00:00Z']));
       let totalUnread = 0;
-      for (const part of parts) {
-        const readAt = part.last_read_at || '1970-01-01T00:00:00Z';
-        const { count } = await db
-          .from('messages')
-          .select('id', { count: 'exact', head: true })
-          .eq('organization_id', chatOrgId)
-          .eq('conversation_id', part.conversation_id)
-          .neq('sender_id', user!.id)
-          .gt('created_at', readAt);
-        totalUnread += (count || 0);
+      for (const m of (unreadMsgs || [])) {
+        const convLastRead = lastReadMap.get(m.conversation_id) || '1970-01-01T00:00:00Z';
+        if (m.created_at > convLastRead) totalUnread++;
       }
 
       const c = totalUnread > 0 ? totalUnread : 0;
-      // Show toast when new message detected
       if (mounted && c > 0 && prevChatCountRef.current === 0 && pathname !== '/chat') {
-        // Fetch latest unread message across all conversations
-        for (const part of parts) {
-          const readAt = part.last_read_at || '1970-01-01T00:00:00Z';
-          const { data: latest } = await db
-            .from('messages')
-            .select('sender_id, content, profiles:profiles!messages_sender_id_fkey(first_name, last_name)')
-            .eq('organization_id', chatOrgId)
-            .eq('conversation_id', part.conversation_id)
-            .neq('sender_id', user!.id)
-            .gt('created_at', readAt)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .single();
-          if (latest && mounted) {
-            const p = (latest as any).profiles;
-            const senderName = p ? `${p.first_name || ''} ${p.last_name || ''}`.trim() : 'New message';
-            showToast({
-              type: 'chat',
-              title: senderName,
-              message: latest.content || 'Sent a message',
-              link: '/chat',
-            });
-            break; // Only show one toast
-          }
+        const newest = (unreadMsgs || [])[0];
+        if (newest && mounted) {
+          const p = (newest as any).profiles;
+          const senderName = p ? `${p.first_name || ''} ${p.last_name || ''}`.trim() : 'New message';
+          showToast({
+            type: 'chat',
+            title: senderName,
+            message: newest.content || 'Sent a message',
+            link: '/chat',
+          });
         }
       }
       if (mounted) { prevChatCountRef.current = c; setChatUnread(c); }

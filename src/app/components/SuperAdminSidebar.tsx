@@ -112,27 +112,36 @@ export function SuperAdminSidebar({
     : `${saProfile.firstName} ${saProfile.lastName}`.trim();
   const saInitials = `${(saProfile.firstName[0] || '').toUpperCase()}${(saProfile.lastName[0] || '').toUpperCase()}`;
 
-  // Poll for unread chat messages
+  // Poll for unread chat messages — single batched query instead of N+1
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
     async function poll() {
-      // Get all conversations for this user
       const { data: parts } = await supabase
         .from('conversation_participants')
         .select('conversation_id, last_read_at')
         .eq('profile_id', user!.id);
-      if (!parts || cancelled) return;
+      if (!parts || cancelled || parts.length === 0) { if (!cancelled) setChatUnread(0); return; }
+
+      const convIds = parts.map(p => p.conversation_id);
+      const earliestLastRead = parts.reduce((min, p) => {
+        const lr = p.last_read_at || '1970-01-01T00:00:00Z';
+        return lr < min ? lr : min;
+      }, new Date().toISOString());
+
+      const { data: unreadMsgs } = await supabase
+        .from('messages')
+        .select('id, conversation_id, created_at')
+        .in('conversation_id', convIds)
+        .neq('sender_id', user!.id)
+        .gt('created_at', earliestLastRead)
+        .limit(50);
+
+      const lastReadMap = new Map(parts.map(p => [p.conversation_id, p.last_read_at || '1970-01-01T00:00:00Z']));
       let total = 0;
-      for (const p of parts) {
-        const query = supabase
-          .from('messages')
-          .select('id', { count: 'exact', head: true })
-          .eq('conversation_id', p.conversation_id)
-          .neq('sender_id', user!.id);
-        if (p.last_read_at) query.gt('created_at', p.last_read_at);
-        const { count } = await query;
-        total += count || 0;
+      for (const m of (unreadMsgs || [])) {
+        const convLastRead = lastReadMap.get(m.conversation_id) || '1970-01-01T00:00:00Z';
+        if (m.created_at > convLastRead) total++;
       }
       if (!cancelled) setChatUnread(total);
     }
