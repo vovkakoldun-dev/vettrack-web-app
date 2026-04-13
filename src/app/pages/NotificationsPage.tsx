@@ -133,7 +133,7 @@ async function fetchNotificationsFromSupabase(db: any, isAdmin: boolean, userId?
         .select('id, scheduled_at, status, reason, pets(id, name, species, breed), clients(id, first_name, last_name)')
         .eq('organization_id', organizationId)
         .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`).lt('scheduled_at', `${today}T00:00:00`)
-        .eq('status', 'Completed').order('scheduled_at', { ascending: false }).limit(15);
+        .eq('status', 'Completed').order('scheduled_at', { ascending: false }).limit(50);
       if (!isAdmin && userId) q = q.eq('vet_id', userId);
       return q;
     })(),
@@ -142,7 +142,7 @@ async function fetchNotificationsFromSupabase(db: any, isAdmin: boolean, userId?
         .select('id, scheduled_at, reason, pets(id, name), clients(id, first_name, last_name)')
         .eq('organization_id', organizationId)
         .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`).eq('status', 'Cancelled')
-        .order('scheduled_at', { ascending: false }).limit(15);
+        .order('scheduled_at', { ascending: false }).limit(50);
       if (!isAdmin && userId) q = q.eq('vet_id', userId);
       return q;
     })(),
@@ -150,18 +150,18 @@ async function fetchNotificationsFromSupabase(db: any, isAdmin: boolean, userId?
       .select('id, vaccine_name, next_due_date, administered_date, pets!inner(id, name, species, breed, organization_id, client_id, clients:clients!pets_client_id_fkey(id, first_name, last_name, phone))')
       .eq('pets.organization_id', organizationId)
       .not('next_due_date', 'is', null).lte('next_due_date', thirtyDaysFromNowStr)
-      .order('next_due_date', { ascending: true }).limit(15),
+      .order('next_due_date', { ascending: true }).limit(50),
     db.from('clients')
       .select('id, first_name, last_name, created_at')
       .eq('organization_id', organizationId)
       .gte('created_at', `${sevenDaysAgoStr}T00:00:00`)
-      .order('created_at', { ascending: false }).limit(15),
+      .order('created_at', { ascending: false }).limit(50),
     (() => {
       let q = db.from('appointments')
         .select('id, scheduled_at, reason, pets(id, name), clients(id, first_name, last_name)')
         .eq('organization_id', organizationId)
         .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`).eq('status', 'No Show')
-        .order('scheduled_at', { ascending: false }).limit(15);
+        .order('scheduled_at', { ascending: false }).limit(50);
       if (!isAdmin && userId) q = q.eq('vet_id', userId);
       return q;
     })(),
@@ -548,7 +548,7 @@ export default function NotificationsPage() {
   const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
   const [loading, setLoading] = useState(true);
   const [visibleCount, setVisibleCount] = useState(10);
-  const loadMoreRef = useRef<HTMLDivElement>(null);
+  const observerRef = useRef<IntersectionObserver | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -641,16 +641,16 @@ export default function NotificationsPage() {
   // Reset visible count when filter changes
   useEffect(() => { setVisibleCount(10); }, [activeFilter]);
 
-  // Auto-load more when sentinel comes into view
-  useEffect(() => {
-    if (!hasMore || !loadMoreRef.current) return;
-    const observer = new IntersectionObserver(
+  // Callback ref for auto-load sentinel — observes when it enters viewport
+  const loadMoreRef = useCallback((node: HTMLDivElement | null) => {
+    if (observerRef.current) observerRef.current.disconnect();
+    if (!node) return;
+    observerRef.current = new IntersectionObserver(
       ([entry]) => { if (entry.isIntersecting) setVisibleCount(prev => prev + 10); },
       { rootMargin: '200px' },
     );
-    observer.observe(loadMoreRef.current);
-    return () => observer.disconnect();
-  }, [hasMore, visibleCount]);
+    observerRef.current.observe(node);
+  }, []);
 
   const saveReadState = async (ids: string[]) => {
     try {
