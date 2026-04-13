@@ -245,6 +245,19 @@ export default function ClientDetailPage() {
   const appointmentsPath = isAdmin ? '/admin/bookings' : '/appointments';
   const [searchParams] = useSearchParams();
 
+  // Role-based access: only doctors and superadmins can edit
+  const [userRole, setUserRole] = useState<string>('');
+  useEffect(() => {
+    if (!user) return;
+    supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .single()
+      .then(({ data }) => { if (data?.role) setUserRole(data.role); });
+  }, [user]);
+  const canEdit = ['veterinarian', 'senior_veterinarian', 'specialist', 'lead_vet_tech', 'superadmin'].includes(userRole);
+
   // Fetch real client from Supabase, fall back to mock
   const [client, setClient] = useState(mockClient);
   const [dbLoaded, setDbLoaded] = useState(false);
@@ -535,6 +548,42 @@ export default function ClientDetailPage() {
 
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [activeTab, setActiveTab] = useState('overview');
+  const [tabCounts, setTabCounts] = useState<Record<string, number>>({});
+
+  const fetchTabCounts = useCallback(async (petDbId: string) => {
+    if (!petDbId) return;
+    try {
+      const results = await Promise.all([
+        db.from('pet_conditions').select('id', { count: 'exact', head: true }).eq('pet_id', petDbId),
+        db.from('pet_allergies').select('id', { count: 'exact', head: true }).eq('pet_id', petDbId),
+        db.from('pet_treatments').select('id', { count: 'exact', head: true }).eq('pet_id', petDbId),
+        db.from('appointments').select('id', { count: 'exact', head: true }).eq('pet_id', petDbId),
+        db.from('vaccinations').select('id', { count: 'exact', head: true }).eq('pet_id', petDbId),
+        db.from('imaging_studies').select('id', { count: 'exact', head: true }).eq('pet_id', petDbId),
+        db.from('surgeries').select('id', { count: 'exact', head: true }).eq('pet_id', petDbId),
+        db.from('treatment_plans').select('id', { count: 'exact', head: true }).eq('pet_id', petDbId),
+        db.from('diet_plans').select('id', { count: 'exact', head: true }).eq('pet_id', petDbId),
+        db.from('lab_results').select('id', { count: 'exact', head: true }).eq('pet_id', petDbId),
+        db.from('pet_notes').select('id', { count: 'exact', head: true }).eq('pet_id', petDbId),
+        db.from('pet_photos').select('id', { count: 'exact', head: true }).eq('pet_id', petDbId),
+        db.from('pet_reports').select('id', { count: 'exact', head: true }).eq('pet_id', petDbId),
+      ]);
+      setTabCounts({
+        'medical-overview': (results[0].count ?? 0) + (results[1].count ?? 0) + (results[2].count ?? 0),
+        visits: results[3].count ?? 0,
+        injections: results[4].count ?? 0,
+        xray: results[5].count ?? 0,
+        surgery: results[6].count ?? 0,
+        plan: results[7].count ?? 0,
+        diet: results[8].count ?? 0,
+        lab: results[9].count ?? 0,
+        notes: results[10].count ?? 0,
+        photos: results[11].count ?? 0,
+        reports: results[12].count ?? 0,
+      });
+    } catch {}
+  }, []);
 
   const handleSave = async () => {
     if (!id) return;
@@ -794,9 +843,23 @@ export default function ClientDetailPage() {
       fetchNotes(petDbId);
       fetchVisitReports(petDbId);
       fetchLabFiles(petDbId);
+      fetchTabCounts(petDbId);
     }
-  }, [selectedPetIdx, client.pets, fetchNotes, fetchVisitReports, fetchLabFiles]);
+  }, [selectedPetIdx, client.pets, fetchNotes, fetchVisitReports, fetchLabFiles, fetchTabCounts]);
 
+  // Re-fetch tab counts when pet data changes on other pages
+  useEffect(() => {
+    const handler = () => {
+      const petDbId = client.pets[selectedPetIdx]?.dbId;
+      if (petDbId) fetchTabCounts(petDbId);
+    };
+    window.addEventListener('petDataChanged', handler);
+    window.addEventListener('clientDataChanged', handler);
+    return () => {
+      window.removeEventListener('petDataChanged', handler);
+      window.removeEventListener('clientDataChanged', handler);
+    };
+  }, [selectedPetIdx, client.pets, fetchTabCounts]);
 
   const handleSaveNote = async (type: 'vet' | 'client') => {
     const content = type === 'vet' ? newVetNote.trim() : newClientNote.trim();
@@ -1013,13 +1076,15 @@ export default function ClientDetailPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button
-            variant={editing ? 'default' : 'outline'}
-            onClick={() => editing ? handleSave() : setEditing(true)}
-            disabled={saving}
-          >
-            {editing ? <><Save className="w-4 h-4" /> {saving ? 'Saving...' : 'Save'}</> : <><Edit2 className="w-4 h-4" /> Edit</>}
-          </Button>
+          {activeTab === 'overview' && (
+            <Button
+              variant={editing ? 'default' : 'outline'}
+              onClick={() => editing ? handleSave() : setEditing(true)}
+              disabled={saving}
+            >
+              {editing ? <><Save className="w-4 h-4" /> {saving ? 'Saving...' : 'Save'}</> : <><Edit2 className="w-4 h-4" /> Edit</>}
+            </Button>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="icon">
@@ -1291,23 +1356,23 @@ export default function ClientDetailPage() {
       </div>
 
       {/* ─── Tabs ───────────────────────────────────────── */}
-      <Tabs defaultValue="overview">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <div className="flex flex-col gap-4 mb-6">
           <div className="flex items-center justify-between">
           <div className="overflow-x-auto" style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
           <TabsList className="w-auto inline-flex">
             <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="medical-overview">Medical Overview</TabsTrigger>
-            <TabsTrigger value="visits">Visits</TabsTrigger>
-            <TabsTrigger value="injections">Injections</TabsTrigger>
-            <TabsTrigger value="xray">X-Ray</TabsTrigger>
-            <TabsTrigger value="surgery">Surgery</TabsTrigger>
-            <TabsTrigger value="plan">Plan</TabsTrigger>
-            <TabsTrigger value="diet">Diet</TabsTrigger>
-            <TabsTrigger value="lab">Lab</TabsTrigger>
-            <TabsTrigger value="notes">Notes</TabsTrigger>
-            <TabsTrigger value="photos">Photos</TabsTrigger>
-            <TabsTrigger value="reports">Reports</TabsTrigger>
+            <TabsTrigger value="medical-overview">Medical Overview{(tabCounts['medical-overview'] ?? 0) > 0 && <span className="inline-block w-1.5 h-1.5 rounded-full ml-1.5" style={{ backgroundColor: 'var(--brand-green-text)' }} />}</TabsTrigger>
+            <TabsTrigger value="visits">Visits{(tabCounts.visits ?? 0) > 0 && <span className="inline-block w-1.5 h-1.5 rounded-full ml-1.5" style={{ backgroundColor: 'var(--brand-green-text)' }} />}</TabsTrigger>
+            <TabsTrigger value="injections">Injections{(tabCounts.injections ?? 0) > 0 && <span className="inline-block w-1.5 h-1.5 rounded-full ml-1.5" style={{ backgroundColor: 'var(--brand-green-text)' }} />}</TabsTrigger>
+            <TabsTrigger value="xray">X-Ray{(tabCounts.xray ?? 0) > 0 && <span className="inline-block w-1.5 h-1.5 rounded-full ml-1.5" style={{ backgroundColor: 'var(--brand-green-text)' }} />}</TabsTrigger>
+            <TabsTrigger value="surgery">Surgery{(tabCounts.surgery ?? 0) > 0 && <span className="inline-block w-1.5 h-1.5 rounded-full ml-1.5" style={{ backgroundColor: 'var(--brand-green-text)' }} />}</TabsTrigger>
+            <TabsTrigger value="plan">Plan{(tabCounts.plan ?? 0) > 0 && <span className="inline-block w-1.5 h-1.5 rounded-full ml-1.5" style={{ backgroundColor: 'var(--brand-green-text)' }} />}</TabsTrigger>
+            <TabsTrigger value="diet">Diet{(tabCounts.diet ?? 0) > 0 && <span className="inline-block w-1.5 h-1.5 rounded-full ml-1.5" style={{ backgroundColor: 'var(--brand-green-text)' }} />}</TabsTrigger>
+            <TabsTrigger value="lab">Lab{(tabCounts.lab ?? 0) > 0 && <span className="inline-block w-1.5 h-1.5 rounded-full ml-1.5" style={{ backgroundColor: 'var(--brand-green-text)' }} />}</TabsTrigger>
+            <TabsTrigger value="notes">Notes{(tabCounts.notes ?? 0) > 0 && <span className="inline-block w-1.5 h-1.5 rounded-full ml-1.5" style={{ backgroundColor: 'var(--brand-green-text)' }} />}</TabsTrigger>
+            <TabsTrigger value="photos">Photos{(tabCounts.photos ?? 0) > 0 && <span className="inline-block w-1.5 h-1.5 rounded-full ml-1.5" style={{ backgroundColor: 'var(--brand-green-text)' }} />}</TabsTrigger>
+            <TabsTrigger value="reports">Reports{(tabCounts.reports ?? 0) > 0 && <span className="inline-block w-1.5 h-1.5 rounded-full ml-1.5" style={{ backgroundColor: 'var(--brand-green-text)' }} />}</TabsTrigger>
           </TabsList>
           </div>
           {/* ── Pet Switcher + Add Pet ── */}
@@ -1579,6 +1644,7 @@ export default function ClientDetailPage() {
             petName={petName}
             petDbId={client.pets[selectedPetIdx]?.dbId || ''}
             onChanged={fetchClientData}
+            readOnly={!canEdit}
           />
 
           {/* Allergies */}
@@ -1588,9 +1654,11 @@ export default function ClientDetailPage() {
                 <AlertCircle className="w-5 h-5 text-[#d4183d]" />
                 <h3 className="text-[var(--text-primary)]">Allergies</h3>
               </div>
-              <Button variant="outline" size="sm" onClick={() => setShowAllergyInput(!showAllergyInput)}>
-                <Plus className="w-4 h-4" /> Add Allergy
-              </Button>
+              {canEdit && (
+                <Button variant="outline" size="sm" onClick={() => setShowAllergyInput(!showAllergyInput)}>
+                  <Plus className="w-4 h-4" /> Add Allergy
+                </Button>
+              )}
             </div>
             <div className="flex flex-wrap gap-2">
               {allergies.map((a) => (
@@ -1631,9 +1699,11 @@ export default function ClientDetailPage() {
           <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6" style={{ borderRadius: '12px' }}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-[var(--text-primary)]">Treatments</h3>
-              <Button variant="outline" size="sm" onClick={() => setTreatmentDialogOpen(true)}>
-                <Plus className="w-4 h-4" /> Add Treatment
-              </Button>
+              {canEdit && (
+                <Button variant="outline" size="sm" onClick={() => setTreatmentDialogOpen(true)}>
+                  <Plus className="w-4 h-4" /> Add Treatment
+                </Button>
+              )}
             </div>
             {treatments.length === 0 ? (
               <p className="text-[var(--text-secondary)] py-4" style={{ fontSize: '14px' }}>No treatments on file.</p>
@@ -2121,17 +2191,21 @@ export default function ClientDetailPage() {
                 </div>
                 <Badge variant="outline" className="border-[#F4A261] text-[#F4A261]">Private</Badge>
               </div>
-              <Textarea
-                value={newVetNote}
-                onChange={(e) => setNewVetNote(e.target.value)}
-                className="min-h-24 bg-[var(--surface-white)]"
-                placeholder="Add internal notes about this patient..."
-              />
-              <div className="flex justify-end mt-3">
-                <Button size="sm" disabled={!newVetNote.trim() || noteSaving} onClick={() => handleSaveNote('vet')}>
-                  <Save className="w-4 h-4" /> {noteSaving ? 'Saving...' : 'Save Note'}
-                </Button>
-              </div>
+              {canEdit && (
+                <>
+                  <Textarea
+                    value={newVetNote}
+                    onChange={(e) => setNewVetNote(e.target.value)}
+                    className="min-h-24 bg-[var(--surface-white)]"
+                    placeholder="Add internal notes about this patient..."
+                  />
+                  <div className="flex justify-end mt-3">
+                    <Button size="sm" disabled={!newVetNote.trim() || noteSaving} onClick={() => handleSaveNote('vet')}>
+                      <Save className="w-4 h-4" /> {noteSaving ? 'Saving...' : 'Save Note'}
+                    </Button>
+                  </div>
+                </>
+              )}
 
               {/* Vet notes history */}
               {noteHistory.filter(n => n.type === 'vet').length > 0 && (
@@ -2176,17 +2250,21 @@ export default function ClientDetailPage() {
                 </div>
                 <Badge variant="outline" className="border-[var(--brand-green-text)] text-[var(--brand-green-text)]">Visible to Client</Badge>
               </div>
-              <Textarea
-                value={newClientNote}
-                onChange={(e) => setNewClientNote(e.target.value)}
-                className="min-h-24 bg-[var(--surface-white)]"
-                placeholder="Add notes for the pet owner..."
-              />
-              <div className="flex justify-end mt-3">
-                <Button size="sm" disabled={!newClientNote.trim() || noteSaving} onClick={() => handleSaveNote('client')}>
-                  <Save className="w-4 h-4" /> {noteSaving ? 'Saving...' : 'Save Note'}
-                </Button>
-              </div>
+              {canEdit && (
+                <>
+                  <Textarea
+                    value={newClientNote}
+                    onChange={(e) => setNewClientNote(e.target.value)}
+                    className="min-h-24 bg-[var(--surface-white)]"
+                    placeholder="Add notes for the pet owner..."
+                  />
+                  <div className="flex justify-end mt-3">
+                    <Button size="sm" disabled={!newClientNote.trim() || noteSaving} onClick={() => handleSaveNote('client')}>
+                      <Save className="w-4 h-4" /> {noteSaving ? 'Saving...' : 'Save Note'}
+                    </Button>
+                  </div>
+                </>
+              )}
 
               {/* Client notes history */}
               {noteHistory.filter(n => n.type === 'client').length > 0 && (
@@ -2328,6 +2406,7 @@ export default function ClientDetailPage() {
             petName={petName}
             petDbId={client.pets[selectedPetIdx]?.dbId || ''}
             onChanged={fetchClientData}
+            readOnly={!canEdit}
           />
         </TabsContent>
 
@@ -2336,6 +2415,7 @@ export default function ClientDetailPage() {
           <XRayTab
             petName={petName}
             petDbId={client.pets[selectedPetIdx]?.dbId || ''}
+            readOnly={!canEdit}
           />
         </TabsContent>
 
@@ -2344,6 +2424,7 @@ export default function ClientDetailPage() {
           <SurgeryTab
             petName={petName}
             petDbId={client.pets[selectedPetIdx]?.dbId || ''}
+            readOnly={!canEdit}
           />
         </TabsContent>
 
@@ -2352,6 +2433,7 @@ export default function ClientDetailPage() {
           <PlanTab
             petName={petName}
             petDbId={client.pets[selectedPetIdx]?.dbId || ''}
+            readOnly={!canEdit}
           />
         </TabsContent>
 
@@ -2362,6 +2444,7 @@ export default function ClientDetailPage() {
             petSpecies={petSpecies}
             petWeight={petWeight}
             petDbId={client.pets[selectedPetIdx]?.dbId || ''}
+            readOnly={!canEdit}
           />
         </TabsContent>
 
@@ -2371,6 +2454,7 @@ export default function ClientDetailPage() {
             petName={petName}
             petImage={petImage}
             petDbId={client.pets[selectedPetIdx]?.dbId || ''}
+            readOnly={!canEdit}
           />
         </TabsContent>
 

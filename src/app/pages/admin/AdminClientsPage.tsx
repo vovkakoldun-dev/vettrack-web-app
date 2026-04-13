@@ -69,6 +69,13 @@ export default function AdminClientsPage() {
   const db = useTenantDb();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
+
+  // Filters & sort
+  const [filterSpecies, setFilterSpecies] = useState<string>('All');
+  const [filterStatus, setFilterStatus] = useState<string>('All');
+  const [filterVet, setFilterVet] = useState<string>('All');
+  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest' | 'name-az' | 'name-za'>('newest');
+
   const {
     clients,
     loading,
@@ -79,19 +86,17 @@ export default function AdminClientsPage() {
     deleteClient,
     refetch,
     loadMore,
-  } = useClients({ pageSize: 30 });
+  } = useClients({
+    pageSize: 30,
+    orderColumn: sortOrder === 'name-az' || sortOrder === 'name-za' ? 'created_at' : 'created_at',
+    orderAscending: sortOrder === 'oldest',
+  });
 
   const [addClientOpen, setAddClientOpen] = useState(false);
   const [statusOverrides, setStatusOverrides] = useState<Record<string, Status>>({});
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [copiedEmail, setCopiedEmail] = useState<string | null>(null);
   const [emailMenuOpen, setEmailMenuOpen] = useState<string | null>(null);
-
-  // Filters & sort
-  const [filterSpecies, setFilterSpecies] = useState<string>('All');
-  const [filterStatus, setFilterStatus] = useState<string>('All');
-  const [filterVet, setFilterVet] = useState<string>('All');
-  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest' | 'name-az' | 'name-za'>('newest');
 
   // Bulk select
   const [selectMode, setSelectMode] = useState(false);
