@@ -134,15 +134,54 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
     prevPathnameRef.current = pathname;
 
     if (pathname === '/admin/notifications') {
-      // On notifications page — badge is 0, auto-read will mark in DB
+      // On notifications page — mark ALL sidebar notification IDs as read directly
       setNotifUnread(0);
       justLeftNotifRef.current = true;
+      // The sidebar knows what IDs it generates — mark them all read now
+      (async () => {
+        try {
+          const { organizationId } = await getOrgContext();
+          const sevenDaysAgoISO = new Date(Date.now() - 7 * 86400000).toISOString();
+          const now = new Date();
+          const today = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}`;
+          const weekAgoStr = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+          const [a1, a2, a3, c1, v1, e1] = await Promise.all([
+            db.from('appointments').select('id').eq('organization_id', organizationId)
+              .gte('scheduled_at', new Date(`${today}T00:00:00`).toISOString()).lte('scheduled_at', new Date(`${today}T23:59:59`).toISOString())
+              .in('status', ['Scheduled', 'Confirmed']),
+            db.from('appointments').select('id').eq('organization_id', organizationId)
+              .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Completed'),
+            db.from('appointments').select('id').eq('organization_id', organizationId)
+              .gte('scheduled_at', `${weekAgoStr}T00:00:00`).eq('status', 'Cancelled'),
+            db.from('clients').select('id').eq('organization_id', organizationId)
+              .gte('created_at', `${weekAgoStr}T00:00:00`),
+            db.from('vaccinations').select('id, pets!inner(organization_id)')
+              .eq('pets.organization_id', organizationId).lte('next_due_date', today),
+            db.from('notification_events').select('id').eq('organization_id', organizationId)
+              .gte('timestamp', sevenDaysAgoISO),
+          ]);
+          const allIds: string[] = [];
+          (a1.data || []).forEach((a: any) => allIds.push(`appt-today-${a.id}`));
+          (a2.data || []).forEach((a: any) => allIds.push(`appt-done-${a.id}`));
+          (a3.data || []).forEach((a: any) => allIds.push(`appt-cancel-${a.id}`));
+          (c1.data || []).forEach((c: any) => allIds.push(`client-${c.id}`));
+          (v1.data || []).forEach((v: any) => allIds.push(`vax-${v.id}`));
+          (e1.data || []).forEach((e: any) => allIds.push(e.id));
+          if (allIds.length > 0 && user) {
+            const rows = allIds.map(id => ({
+              notification_id: id, status: 'read' as const,
+              updated_at: new Date().toISOString(),
+              organization_id: organizationId, user_id: user.id,
+            }));
+            await db.from('notification_state').upsert(rows);
+          }
+        } catch (e) { console.error('Sidebar auto-read failed:', e); }
+      })();
     } else if (wasOnNotif || justLeftNotifRef.current) {
-      // Just left notifications — auto-read DB write may still be in progress
-      // Keep badge at 0 and delay recomputation to let DB write complete
+      // Just left notifications — everything was marked read above, skip re-compute briefly
       justLeftNotifRef.current = false;
       setNotifUnread(0);
-      const timer = setTimeout(() => { if (mounted) computeNotifCount(); }, 3000);
+      const timer = setTimeout(() => { if (mounted) computeNotifCount(); }, 2000);
       return () => { mounted = false; clearTimeout(timer); };
     } else {
       computeNotifCount();
