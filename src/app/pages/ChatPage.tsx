@@ -16,6 +16,9 @@ import {
   Download,
   Image as ImageIcon,
   Forward,
+  Microscope,
+  ClipboardList,
+  ExternalLink,
 } from 'lucide-react';
 import { Input } from '../components/ui/input';
 import { getOrgContext } from '../hooks/useOrgContext';
@@ -38,6 +41,45 @@ const EMOJI_GROUPS = [
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+type AttachmentMeta = {
+  type: 'record' | 'lab';
+  id: string;
+  title: string;
+  petName: string;
+  petImage?: string;
+  date: string;
+  status: string;
+  recordType?: string;
+  vet?: string;
+  summary?: string;
+  fileUrl?: string;
+  fileName?: string;
+};
+
+type RecordPickItem = {
+  id: string;
+  recordNumber: string;
+  recordType: string;
+  petName: string;
+  petImage: string;
+  date: string;
+  vet: string;
+  summary: string;
+  status: string;
+};
+
+type LabPickItem = {
+  id: string;
+  fileName: string;
+  fileUrl: string;
+  testPanel: string;
+  petName: string;
+  petImage: string;
+  date: string;
+  status: string;
+  uploadedBy: string;
+};
+
 type DisplayMessage = {
   id: string;
   from: 'me' | 'them';
@@ -51,6 +93,8 @@ type DisplayMessage = {
   senderName?: string;
   /** If this message was forwarded, name of the original author. */
   forwardedFromName?: string;
+  /** Rich attachment metadata for records/lab results */
+  attachmentMeta?: AttachmentMeta;
 };
 
 type Reaction = {
@@ -189,6 +233,14 @@ export default function ChatPage() {
   const [uploadingImage, setUploadingImage] = useState(false);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const attachMenuRef = useRef<HTMLDivElement>(null);
+
+  // Record / Lab picker
+  const [recordPickerOpen, setRecordPickerOpen] = useState(false);
+  const [labPickerOpen, setLabPickerOpen] = useState(false);
+  const [availableRecords, setAvailableRecords] = useState<RecordPickItem[]>([]);
+  const [availableLabs, setAvailableLabs] = useState<LabPickItem[]>([]);
+  const [pickerSearch, setPickerSearch] = useState('');
+  const [attachedRecord, setAttachedRecord] = useState<AttachmentMeta | null>(null);
 
   // Delete conversation
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -504,7 +556,7 @@ export default function ChatPage() {
     const { organizationId } = await getOrgContext();
     const { data } = await db
       .from('messages')
-      .select('id, content, sender_id, image_url, file_url, file_name, file_size, forwarded_from_name, created_at, sender:profiles!messages_sender_id_fkey(first_name, last_name, role)')
+      .select('id, content, sender_id, image_url, file_url, file_name, file_size, forwarded_from_name, attachment_meta, created_at, sender:profiles!messages_sender_id_fkey(first_name, last_name, role)')
       .eq('organization_id', organizationId)
       .eq('conversation_id', convId)
       .order('created_at', { ascending: true });
@@ -526,6 +578,7 @@ export default function ChatPage() {
           fileSize: m.file_size || undefined,
           senderName,
           forwardedFromName: m.forwarded_from_name || undefined,
+          attachmentMeta: m.attachment_meta || undefined,
         };
       }));
     }
@@ -740,6 +793,100 @@ export default function ChatPage() {
     setAttachedFile(null);
   }
 
+  function clearAttachedRecord() {
+    setAttachedRecord(null);
+  }
+
+  async function fetchAvailableRecords() {
+    const { organizationId } = await getOrgContext();
+    const { data } = await db
+      .from('medical_records')
+      .select('id, record_number, record_type, status, visit_date, reason, clinical_notes, pets!left(name, photo_url), clients!left(first_name, last_name), staff!medical_records_vet_id_fkey!left(profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
+      .eq('organization_id', organizationId)
+      .order('visit_date', { ascending: false })
+      .limit(50);
+    if (data) {
+      setAvailableRecords(data.map((r: any) => ({
+        id: r.id,
+        recordNumber: r.record_number || r.id.slice(0, 8).toUpperCase(),
+        recordType: r.record_type || 'Visit',
+        petName: r.pets?.name ?? '—',
+        petImage: r.pets?.photo_url || '',
+        date: r.visit_date ? new Date(r.visit_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—',
+        vet: r.staff?.profiles ? `Dr. ${r.staff.profiles.first_name} ${r.staff.profiles.last_name}` : '—',
+        summary: r.reason || r.clinical_notes || '—',
+        status: r.status || 'Final',
+      })));
+    }
+  }
+
+  async function fetchAvailableLabs() {
+    const { organizationId } = await getOrgContext();
+    const { data } = await db
+      .from('lab_results')
+      .select('id, file_name, file_url, test_panel, review_status, created_at, pet_id, pets!left(name, photo_url), uploader:profiles!lab_results_uploaded_by_fkey(first_name, last_name)')
+      .eq('organization_id', organizationId)
+      .not('file_url', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(50);
+    if (data) {
+      setAvailableLabs(data.map((r: any) => ({
+        id: r.id,
+        fileName: r.file_name || 'Unnamed file',
+        fileUrl: r.file_url || '',
+        testPanel: r.test_panel || 'General',
+        petName: r.pets?.name ?? '—',
+        petImage: r.pets?.photo_url || '',
+        date: r.created_at ? new Date(r.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—',
+        status: r.review_status === 'reviewed' ? 'Reviewed' : 'Awaiting Review',
+        uploadedBy: r.uploader ? `${r.uploader.first_name} ${r.uploader.last_name}`.trim() : '—',
+      })));
+    }
+  }
+
+  function handlePickRecord(rec: RecordPickItem) {
+    const meta: AttachmentMeta = {
+      type: 'record',
+      id: rec.id,
+      title: rec.recordNumber,
+      petName: rec.petName,
+      petImage: rec.petImage,
+      date: rec.date,
+      status: rec.status,
+      recordType: rec.recordType,
+      vet: rec.vet,
+      summary: rec.summary,
+    };
+    setAttachedRecord(meta);
+    setImageFile(null);
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
+    setImagePreview(null);
+    setAttachedFile(null);
+    setRecordPickerOpen(false);
+    setPickerSearch('');
+  }
+
+  function handlePickLab(lab: LabPickItem) {
+    const meta: AttachmentMeta = {
+      type: 'lab',
+      id: lab.id,
+      title: lab.testPanel,
+      petName: lab.petName,
+      petImage: lab.petImage,
+      date: lab.date,
+      status: lab.status,
+      fileUrl: lab.fileUrl,
+      fileName: lab.fileName,
+    };
+    setAttachedRecord(meta);
+    setImageFile(null);
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
+    setImagePreview(null);
+    setAttachedFile(null);
+    setLabPickerOpen(false);
+    setPickerSearch('');
+  }
+
   function formatFileSize(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -772,17 +919,21 @@ export default function ChatPage() {
   // ── Send message ────────────────────────────────────────────────────────────
 
   async function handleSend() {
-    if ((!inputValue.trim() && !imageFile && !attachedFile) || !selectedId || !user) return;
+    if ((!inputValue.trim() && !imageFile && !attachedFile && !attachedRecord) || !selectedId || !user) return;
     const content = inputValue.trim();
     setInputValue('');
     const pendingImageFile = imageFile;
     const pendingPreview = imagePreview;
     const pendingAttachedFile = attachedFile;
+    const pendingRecord = attachedRecord;
     setImageFile(null);
     setImagePreview(null);
     setAttachedFile(null);
+    setAttachedRecord(null);
 
-    const attachLabel = pendingAttachedFile ? `📎 ${pendingAttachedFile.name}` : pendingImageFile ? '📷 Image' : '';
+    const attachLabel = pendingRecord
+      ? (pendingRecord.type === 'record' ? `📋 Record: ${pendingRecord.title}` : `🔬 Lab: ${pendingRecord.title}`)
+      : pendingAttachedFile ? `📎 ${pendingAttachedFile.name}` : pendingImageFile ? '📷 Image' : '';
 
     // Optimistic update
     const tempId = `temp-${Date.now()}`;
@@ -795,6 +946,7 @@ export default function ChatPage() {
       imageUrl: pendingPreview || undefined,
       fileName: pendingAttachedFile?.name,
       fileSize: pendingAttachedFile?.size,
+      attachmentMeta: pendingRecord || undefined,
     }]);
 
     setConversations(prev => prev.map(c =>
@@ -841,19 +993,23 @@ export default function ChatPage() {
 
     // Insert into Supabase
     const { organizationId } = await getOrgContext();
-    const msgContent = content || (imageUrl ? '📷 Image' : fileName ? `📎 ${fileName}` : '');
+    const msgContent = content || (pendingRecord
+      ? (pendingRecord.type === 'record' ? `📋 Record: ${pendingRecord.title}` : `🔬 Lab: ${pendingRecord.title}`)
+      : imageUrl ? '📷 Image' : fileName ? `📎 ${fileName}` : '');
+    const insertPayload: any = {
+      organization_id: organizationId,
+      conversation_id: selectedId,
+      sender_id: user.id,
+      content: msgContent,
+      image_url: imageUrl,
+      file_url: fileUrl,
+      file_name: fileName,
+      file_size: fileSize,
+    };
+    if (pendingRecord) insertPayload.attachment_meta = pendingRecord;
     const { data } = await db
       .from('messages')
-      .insert({
-        organization_id: organizationId,
-        conversation_id: selectedId,
-        sender_id: user.id,
-        content: msgContent,
-        image_url: imageUrl,
-        file_url: fileUrl,
-        file_name: fileName,
-        file_size: fileSize,
-      })
+      .insert(insertPayload)
       .select('id')
       .single();
 
@@ -865,6 +1021,7 @@ export default function ChatPage() {
         fileUrl: fileUrl || undefined,
         fileName: fileName || m.fileName,
         fileSize: fileSize ?? m.fileSize,
+        attachmentMeta: pendingRecord || undefined,
       } : m));
     }
 
@@ -897,6 +1054,7 @@ export default function ChatPage() {
             fileUrl: msg.file_url || undefined,
             fileName: msg.file_name || undefined,
             fileSize: msg.file_size || undefined,
+            attachmentMeta: msg.attachment_meta || undefined,
           }]);
           const now = new Date().toISOString();
           lastReadAtRef.current = now;
@@ -1297,7 +1455,7 @@ export default function ChatPage() {
                             )}
 
                             <div style={{
-                              padding: (msg.imageUrl || msg.fileUrl) ? '4px' : '10px 14px',
+                              padding: (msg.imageUrl || msg.fileUrl || msg.attachmentMeta) ? '4px' : '10px 14px',
                               borderRadius: isMe ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
                               backgroundColor: isMe ? 'var(--brand-green-text)' : 'var(--surface-elevated)',
                               color: isMe ? 'var(--on-brand-green)' : 'var(--text-primary)',
@@ -1313,7 +1471,7 @@ export default function ChatPage() {
                                   fontWeight: 600,
                                   fontStyle: 'italic',
                                   opacity: 0.85,
-                                  padding: (msg.imageUrl || msg.fileUrl) ? '6px 10px 0' : '0 0 4px',
+                                  padding: (msg.imageUrl || msg.fileUrl || msg.attachmentMeta) ? '6px 10px 0' : '0 0 4px',
                                   color: isMe ? 'var(--on-brand-green)' : 'var(--brand-green-text)',
                                 }}>
                                   <Forward style={{ width: '11px', height: '11px' }} />
@@ -1359,8 +1517,55 @@ export default function ChatPage() {
                                   <Download style={{ width: 14, height: 14, opacity: 0.6, flexShrink: 0 }} />
                                 </a>
                               )}
-                              {msg.text && msg.text !== '📷 Image' && !msg.text.startsWith('📎 ') && (
-                                <div style={{ padding: (msg.imageUrl || msg.fileUrl) ? '8px 10px 6px' : '0' }}>{msg.text}</div>
+                              {msg.attachmentMeta && (
+                                <div
+                                  onClick={() => {
+                                    if (msg.attachmentMeta!.type === 'record') {
+                                      window.open(`/records/${msg.attachmentMeta!.id}`, '_blank');
+                                    } else if (msg.attachmentMeta!.fileUrl) {
+                                      window.open(msg.attachmentMeta!.fileUrl, '_blank');
+                                    }
+                                  }}
+                                  style={{
+                                    display: 'flex', alignItems: 'center', gap: '10px',
+                                    padding: '10px 12px', margin: '4px',
+                                    borderRadius: '10px',
+                                    backgroundColor: isMe ? 'rgba(255,255,255,0.15)' : 'var(--bg-offwhite)',
+                                    cursor: 'pointer', minWidth: '200px', maxWidth: '280px',
+                                    transition: 'background-color 0.15s',
+                                  }}
+                                >
+                                  <div style={{
+                                    width: 36, height: 36, borderRadius: '8px',
+                                    backgroundColor: msg.attachmentMeta.type === 'record'
+                                      ? (isMe ? 'rgba(0,0,0,0.08)' : 'rgba(45,106,79,0.12)')
+                                      : (isMe ? 'rgba(0,0,0,0.08)' : 'rgba(236,72,153,0.12)'),
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                                  }}>
+                                    {msg.attachmentMeta.type === 'record'
+                                      ? <ClipboardList style={{ width: 16, height: 16, color: isMe ? '#1a1a2e' : '#2D6A4F' }} />
+                                      : <Microscope style={{ width: 16, height: 16, color: isMe ? '#1a1a2e' : '#EC4899' }} />}
+                                  </div>
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontSize: '13px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      {msg.attachmentMeta.type === 'record'
+                                        ? `${msg.attachmentMeta.recordType} Record`
+                                        : msg.attachmentMeta.title}
+                                    </div>
+                                    <div style={{ fontSize: '11px', opacity: 0.7, marginTop: '1px' }}>
+                                      {msg.attachmentMeta.petName} &middot; {msg.attachmentMeta.date}
+                                    </div>
+                                    {msg.attachmentMeta.type === 'record' && msg.attachmentMeta.vet && (
+                                      <div style={{ fontSize: '11px', opacity: 0.6, marginTop: '1px' }}>
+                                        {msg.attachmentMeta.vet}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <ExternalLink style={{ width: 14, height: 14, opacity: 0.6, flexShrink: 0 }} />
+                                </div>
+                              )}
+                              {msg.text && msg.text !== '📷 Image' && !msg.text.startsWith('📎 ') && !msg.text.startsWith('📋 Record:') && !msg.text.startsWith('🔬 Lab:') && (
+                                <div style={{ padding: (msg.imageUrl || msg.fileUrl || msg.attachmentMeta) ? '8px 10px 6px' : '0' }}>{msg.text}</div>
                               )}
                             </div>
 
@@ -1445,8 +1650,42 @@ export default function ChatPage() {
               </div>
             )}
 
+            {/* Record / Lab preview */}
+            {attachedRecord && (
+              <div style={{ flexShrink: 0, borderTop: '1px solid var(--border-color)', padding: '12px 16px 0', backgroundColor: 'var(--surface-white)' }}>
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: '10px',
+                  padding: '10px 12px', borderRadius: '10px',
+                  backgroundColor: attachedRecord.type === 'record' ? 'rgba(45,106,79,0.08)' : 'rgba(236,72,153,0.08)',
+                  border: `1px solid ${attachedRecord.type === 'record' ? 'rgba(45,106,79,0.25)' : 'rgba(236,72,153,0.25)'}`,
+                }}>
+                  <div style={{
+                    width: 36, height: 36, borderRadius: '8px',
+                    backgroundColor: attachedRecord.type === 'record' ? 'rgba(45,106,79,0.15)' : 'rgba(236,72,153,0.15)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                  }}>
+                    {attachedRecord.type === 'record'
+                      ? <ClipboardList style={{ width: 16, height: 16, color: '#2D6A4F' }} />
+                      : <Microscope style={{ width: 16, height: 16, color: '#EC4899' }} />}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {attachedRecord.type === 'record' ? `${attachedRecord.recordType} — ${attachedRecord.title}` : attachedRecord.title}
+                    </div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '1px' }}>
+                      {attachedRecord.petName} &middot; {attachedRecord.date}
+                    </div>
+                  </div>
+                  <button
+                    onClick={clearAttachedRecord}
+                    style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: '#d4183d', color: '#fff', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 700, flexShrink: 0 }}
+                  >x</button>
+                </div>
+              </div>
+            )}
+
             {/* Input area */}
-            <div style={{ flexShrink: 0, borderTop: (imagePreview || attachedFile) ? 'none' : '1px solid var(--border-color)', padding: '16px', display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: 'var(--surface-white)' }}>
+            <div style={{ flexShrink: 0, borderTop: (imagePreview || attachedFile || attachedRecord) ? 'none' : '1px solid var(--border-color)', padding: '16px', display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: 'var(--surface-white)' }}>
               <input type="file" ref={chatImageRef} accept="image/*" style={{ display: 'none' }} onChange={handleImageSelect} />
               <input type="file" ref={chatFileRef} accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.ppt,.pptx,.txt,.zip,.rar,.7z,.mp4,.mov,.mp3,.wav" style={{ display: 'none' }} onChange={handleFileSelect} />
               <div ref={attachMenuRef} style={{ position: 'relative', flexShrink: 0 }}>
@@ -1486,6 +1725,26 @@ export default function ChatPage() {
                     >
                       <FileText style={{ width: 16, height: 16, color: '#8B5CF6' }} />
                       Document or File
+                    </button>
+                    <div style={{ height: '1px', backgroundColor: 'var(--border-color)' }} />
+                    <button
+                      onClick={() => { setAttachMenuOpen(false); fetchAvailableLabs(); setLabPickerOpen(true); }}
+                      style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: '10px 14px', border: 'none', backgroundColor: 'transparent', cursor: 'pointer', color: 'var(--text-primary)', fontSize: '13px', fontWeight: 500, transition: 'background-color 0.15s' }}
+                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--surface-elevated)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                    >
+                      <Microscope style={{ width: 16, height: 16, color: '#EC4899' }} />
+                      Lab Result
+                    </button>
+                    <div style={{ height: '1px', backgroundColor: 'var(--border-color)' }} />
+                    <button
+                      onClick={() => { setAttachMenuOpen(false); fetchAvailableRecords(); setRecordPickerOpen(true); }}
+                      style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: '10px 14px', border: 'none', backgroundColor: 'transparent', cursor: 'pointer', color: 'var(--text-primary)', fontSize: '13px', fontWeight: 500, transition: 'background-color 0.15s' }}
+                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--surface-elevated)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                    >
+                      <ClipboardList style={{ width: 16, height: 16, color: '#2D6A4F' }} />
+                      Medical Record
                     </button>
                   </div>
                 )}
@@ -1538,12 +1797,12 @@ export default function ChatPage() {
               <button
                 title="Send"
                 onClick={handleSend}
-                disabled={!inputValue.trim() && !imageFile && !attachedFile}
+                disabled={!inputValue.trim() && !imageFile && !attachedFile && !attachedRecord}
                 style={{
                   width: '36px', height: '36px', flexShrink: 0, borderRadius: '999px', border: 'none',
-                  backgroundColor: (inputValue.trim() || imageFile || attachedFile) ? 'var(--brand-green-text)' : 'var(--border-color)',
+                  backgroundColor: (inputValue.trim() || imageFile || attachedFile || attachedRecord) ? 'var(--brand-green-text)' : 'var(--border-color)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  cursor: (inputValue.trim() || imageFile || attachedFile) ? 'pointer' : 'not-allowed', color: 'var(--on-brand-green)', transition: 'background-color 0.15s',
+                  cursor: (inputValue.trim() || imageFile || attachedFile || attachedRecord) ? 'pointer' : 'not-allowed', color: 'var(--on-brand-green)', transition: 'background-color 0.15s',
                 }}
               >
                 <Send style={{ width: '16px', height: '16px' }} />
@@ -1647,6 +1906,121 @@ export default function ChatPage() {
               <button onClick={() => handleDeleteConversation(deleteConfirmId)} style={{ padding: '8px 16px', borderRadius: '8px', border: 'none', backgroundColor: '#d4183d', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
                 Delete
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Lab Result picker dialog ──────────────────────────────────────── */}
+      {labPickerOpen && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.4)' }} onClick={() => { setLabPickerOpen(false); setPickerSearch(''); }}>
+          <div style={{ backgroundColor: 'var(--surface-white)', borderRadius: '12px', padding: '24px', width: '500px', maxWidth: '90vw', maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 16px 48px rgba(0,0,0,0.18)' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
+              <Microscope style={{ width: 20, height: 20, color: '#EC4899' }} />
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>Attach Lab Result</h3>
+            </div>
+            <p style={{ margin: '0 0 12px', fontSize: '13px', color: 'var(--text-secondary)' }}>Select a lab result to share in this conversation.</p>
+            <input
+              type="text"
+              placeholder="Search by pet name, test, or file..."
+              value={pickerSearch}
+              onChange={(e) => setPickerSearch(e.target.value)}
+              autoFocus
+              style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', fontSize: '13px', marginBottom: '12px', outline: 'none', backgroundColor: 'transparent', color: 'var(--text-primary)', boxSizing: 'border-box' }}
+            />
+            <div style={{ flex: 1, overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: '8px', maxHeight: '350px' }}>
+              {availableLabs.length === 0 ? (
+                <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '13px' }}>No lab results found</div>
+              ) : availableLabs.filter(l => {
+                const q = pickerSearch.toLowerCase();
+                return !q || l.petName.toLowerCase().includes(q) || l.testPanel.toLowerCase().includes(q) || l.fileName.toLowerCase().includes(q);
+              }).map(lab => (
+                <button
+                  key={lab.id}
+                  onClick={() => handlePickLab(lab)}
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', border: 'none', backgroundColor: 'transparent', cursor: 'pointer', textAlign: 'left', transition: 'background-color 0.15s', borderBottom: '1px solid var(--border-color)' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--surface-elevated)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                >
+                  <div style={{ width: 36, height: 36, borderRadius: '8px', backgroundColor: 'rgba(236,72,153,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Microscope style={{ width: 16, height: 16, color: '#EC4899' }} />
+                  </div>
+                  {lab.petImage ? (
+                    <img src={lab.petImage} alt="" style={{ width: 28, height: 28, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
+                  ) : (
+                    <div style={{ width: 28, height: 28, borderRadius: '50%', backgroundColor: 'var(--surface-elevated)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', flexShrink: 0 }}>{lab.petName.charAt(0)}</div>
+                  )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lab.testPanel}</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{lab.petName} &middot; {lab.date}</div>
+                  </div>
+                  <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '999px', backgroundColor: lab.status === 'Reviewed' ? 'rgba(116,198,157,0.15)' : 'rgba(244,162,97,0.15)', color: lab.status === 'Reviewed' ? 'var(--brand-green-text)' : '#F4A261' }}>{lab.status}</span>
+                </button>
+              ))}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
+              <button onClick={() => { setLabPickerOpen(false); setPickerSearch(''); }} style={{ padding: '8px 16px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-white)', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: 'var(--text-primary)' }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Medical Record picker dialog ──────────────────────────────────── */}
+      {recordPickerOpen && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.4)' }} onClick={() => { setRecordPickerOpen(false); setPickerSearch(''); }}>
+          <div style={{ backgroundColor: 'var(--surface-white)', borderRadius: '12px', padding: '24px', width: '520px', maxWidth: '90vw', maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 16px 48px rgba(0,0,0,0.18)' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
+              <ClipboardList style={{ width: 20, height: 20, color: '#2D6A4F' }} />
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>Attach Medical Record</h3>
+            </div>
+            <p style={{ margin: '0 0 12px', fontSize: '13px', color: 'var(--text-secondary)' }}>Select a record to share in this conversation.</p>
+            <input
+              type="text"
+              placeholder="Search by pet name, vet, or summary..."
+              value={pickerSearch}
+              onChange={(e) => setPickerSearch(e.target.value)}
+              autoFocus
+              style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', fontSize: '13px', marginBottom: '12px', outline: 'none', backgroundColor: 'transparent', color: 'var(--text-primary)', boxSizing: 'border-box' }}
+            />
+            <div style={{ flex: 1, overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: '8px', maxHeight: '350px' }}>
+              {availableRecords.length === 0 ? (
+                <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '13px' }}>No records found</div>
+              ) : availableRecords.filter(r => {
+                const q = pickerSearch.toLowerCase();
+                return !q || r.petName.toLowerCase().includes(q) || r.vet.toLowerCase().includes(q) || r.summary.toLowerCase().includes(q) || r.recordType.toLowerCase().includes(q);
+              }).map(rec => {
+                const typeColors: Record<string, string> = { Visit: '#2D6A4F', Vaccination: '#3B82F6', 'Lab Result': '#8B5CF6', Surgery: '#EC4899', Prescription: '#F4A261', Dental: '#06B6D4', Imaging: '#6B7280' };
+                const tc = typeColors[rec.recordType] || '#2D6A4F';
+                return (
+                  <button
+                    key={rec.id}
+                    onClick={() => handlePickRecord(rec)}
+                    style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', border: 'none', backgroundColor: 'transparent', cursor: 'pointer', textAlign: 'left', transition: 'background-color 0.15s', borderBottom: '1px solid var(--border-color)' }}
+                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--surface-elevated)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                  >
+                    <div style={{ width: 36, height: 36, borderRadius: '8px', backgroundColor: `${tc}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <ClipboardList style={{ width: 16, height: 16, color: tc }} />
+                    </div>
+                    {rec.petImage ? (
+                      <img src={rec.petImage} alt="" style={{ width: 28, height: 28, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
+                    ) : (
+                      <div style={{ width: 28, height: 28, borderRadius: '50%', backgroundColor: 'var(--surface-elevated)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', flexShrink: 0 }}>{rec.petName.charAt(0)}</div>
+                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{rec.petName}</span>
+                        <span style={{ fontSize: '11px', fontWeight: 600, padding: '1px 6px', borderRadius: '999px', backgroundColor: `${tc}18`, color: tc }}>{rec.recordType}</span>
+                      </div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{rec.vet} &middot; {rec.date}</div>
+                    </div>
+                    <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '999px', flexShrink: 0, backgroundColor: rec.status === 'Final' ? 'rgba(116,198,157,0.15)' : rec.status === 'Pending Review' ? 'rgba(244,162,97,0.15)' : 'rgba(59,130,246,0.15)', color: rec.status === 'Final' ? 'var(--brand-green-text)' : rec.status === 'Pending Review' ? '#F4A261' : '#3B82F6' }}>{rec.status}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
+              <button onClick={() => { setRecordPickerOpen(false); setPickerSearch(''); }} style={{ padding: '8px 16px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-white)', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: 'var(--text-primary)' }}>Cancel</button>
             </div>
           </div>
         </div>

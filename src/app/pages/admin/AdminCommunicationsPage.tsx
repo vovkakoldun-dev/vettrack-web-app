@@ -1208,10 +1208,12 @@ function EmailInboxView({ connectedIds, integrations, onManageIntegrations, acti
               </div>
 
               {selectedEmail.body && selectedEmail.body.includes('<') ? (
-                <div
-                  style={{ fontSize: 14, color: 'var(--text-primary)', lineHeight: 1.8 }}
-                  dangerouslySetInnerHTML={{ __html: selectedEmail.body }}
-                />
+                <div style={{
+                  backgroundColor: '#ffffff', color: '#1a1a1a', borderRadius: 8, padding: 16,
+                  fontSize: 14, lineHeight: 1.8, overflow: 'auto',
+                }}>
+                  <div dangerouslySetInnerHTML={{ __html: selectedEmail.body }} />
+                </div>
               ) : (
                 <div style={{ fontSize: 14, color: 'var(--text-primary)', lineHeight: 1.8, whiteSpace: 'pre-line' }}>
                   {selectedEmail.body}
