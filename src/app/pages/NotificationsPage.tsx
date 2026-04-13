@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router';
 import {
   Bell, Calendar, FlaskConical, User, Syringe, AlertTriangle,
@@ -133,7 +133,7 @@ async function fetchNotificationsFromSupabase(db: any, isAdmin: boolean, userId?
         .select('id, scheduled_at, status, reason, pets(id, name, species, breed), clients(id, first_name, last_name)')
         .eq('organization_id', organizationId)
         .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`).lt('scheduled_at', `${today}T00:00:00`)
-        .eq('status', 'Completed').order('scheduled_at', { ascending: false }).limit(50);
+        .eq('status', 'Completed').order('scheduled_at', { ascending: false }).limit(20);
       if (!isAdmin && userId) q = q.eq('vet_id', userId);
       return q;
     })(),
@@ -142,7 +142,7 @@ async function fetchNotificationsFromSupabase(db: any, isAdmin: boolean, userId?
         .select('id, scheduled_at, reason, pets(id, name), clients(id, first_name, last_name)')
         .eq('organization_id', organizationId)
         .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`).eq('status', 'Cancelled')
-        .order('scheduled_at', { ascending: false }).limit(50);
+        .order('scheduled_at', { ascending: false }).limit(20);
       if (!isAdmin && userId) q = q.eq('vet_id', userId);
       return q;
     })(),
@@ -150,18 +150,18 @@ async function fetchNotificationsFromSupabase(db: any, isAdmin: boolean, userId?
       .select('id, vaccine_name, next_due_date, administered_date, pets!inner(id, name, species, breed, organization_id, client_id, clients:clients!pets_client_id_fkey(id, first_name, last_name, phone))')
       .eq('pets.organization_id', organizationId)
       .not('next_due_date', 'is', null).lte('next_due_date', thirtyDaysFromNowStr)
-      .order('next_due_date', { ascending: true }).limit(50),
+      .order('next_due_date', { ascending: true }).limit(20),
     db.from('clients')
       .select('id, first_name, last_name, created_at')
       .eq('organization_id', organizationId)
       .gte('created_at', `${sevenDaysAgoStr}T00:00:00`)
-      .order('created_at', { ascending: false }).limit(50),
+      .order('created_at', { ascending: false }).limit(20),
     (() => {
       let q = db.from('appointments')
         .select('id, scheduled_at, reason, pets(id, name), clients(id, first_name, last_name)')
         .eq('organization_id', organizationId)
         .gte('scheduled_at', `${sevenDaysAgoStr}T00:00:00`).eq('status', 'No Show')
-        .order('scheduled_at', { ascending: false }).limit(50);
+        .order('scheduled_at', { ascending: false }).limit(20);
       if (!isAdmin && userId) q = q.eq('vet_id', userId);
       return q;
     })(),
@@ -548,7 +548,6 @@ export default function NotificationsPage() {
   const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
   const [loading, setLoading] = useState(true);
   const [visibleCount, setVisibleCount] = useState(10);
-  const observerRef = useRef<IntersectionObserver | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -641,16 +640,20 @@ export default function NotificationsPage() {
   // Reset visible count when filter changes
   useEffect(() => { setVisibleCount(10); }, [activeFilter]);
 
-  // Callback ref for auto-load sentinel — observes when it enters viewport
-  const loadMoreRef = useCallback((node: HTMLDivElement | null) => {
-    if (observerRef.current) observerRef.current.disconnect();
-    if (!node) return;
-    observerRef.current = new IntersectionObserver(
-      ([entry]) => { if (entry.isIntersecting) setVisibleCount(prev => prev + 10); },
-      { rootMargin: '200px' },
-    );
-    observerRef.current.observe(node);
-  }, []);
+  // Auto-load more when user scrolls near bottom
+  useEffect(() => {
+    if (!hasMore) return;
+    const main = document.querySelector('main');
+    if (!main) return;
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = main;
+      if (scrollTop > 50 && scrollTop + clientHeight >= scrollHeight - 300) {
+        setVisibleCount(prev => prev + 10);
+      }
+    };
+    main.addEventListener('scroll', handleScroll, { passive: true });
+    return () => main.removeEventListener('scroll', handleScroll);
+  }, [hasMore, visibleCount]);
 
   const saveReadState = async (ids: string[]) => {
     try {
@@ -1141,7 +1144,7 @@ export default function NotificationsPage() {
 
           {/* Auto-load sentinel */}
           {hasMore && (
-            <div ref={loadMoreRef} className="flex items-center justify-center py-6">
+            <div className="flex items-center justify-center py-6">
               <Loader2 className="w-5 h-5 animate-spin text-[var(--text-secondary)]" />
               <span className="ml-2 text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>Loading more...</span>
             </div>
