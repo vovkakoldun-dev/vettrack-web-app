@@ -66,6 +66,8 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
   // ── Notification unread badge ──────────────────────────────────
   const [notifUnread, setNotifUnread] = useState(0);
   const prevNotifCountRef = useRef(-1);
+  const justLeftNotifRef = useRef(false);
+  const prevPathnameRef = useRef(pathname);
 
   useEffect(() => {
     if (!user) return;
@@ -103,7 +105,6 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
         (cancelledRes.data || []).forEach((a: any) => allIds.push(`appt-cancel-${a.id}`));
         (clientRes.data || []).forEach((c: any) => allIds.push(`client-${c.id}`));
         (vacRes.data || []).forEach((v: any) => allIds.push(`vax-${v.id}`));
-        // Include all notification_events (admins see everything)
         for (const evt of (notifEvtRes.data || []) as any[]) {
           allIds.push(evt.id);
         }
@@ -128,13 +129,26 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
       } catch {}
     }
 
-    // If user is on the notifications page, assume all are read — skip heavy recomputation
+    // Track whether we just left the notifications page
+    const wasOnNotif = prevPathnameRef.current === '/admin/notifications';
+    prevPathnameRef.current = pathname;
+
     if (pathname === '/admin/notifications') {
+      // On notifications page — badge is 0, auto-read will mark in DB
       setNotifUnread(0);
+      justLeftNotifRef.current = true;
+    } else if (wasOnNotif || justLeftNotifRef.current) {
+      // Just left notifications — auto-read DB write may still be in progress
+      // Keep badge at 0 and delay recomputation to let DB write complete
+      justLeftNotifRef.current = false;
+      setNotifUnread(0);
+      const timer = setTimeout(() => { if (mounted) computeNotifCount(); }, 3000);
+      return () => { mounted = false; clearTimeout(timer); };
     } else {
       computeNotifCount();
     }
-    // Also listen for explicit broadcasts from NotificationsPage
+
+    // Listen for explicit broadcasts from NotificationsPage
     const handler = (e: Event) => {
       const count = (e as CustomEvent).detail?.count;
       if (typeof count === 'number') setNotifUnread(count);
