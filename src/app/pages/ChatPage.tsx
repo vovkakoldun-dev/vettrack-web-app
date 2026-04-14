@@ -1136,8 +1136,32 @@ export default function ChatPage() {
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
+  const isHugoChat = selectedConv?.groupTitle === 'HugoChat';
+
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', backgroundColor: 'var(--bg-offwhite)' }}>
+      <style>{`
+        @keyframes hugoGradientSpin {
+          0%   { --hugo-angle: 0deg; }
+          100% { --hugo-angle: 360deg; }
+        }
+        @property --hugo-angle {
+          syntax: '<angle>';
+          initial-value: 0deg;
+          inherits: false;
+        }
+        .hugo-glow-border {
+          position: relative;
+          border-radius: 16px 16px 16px 4px;
+          padding: 2px;
+          background: conic-gradient(from var(--hugo-angle), #4ADE80, #3B82F6, #8B5CF6, #F4A261, #4ADE80);
+          animation: hugoGradientSpin 4s linear infinite;
+          box-shadow: 0 0 12px rgba(74,222,128,0.3), 0 0 24px rgba(59,130,246,0.2), 0 0 12px rgba(139,92,246,0.2);
+        }
+        .hugo-glow-border > div {
+          border-radius: 14px 14px 14px 2px;
+        }
+      `}</style>
 
       {/* ── Left panel ──────────────────────────────────────────────────────── */}
       <div style={{ width: '320px', flexShrink: 0, display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: 'var(--surface-white)', borderRight: '1px solid var(--border-color)' }}>
@@ -1380,7 +1404,11 @@ export default function ChatPage() {
                         <div key={msg.id} data-msg-index={globalIndex} style={{ display: 'flex', flexDirection: isMe ? 'row-reverse' : 'row', alignItems: 'flex-end', gap: '8px', marginBottom: '8px', borderRadius: '12px', outline: msgSearchOpen && msgSearchMatches[msgSearchIndex] === globalIndex ? '2px solid #3B82F6' : 'none', outlineOffset: '4px', transition: 'outline 0.2s' }}>
                           {!isMe && (
                             <div style={{ flexShrink: 0 }}>
-                              <ChatAvatar name={selectedConv.otherName} color={getAvatarColor(selectedConv.otherProfileId)} size={28} photoUrl={selectedConv.otherAvatarUrl} />
+                              {selectedConv.groupTitle === 'HugoChat' ? (
+                                <img src="/logo-mini.svg" alt="HugoChat" style={{ width: 28, height: 28, borderRadius: '50%' }} />
+                              ) : (
+                                <ChatAvatar name={selectedConv.otherName} color={getAvatarColor(selectedConv.otherProfileId)} size={28} photoUrl={selectedConv.otherAvatarUrl} />
+                              )}
                             </div>
                           )}
 
@@ -1459,6 +1487,7 @@ export default function ChatPage() {
                               </div>
                             )}
 
+                            <div className={isHugoChat && !isMe ? 'hugo-glow-border' : undefined} style={isHugoChat && !isMe ? { marginBottom: 0 } : undefined}>
                             <div style={{
                               padding: (msg.imageUrl || msg.fileUrl || msg.attachmentMeta) ? '4px' : '10px 14px',
                               borderRadius: isMe ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
@@ -1570,8 +1599,9 @@ export default function ChatPage() {
                                 </div>
                               )}
                               {msg.text && msg.text !== '📷 Image' && !msg.text.startsWith('📎 ') && !msg.text.startsWith('📋 Record:') && !msg.text.startsWith('🔬 Lab:') && (
-                                <div style={{ padding: (msg.imageUrl || msg.fileUrl || msg.attachmentMeta) ? '8px 10px 6px' : '0' }}>{msg.text}</div>
+                                <div style={{ padding: (msg.imageUrl || msg.fileUrl || msg.attachmentMeta) ? '8px 10px 6px' : '0', whiteSpace: 'pre-wrap' }}>{isHugoChat && msg.text.startsWith('Welcome to HugoChat') ? <><strong style={{ fontSize: '16px' }}>Welcome to HugoChat</strong>{msg.text.slice('Welcome to HugoChat'.length)}</> : msg.text}</div>
                               )}
+                            </div>
                             </div>
 
                             {/* Reactions display */}
