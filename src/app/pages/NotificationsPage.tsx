@@ -452,7 +452,7 @@ async function fetchNotificationsFromSupabase(db: any, isAdmin: boolean, userId?
             : `${d.doctorName} — ${d.blockType || 'PTO'} approved`,
           description: hasAppts
             ? `${d.doctorName} is on ${(d.blockType || 'PTO').toLowerCase()} ${d.dateRange}. Appointments that need reassignment: ${apptLines}`
-            : `${d.doctorName} is on approved ${(d.blockType || 'PTO').toLowerCase()} ${d.dateRange}. No appointments need reassignment.`,
+            : `${d.doctorName} is on approved ${(d.blockType || 'PTO').toLowerCase()} ${d.dateRange}.`,
           time: formatRelativeTime(evt.timestamp),
           timeISO: evt.timestamp,
           read: false,

@@ -1159,39 +1159,6 @@ export default function VisitPage() {
           </div>
         </SectionCard>
 
-        {/* ── Section 8: Follow-Up ── */}
-        <SectionCard icon={<ClipboardList className="w-4 h-4" />} title="Follow-Up">
-          <div className="grid grid-cols-2 gap-4 mb-4">
-            <div>
-              <label className="text-[var(--text-primary)] mb-1.5 block" style={{ fontSize: '13px', fontWeight: 600 }}>
-                Next Visit Date
-              </label>
-              <Input
-                type="date"
-                value={followUpDate}
-                onChange={(e) => setFollowUpDate(e.target.value)}
-                style={{ borderRadius: '8px' }}
-              />
-            </div>
-            <div>
-              <label className="text-[var(--text-primary)] mb-1.5 block" style={{ fontSize: '13px', fontWeight: 600 }}>
-                Reason
-              </label>
-              <Input
-                placeholder="e.g. Recheck, vaccine due…"
-                value={followUpReason}
-                onChange={(e) => setFollowUpReason(e.target.value)}
-                style={{ borderRadius: '8px' }}
-              />
-            </div>
-          </div>
-          <Textarea
-            placeholder="Additional follow-up notes…"
-            value={followUpNotes}
-            onChange={(e) => setFollowUpNotes(e.target.value)}
-            style={{ minHeight: '64px', resize: 'vertical' }}
-          />
-        </SectionCard>
 
           </TabsContent>
           {/* ═══════════════ END GENERAL TAB ═══════════════ */}

@@ -27,7 +27,7 @@ type DisplayAppt = {
   service: string; vet: string; vetId: string; date: string; timeStart: string; timeEnd: string;
   status: 'Confirmed' | 'Pending' | 'Completed' | 'Cancelled' | 'Checked In' | 'In Progress';
   petHealth: 'Healthy' | 'Follow-up' | 'Critical'; duration: string;
-  priority: string; room: string; confirmMethod: string; reminderMethod: string;
+  priority: string; room: string; roomId: string; confirmMethod: string; reminderMethod: string;
   reminderTiming: string; notes: string;
 };
 
@@ -63,6 +63,7 @@ function adaptAppt(a: AppointmentRow): DisplayAppt {
     duration: `${a.duration_minutes ?? 30} min`,
     priority: 'Normal',
     room: a.room ?? '',
+    roomId: a.room_id ?? '',
     confirmMethod: 'Email',
     reminderMethod: 'Email',
     reminderTiming: '1 day',
@@ -2599,8 +2600,8 @@ export default function AppointmentsPage() {
             const cellPx = cols > 0 ? Math.max(14, Math.min(28, Math.floor(CANVAS_W / Math.max(cols, 12)))) : 22;
             const canvasW = (cols || 12) * cellPx;
             const canvasH = (rowsCount || 8) * cellPx;
-            // Find the target room by name match
-            const targetRoom = clinicRooms.find(r => r.name === roomInfoAppt.room);
+            // Find the target room by ID (fall back to name for legacy data)
+            const targetRoom = (roomInfoAppt.roomId && clinicRooms.find(r => r.id === roomInfoAppt.roomId)) || clinicRooms.find(r => r.name === roomInfoAppt.room);
 
             return (
               <>
