@@ -21,7 +21,7 @@ interface Notification {
   description: string;
   time: string;
   timeISO: string;
-  /** Used for sorting — defaults to timeISO but overridden for future-dated items like vaccine due dates */
+  /** Override for sorting — used when timeISO is a future date (e.g. vaccine due dates) */
   sortTime?: string;
   read: boolean;
   petName?: string;
@@ -313,7 +313,7 @@ async function fetchNotificationsFromSupabase(db: any, isAdmin: boolean, userId?
           ? `Due ${dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
           : `Due in ${daysUntilDue} day${daysUntilDue !== 1 ? 's' : ''}`,
         timeISO: vax.next_due_date!,
-        sortTime: new Date().toISOString(),
+        sortTime: `${today}T00:00:00`,
         read: false,
         petName: pet?.name,
         petId: pet?.id,
@@ -532,8 +532,7 @@ async function fetchNotificationsFromSupabase(db: any, isAdmin: boolean, userId?
   }
 
   // Sort all notifications: unread first, then by date descending
-  // Use sortTime (falls back to timeISO) so future-dated items like vaccine due dates
-  // don't jump above genuinely recent notifications
+  // Use sortTime when set (e.g. vaccine due dates use start-of-day so real events sort above)
   notifications.sort((a, b) => {
     if (a.read !== b.read) return a.read ? 1 : -1;
     const aTime = new Date(a.sortTime || a.timeISO).getTime();
