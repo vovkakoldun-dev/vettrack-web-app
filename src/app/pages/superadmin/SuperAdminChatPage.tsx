@@ -20,6 +20,7 @@ import {
   Microscope,
   ClipboardList,
   ExternalLink,
+  Lock,
 } from 'lucide-react';
 import { Input } from '../../components/ui/input';
 import { supabase } from '../../../lib/supabase';
@@ -518,7 +519,7 @@ export default function SuperAdminChatPage() {
         groupTitle,
         otherProfileId: firstProfile?.id || '',
         otherName,
-        otherRole: isGroup ? `${otherParts.length + 1} members` : (ROLE_LABELS[firstProfile?.role] || firstProfile?.role || ''),
+        otherRole: groupTitle === 'HugoChat' ? 'HugoIT Updates' : isGroup ? `${otherParts.length + 1} members` : (ROLE_LABELS[firstProfile?.role] || firstProfile?.role || ''),
         otherAvatarUrl: isGroup ? '' : (firstProfile?.avatar_url || ''),
         lastMessage: lastMsg?.content || '',
         lastMessageTime: lastMsg ? new Date(lastMsg.created_at) : null,
@@ -1227,7 +1228,9 @@ export default function SuperAdminChatPage() {
                   onMouseEnter={(e) => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--surface-elevated)'; }}
                   onMouseLeave={(e) => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}
                 >
-                  {conv.isGroup ? (
+                  {conv.isGroup && conv.groupTitle === 'HugoChat' ? (
+                    <img src="/logo-mini.svg" alt="HugoChat" style={{ width: 40, height: 40, borderRadius: '50%', flexShrink: 0 }} />
+                  ) : conv.isGroup ? (
                     <div style={{ width: 40, height: 40, borderRadius: '50%', backgroundColor: 'var(--brand-green-text)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                       <Users style={{ width: 20, height: 20, color: '#fff' }} />
                     </div>
@@ -1288,7 +1291,9 @@ export default function SuperAdminChatPage() {
             {/* Chat header */}
             <div style={{ height: '64px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--surface-white)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                {selectedConv.isGroup ? (
+                {selectedConv.isGroup && selectedConv.groupTitle === 'HugoChat' ? (
+                  <img src="/logo-mini.svg" alt="HugoChat" style={{ width: 40, height: 40, borderRadius: '50%', flexShrink: 0 }} />
+                ) : selectedConv.isGroup ? (
                   <div style={{ width: 40, height: 40, borderRadius: '50%', backgroundColor: 'var(--brand-green-text)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     <Users style={{ width: 20, height: 20, color: '#fff' }} />
                   </div>
@@ -1661,6 +1666,12 @@ export default function SuperAdminChatPage() {
             )}
 
             {/* Input area */}
+            {selectedConv.groupTitle === 'HugoChat' ? (
+              <div style={{ flexShrink: 0, borderTop: '1px solid var(--border-color)', padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: 'var(--surface-white)', color: 'var(--text-secondary)', fontSize: 13 }}>
+                <Lock style={{ width: 14, height: 14 }} />
+                This channel is read-only — updates are posted by the HugoIT team
+              </div>
+            ) : (
             <div style={{ flexShrink: 0, borderTop: (imagePreview || attachedFile || attachedRecord) ? 'none' : '1px solid var(--border-color)', padding: '16px', display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: 'var(--surface-white)' }}>
               <input type="file" ref={chatImageRef} accept="image/*" style={{ display: 'none' }} onChange={handleImageSelect} />
               <input type="file" ref={chatFileRef} accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.ppt,.pptx,.txt,.zip,.rar,.7z,.mp4,.mov,.mp3,.wav" style={{ display: 'none' }} onChange={handleFileSelect} />
@@ -1784,6 +1795,7 @@ export default function SuperAdminChatPage() {
                 <Send style={{ width: '16px', height: '16px' }} />
               </button>
             </div>
+            )}
           </>
         ) : (
           /* Empty state */
