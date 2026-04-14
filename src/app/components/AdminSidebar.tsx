@@ -168,12 +168,17 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
           (v1.data || []).forEach((v: any) => allIds.push(`vax-${v.id}`));
           (e1.data || []).forEach((e: any) => allIds.push(e.id));
           if (allIds.length > 0 && user) {
-            const rows = allIds.map(id => ({
+            // Don't overwrite dismissed entries — only mark non-dismissed as read
+            const { data: alreadyDismissed } = await db.from('notification_state')
+              .select('notification_id').eq('organization_id', organizationId).eq('user_id', user.id)
+              .eq('status', 'dismissed').in('notification_id', allIds);
+            const dismissedSet = new Set((alreadyDismissed || []).map(r => r.notification_id));
+            const rows = allIds.filter(id => !dismissedSet.has(id)).map(id => ({
               notification_id: id, status: 'read' as const,
               updated_at: new Date().toISOString(),
               organization_id: organizationId, user_id: user.id,
             }));
-            await db.from('notification_state').upsert(rows);
+            if (rows.length > 0) await db.from('notification_state').upsert(rows);
           }
         } catch (e) { console.error('Sidebar auto-read failed:', e); }
       })();

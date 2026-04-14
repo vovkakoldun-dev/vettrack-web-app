@@ -21,6 +21,8 @@ interface Notification {
   description: string;
   time: string;
   timeISO: string;
+  /** Used for sorting — defaults to timeISO but overridden for future-dated items like vaccine due dates */
+  sortTime?: string;
   read: boolean;
   petName?: string;
   petId?: string;
@@ -311,6 +313,7 @@ async function fetchNotificationsFromSupabase(db: any, isAdmin: boolean, userId?
           ? `Due ${dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
           : `Due in ${daysUntilDue} day${daysUntilDue !== 1 ? 's' : ''}`,
         timeISO: vax.next_due_date!,
+        sortTime: new Date().toISOString(),
         read: false,
         petName: pet?.name,
         petId: pet?.id,
@@ -529,9 +532,13 @@ async function fetchNotificationsFromSupabase(db: any, isAdmin: boolean, userId?
   }
 
   // Sort all notifications: unread first, then by date descending
+  // Use sortTime (falls back to timeISO) so future-dated items like vaccine due dates
+  // don't jump above genuinely recent notifications
   notifications.sort((a, b) => {
     if (a.read !== b.read) return a.read ? 1 : -1;
-    return new Date(b.timeISO).getTime() - new Date(a.timeISO).getTime();
+    const aTime = new Date(a.sortTime || a.timeISO).getTime();
+    const bTime = new Date(b.sortTime || b.timeISO).getTime();
+    return bTime - aTime;
   });
 
   return notifications;
@@ -601,7 +608,7 @@ export default function NotificationsPage() {
               .gte('created_at', `${weekAgoStr}T00:00:00`),
             db.from('notification_events').select('id').eq('organization_id', organizationId)
               .gte('timestamp', weekAgoDate.toISOString()),
-          ]).then(([apptToday, completed, cancelledAppts, vacs, clients, notifEvts]) => {
+          ]).then(async ([apptToday, completed, cancelledAppts, vacs, clients, notifEvts]) => {
             const extraIds: string[] = [];
             (apptToday.data || []).forEach(a => extraIds.push(`appt-today-${a.id}`));
             (completed.data || []).forEach(a => extraIds.push(`appt-done-${a.id}`));
@@ -610,7 +617,12 @@ export default function NotificationsPage() {
             (clients.data || []).forEach(c => extraIds.push(`client-${c.id}`));
             (notifEvts.data || []).forEach(e => extraIds.push(e.id));
             const allToMark = [...new Set([...unreadIds, ...extraIds])];
-            const markRows = allToMark.map(id => ({ notification_id: id, status: 'read' as const, updated_at: nowISO, organization_id: organizationId, user_id: user?.id }));
+            // Don't overwrite dismissed entries — only mark non-dismissed as read
+            const { data: alreadyDismissed } = await db.from('notification_state')
+              .select('notification_id').eq('organization_id', organizationId).eq('user_id', user?.id)
+              .eq('status', 'dismissed').in('notification_id', allToMark);
+            const dismissedSet = new Set((alreadyDismissed || []).map(r => r.notification_id));
+            const markRows = allToMark.filter(id => !dismissedSet.has(id)).map(id => ({ notification_id: id, status: 'read' as const, updated_at: nowISO, organization_id: organizationId, user_id: user?.id }));
             if (markRows.length > 0) db.from('notification_state').upsert(markRows);
           });
         });
