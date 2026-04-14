@@ -1138,6 +1138,37 @@ export default function ChatPage() {
 
   const isHugoChat = selectedConv?.groupTitle === 'HugoChat';
 
+  const spawnHugoStars = (e: React.MouseEvent) => {
+    const msgEl = (e.currentTarget as HTMLElement).closest('[data-msg-index]');
+    const refEl = msgEl?.querySelector('.hugo-glow-border');
+    if (!refEl) return;
+    const rect = refEl.getBoundingClientRect();
+    const stars = ['✦', '✧', '⭑', '✶', '★'];
+    const colors = ['#4ADE80', '#3B82F6', '#8B5CF6', '#F4A261', '#FFD700'];
+    for (let i = 0; i < 10; i++) {
+      const star = document.createElement('span');
+      star.textContent = stars[Math.floor(Math.random() * stars.length)];
+      // Place on the border edge
+      const side = Math.floor(Math.random() * 4);
+      let x: number, y: number, angle: number;
+      if (side === 0) { x = Math.random() * rect.width; y = -4; angle = -Math.PI / 2 + (Math.random() - 0.5) * 0.6; }
+      else if (side === 1) { x = Math.random() * rect.width; y = rect.height + 4; angle = Math.PI / 2 + (Math.random() - 0.5) * 0.6; }
+      else if (side === 2) { x = -4; y = Math.random() * rect.height; angle = Math.PI + (Math.random() - 0.5) * 0.6; }
+      else { x = rect.width + 4; y = Math.random() * rect.height; angle = (Math.random() - 0.5) * 0.6; }
+      const dist = 20 + Math.random() * 35;
+      const dx = Math.cos(angle) * dist;
+      const dy = Math.sin(angle) * dist;
+      const dur = 700 + Math.random() * 400;
+      star.style.cssText = `position:fixed;left:${rect.left + x}px;top:${rect.top + y}px;font-size:${8 + Math.random() * 8}px;color:${colors[i % colors.length]};pointer-events:none;z-index:9999;text-shadow:0 0 4px rgba(255,255,200,0.6);`;
+      document.body.appendChild(star);
+      star.animate([
+        { transform: 'translate(0,0) scale(1)', opacity: 1 },
+        { transform: `translate(${dx}px,${dy}px) scale(0.4)`, opacity: 0 },
+      ], { duration: dur, easing: 'ease-out', fill: 'forwards' });
+      setTimeout(() => star.remove(), dur + 50);
+    }
+  };
+
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', backgroundColor: 'var(--bg-offwhite)' }}>
       <style>{`
@@ -1248,12 +1279,13 @@ export default function ChatPage() {
                     padding: '12px 16px',
                     backgroundColor: isActive ? 'var(--surface-elevated)' : 'transparent',
                     border: 'none', cursor: 'pointer', textAlign: 'left', transition: 'background-color 0.15s',
+                    ...(conv.groupTitle === 'HugoChat' ? { borderLeft: '3px solid', borderImage: 'linear-gradient(to bottom, #4ADE80, #3B82F6, #8B5CF6, #F4A261) 1' } : {}),
                   }}
                   onMouseEnter={(e) => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--surface-elevated)'; }}
                   onMouseLeave={(e) => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}
                 >
                   {conv.isGroup && conv.groupTitle === 'HugoChat' ? (
-                    <img src="/logo-mini.svg" alt="HugoChat" style={{ width: 40, height: 40, borderRadius: '50%', flexShrink: 0 }} />
+                    <img src="/logo-mini.svg" alt="HugoChat" style={{ width: 40, height: 40, flexShrink: 0 }} />
                   ) : conv.isGroup ? (
                     <div style={{ width: 40, height: 40, borderRadius: '50%', backgroundColor: 'var(--brand-green-text)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                       <Users style={{ width: 20, height: 20, color: '#fff' }} />
@@ -1316,7 +1348,7 @@ export default function ChatPage() {
             <div style={{ height: '64px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--surface-white)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                 {selectedConv.isGroup && selectedConv.groupTitle === 'HugoChat' ? (
-                  <img src="/logo-mini.svg" alt="HugoChat" style={{ width: 40, height: 40, borderRadius: '50%', flexShrink: 0 }} />
+                  <img src="/logo-mini.svg" alt="HugoChat" style={{ width: 40, height: 40, flexShrink: 0 }} />
                 ) : selectedConv.isGroup ? (
                   <div style={{ width: 40, height: 40, borderRadius: '50%', backgroundColor: 'var(--brand-green-text)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     <Users style={{ width: 20, height: 20, color: '#fff' }} />
@@ -1398,14 +1430,14 @@ export default function ChatPage() {
                     {group.msgs.map((msg) => {
                       const globalIndex = messages.findIndex((m) => m.id === msg.id);
                       const isLastMine = globalIndex === lastMineIndex;
-                      const isMe = msg.from === 'me';
+                      const isMe = isHugoChat ? false : msg.from === 'me';
 
                       return (
                         <div key={msg.id} data-msg-index={globalIndex} style={{ display: 'flex', flexDirection: isMe ? 'row-reverse' : 'row', alignItems: 'flex-end', gap: '8px', marginBottom: '8px', borderRadius: '12px', outline: msgSearchOpen && msgSearchMatches[msgSearchIndex] === globalIndex ? '2px solid #3B82F6' : 'none', outlineOffset: '4px', transition: 'outline 0.2s' }}>
                           {!isMe && (
                             <div style={{ flexShrink: 0 }}>
                               {selectedConv.groupTitle === 'HugoChat' ? (
-                                <img src="/logo-mini.svg" alt="HugoChat" style={{ width: 28, height: 28, borderRadius: '50%' }} />
+                                <img src="/logo-mini.svg" alt="HugoChat" style={{ width: 28, height: 28 }} />
                               ) : (
                                 <ChatAvatar name={selectedConv.otherName} color={getAvatarColor(selectedConv.otherProfileId)} size={28} photoUrl={selectedConv.otherAvatarUrl} />
                               )}
@@ -1435,7 +1467,7 @@ export default function ChatPage() {
                                   return (
                                     <button
                                       key={emoji}
-                                      onClick={(e) => { e.stopPropagation(); toggleReaction(msg.id, emoji); }}
+                                      onClick={(e) => { e.stopPropagation(); toggleReaction(msg.id, emoji); if (isHugoChat) spawnHugoStars(e); }}
                                       style={{
                                         width: '28px', height: '28px', borderRadius: '50%', border: 'none',
                                         backgroundColor: myReaction ? 'var(--surface-elevated)' : 'transparent',
@@ -1610,7 +1642,7 @@ export default function ChatPage() {
                                 {(reactions[msg.id] || []).map(rx => (
                                   <button
                                     key={rx.emoji}
-                                    onClick={() => toggleReaction(msg.id, rx.emoji)}
+                                    onClick={(e) => { toggleReaction(msg.id, rx.emoji); if (isHugoChat) spawnHugoStars(e); }}
                                     style={{
                                       display: 'flex', alignItems: 'center', gap: '4px',
                                       padding: '2px 8px', borderRadius: '999px', border: '1px solid var(--border-color)',

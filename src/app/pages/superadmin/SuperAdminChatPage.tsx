@@ -1140,6 +1140,36 @@ export default function SuperAdminChatPage() {
 
   const isHugoChat = selectedConv?.groupTitle === 'HugoChat';
 
+  const spawnHugoStars = (e: React.MouseEvent) => {
+    const msgEl = (e.currentTarget as HTMLElement).closest('[data-msg-index]');
+    const refEl = msgEl?.querySelector('.hugo-glow-border');
+    if (!refEl) return;
+    const rect = refEl.getBoundingClientRect();
+    const stars = ['✦', '✧', '⭑', '✶', '★'];
+    const colors = ['#4ADE80', '#3B82F6', '#8B5CF6', '#F4A261', '#FFD700'];
+    for (let i = 0; i < 14; i++) {
+      const star = document.createElement('span');
+      star.textContent = stars[Math.floor(Math.random() * stars.length)];
+      const perim = Math.random();
+      let x: number, y: number, outAngle: number;
+      if (perim < 0.25) { x = Math.random() * rect.width; y = 0; outAngle = -Math.PI / 2 + (Math.random() - 0.5) * 0.8; }
+      else if (perim < 0.5) { x = Math.random() * rect.width; y = rect.height; outAngle = Math.PI / 2 + (Math.random() - 0.5) * 0.8; }
+      else if (perim < 0.75) { x = 0; y = Math.random() * rect.height; outAngle = Math.PI + (Math.random() - 0.5) * 0.8; }
+      else { x = rect.width; y = Math.random() * rect.height; outAngle = (Math.random() - 0.5) * 0.8; }
+      const dist = 40 + Math.random() * 70;
+      const dx = Math.cos(outAngle) * dist;
+      const dy = Math.sin(outAngle) * dist;
+      const dur = 600 + Math.random() * 500;
+      star.style.cssText = `position:fixed;left:${rect.left + x}px;top:${rect.top + y}px;font-size:${10 + Math.random() * 10}px;color:${colors[i % colors.length]};pointer-events:none;z-index:9999;text-shadow:0 0 6px rgba(255,255,200,0.8);`;
+      document.body.appendChild(star);
+      star.animate([
+        { transform: 'translate(0,0) scale(1)', opacity: 1 },
+        { transform: `translate(${dx}px,${dy}px) scale(0.3)`, opacity: 0 },
+      ], { duration: dur, easing: 'ease-out', fill: 'forwards' });
+      setTimeout(() => star.remove(), dur + 100);
+    }
+  };
+
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', backgroundColor: 'var(--bg-offwhite)' }}>
       <style>{`
@@ -1248,12 +1278,13 @@ export default function SuperAdminChatPage() {
                     padding: '12px 16px',
                     backgroundColor: isActive ? 'var(--surface-elevated)' : 'transparent',
                     border: 'none', cursor: 'pointer', textAlign: 'left', transition: 'background-color 0.15s',
+                    ...(conv.groupTitle === 'HugoChat' ? { borderLeft: '3px solid', borderImage: 'linear-gradient(to bottom, #4ADE80, #3B82F6, #8B5CF6, #F4A261) 1' } : {}),
                   }}
                   onMouseEnter={(e) => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--surface-elevated)'; }}
                   onMouseLeave={(e) => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}
                 >
                   {conv.isGroup && conv.groupTitle === 'HugoChat' ? (
-                    <img src="/logo-mini.svg" alt="HugoChat" style={{ width: 40, height: 40, borderRadius: '50%', flexShrink: 0 }} />
+                    <img src="/logo-mini.svg" alt="HugoChat" style={{ width: 40, height: 40, flexShrink: 0 }} />
                   ) : conv.isGroup ? (
                     <div style={{ width: 40, height: 40, borderRadius: '50%', backgroundColor: 'var(--brand-green-text)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                       <Users style={{ width: 20, height: 20, color: '#fff' }} />
@@ -1316,7 +1347,7 @@ export default function SuperAdminChatPage() {
             <div style={{ height: '64px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--surface-white)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                 {selectedConv.isGroup && selectedConv.groupTitle === 'HugoChat' ? (
-                  <img src="/logo-mini.svg" alt="HugoChat" style={{ width: 40, height: 40, borderRadius: '50%', flexShrink: 0 }} />
+                  <img src="/logo-mini.svg" alt="HugoChat" style={{ width: 40, height: 40, flexShrink: 0 }} />
                 ) : selectedConv.isGroup ? (
                   <div style={{ width: 40, height: 40, borderRadius: '50%', backgroundColor: 'var(--brand-green-text)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     <Users style={{ width: 20, height: 20, color: '#fff' }} />
@@ -1398,7 +1429,7 @@ export default function SuperAdminChatPage() {
                     {group.msgs.map((msg) => {
                       const globalIndex = messages.findIndex((m) => m.id === msg.id);
                       const isLastMine = globalIndex === lastMineIndex;
-                      const isMe = msg.from === 'me';
+                      const isMe = isHugoChat ? false : msg.from === 'me';
 
                       return (
                         <div key={msg.id} data-msg-index={globalIndex} style={{ display: 'flex', flexDirection: isMe ? 'row-reverse' : 'row', alignItems: 'flex-end', gap: '8px', marginBottom: '8px', borderRadius: '12px', outline: msgSearchOpen && msgSearchMatches[msgSearchIndex] === globalIndex ? '2px solid #3B82F6' : 'none', outlineOffset: '4px', transition: 'outline 0.2s' }}>
@@ -1406,7 +1437,7 @@ export default function SuperAdminChatPage() {
                           {!isMe && (
                             <div style={{ flexShrink: 0 }}>
                               {selectedConv.groupTitle === 'HugoChat' ? (
-                                <img src="/logo-mini.svg" alt="HugoChat" style={{ width: 28, height: 28, borderRadius: '50%' }} />
+                                <img src="/logo-mini.svg" alt="HugoChat" style={{ width: 28, height: 28 }} />
                               ) : (
                                 <ChatAvatar name={selectedConv.otherName} color={getAvatarColor(selectedConv.otherProfileId)} size={28} photoUrl={selectedConv.otherAvatarUrl} />
                               )}
@@ -1430,7 +1461,7 @@ export default function SuperAdminChatPage() {
                                   const msgRx = reactions[msg.id] || [];
                                   const myReaction = msgRx.find(r => r.emoji === emoji && r.users.includes(saProfileId!));
                                   return (
-                                    <button key={emoji} onClick={(e) => { e.stopPropagation(); toggleReaction(msg.id, emoji); }}
+                                    <button key={emoji} onClick={(e) => { e.stopPropagation(); toggleReaction(msg.id, emoji); if (isHugoChat) spawnHugoStars(e); }}
                                       style={{ width: '28px', height: '28px', borderRadius: '50%', border: 'none', backgroundColor: myReaction ? 'var(--surface-elevated)' : 'transparent', cursor: 'pointer', fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'transform 0.15s, background-color 0.15s' }}
                                       onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.25)'; e.currentTarget.style.backgroundColor = 'var(--surface-elevated)'; }}
                                       onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; if (!myReaction) e.currentTarget.style.backgroundColor = 'transparent'; }}
@@ -1593,7 +1624,7 @@ export default function SuperAdminChatPage() {
                             {(reactions[msg.id] || []).length > 0 && (
                               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px' }}>
                                 {(reactions[msg.id] || []).map(rx => (
-                                  <button key={rx.emoji} onClick={() => toggleReaction(msg.id, rx.emoji)}
+                                  <button key={rx.emoji} onClick={(e) => { toggleReaction(msg.id, rx.emoji); if (isHugoChat) spawnHugoStars(e); }}
                                     style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 8px', borderRadius: '999px', border: '1px solid var(--border-color)', backgroundColor: rx.users.includes(saProfileId!) ? '#C2671A' : 'var(--surface-elevated)', color: rx.users.includes(saProfileId!) ? '#fff' : 'var(--text-primary)', cursor: 'pointer', fontSize: '13px', lineHeight: '20px', transition: 'background-color 0.15s' }}>
                                     <span>{rx.emoji}</span>
                                     {rx.users.length > 1 && <span style={{ fontSize: '11px', fontWeight: 600 }}>{rx.users.length}</span>}
