@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { supabase } from '../../lib/supabase'
 import { useTenantDb } from '../context/TenantContext';
 import { getOrgContext } from './useOrgContext'
 
@@ -154,9 +155,10 @@ export function useAppointments(dateFilter?: string) {
     // Optimistic delete — remove from UI immediately
     const prev = appointments;
     setAppointments(p => p.filter(a => a.id !== id));
-    const { organizationId } = await getOrgContext()
-    const { error: err } = await db.from('appointments').delete().eq('id', id).eq('organization_id', organizationId)
+
+    const { error: err } = await supabase.rpc('delete_appointment_cascade', { p_appointment_id: id })
     if (err) {
+      console.error('[deleteAppointment] failed:', err.message, err)
       setAppointments(prev); // Revert on error
     } else {
       window.dispatchEvent(new CustomEvent('appointmentDataChanged'))

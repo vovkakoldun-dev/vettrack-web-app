@@ -291,6 +291,7 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
   const [searchQuery, setSearchQuery] = useState('');
   const [filterService, setFilterService] = useState<string>('all');
   const [filterSpecies, setFilterSpecies] = useState<string>('all');
+  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'schedule' | 'month'>('list');
   const [showAllDates, setShowAllDates] = useState(false);
@@ -411,6 +412,7 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
   }, [appointments, updateApptStatus]);
 
   const [detailOpen, setDetailOpen] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [arrivedToast, setArrivedToast] = useState<string | null>(null);
   // Payment checkout dialog
   const [paymentOpen, setPaymentOpen] = useState(false);
@@ -661,7 +663,10 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
   const dayAppointments = showAllDates
     ? [...appointments]
         .filter((a) => selectedVetFilter === 'all' || (a as any).vetId === selectedVetFilter)
-        .sort((a, b) => a.date.localeCompare(b.date) || a.timeStart.localeCompare(b.timeStart))
+        .sort((a, b) => {
+          const dir = sortOrder === 'oldest' ? 1 : -1;
+          return dir * (a.date.localeCompare(b.date) || a.timeStart.localeCompare(b.timeStart));
+        })
     : appointments.filter((a) => {
         if (!isSameDay(a.date, selectedDate)) return false;
         if (selectedVetFilter !== 'all' && (a as any).vetId !== selectedVetFilter) return false;
@@ -707,7 +712,7 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
   // Derive unique services & species for filter dropdowns
   const uniqueServices = useMemo(() => [...new Set(appointments.map(a => a.service))].sort(), [appointments]);
   const uniqueSpecies = useMemo(() => [...new Set(appointments.map(a => a.species).filter(Boolean))].sort(), [appointments]);
-  const hasActiveFilters = selectedVetFilter !== 'all' || filterService !== 'all' || filterSpecies !== 'all';
+  const hasActiveFilters = selectedVetFilter !== 'all' || filterService !== 'all' || filterSpecies !== 'all' || sortOrder !== 'newest';
 
   const totalToday = dayAppointments.length;
   const completedToday = dayAppointments.filter((a) => a.status === 'Completed').length;
@@ -905,11 +910,20 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
     setDetailOpen(false);
   };
 
-  const handleDeleteAppt = async () => {
+  const handleDeleteAppt = () => {
     if (!selectedAppt) return;
-    if (!confirm('Are you sure you want to permanently delete this booking? This cannot be undone.')) return;
-    await deleteAppointment(selectedAppt.id);
-    setDetailOpen(false);
+    setConfirmDeleteOpen(true);
+  };
+
+  const confirmDeleteAppt = async () => {
+    if (!selectedAppt) return;
+    const { error } = await deleteAppointment(selectedAppt.id);
+    if (error) {
+      alert(`Failed to delete: ${error.message}`);
+    } else {
+      setConfirmDeleteOpen(false);
+      setDetailOpen(false);
+    }
   };
 
   const getSlotAvailability = (dateStr: string, excludeId?: string, vetId?: string, slotsList: readonly string[] = SCHEDULE_SLOTS) => {
@@ -1527,11 +1541,20 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
                     ))}
                   </SelectContent>
                 </Select>
+                <Select value={sortOrder} onValueChange={(v) => setSortOrder(v as 'newest' | 'oldest')}>
+                  <SelectTrigger className="h-7 w-auto min-w-[120px]" style={{ fontSize: '12px' }}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="newest">Newest First</SelectItem>
+                    <SelectItem value="oldest">Oldest First</SelectItem>
+                  </SelectContent>
+                </Select>
                 {hasActiveFilters && (
                   <>
                     <div className="w-px h-4 bg-[var(--border-color)]" />
                     <button
-                      onClick={() => { setSelectedVetFilter('all'); setFilterService('all'); setFilterSpecies('all'); }}
+                      onClick={() => { setSelectedVetFilter('all'); setFilterService('all'); setFilterSpecies('all'); setSortOrder('newest'); }}
                       className="inline-flex items-center gap-1 px-2 py-0.5 hover:opacity-80 transition-opacity"
                       style={{ fontSize: '11px', fontWeight: 600, color: '#d4183d', cursor: 'pointer', background: 'none', border: 'none' }}
                     >
@@ -3303,6 +3326,23 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
               </>
             );
           })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Delete Confirmation Dialog ────────────────── */}
+      <Dialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
+        <DialogContent className="max-w-sm p-6" style={{ borderRadius: '14px' }}>
+          <div className="text-center space-y-3">
+            <div className="mx-auto w-12 h-12 rounded-full flex items-center justify-center" style={{ backgroundColor: '#d4183d15' }}>
+              <Trash2 className="w-5 h-5" style={{ color: '#d4183d' }} />
+            </div>
+            <h3 className="text-[var(--text-primary)]" style={{ fontSize: '16px', fontWeight: 700 }}>Delete Booking</h3>
+            <p className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>Are you sure you want to permanently delete this booking? This cannot be undone.</p>
+            <div className="flex gap-2 pt-2">
+              <Button variant="outline" className="flex-1" onClick={() => setConfirmDeleteOpen(false)}>Cancel</Button>
+              <Button className="flex-1" onClick={confirmDeleteAppt} style={{ backgroundColor: '#d4183d', color: '#fff', border: 'none' }}>Delete</Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 
