@@ -7,7 +7,7 @@ import {
   Pencil, Trash2, Bell, Stethoscope, UserCheck,
   Smartphone, ChevronDown, ChevronUp, Phone, MessageCircle, X,
   CreditCard, Receipt, DollarSign, Banknote, DoorOpen,
-  Scissors, Microscope, Bed, Briefcase, Bath, Coffee, Sparkles, Building2, Loader2, Camera, Star,
+  Scissors, Microscope, Bed, Briefcase, Bath, Coffee, Sparkles, Building2, Loader2, Camera, Star, SlidersHorizontal,
 } from 'lucide-react';
 import { useAppointments } from '../../hooks/useAppointments';
 import { Button } from '../../components/ui/button';
@@ -266,7 +266,7 @@ const EXTENDED_SCHEDULE_SLOTS = Array.from({ length: 32 }, (_, i) => {
 
 // ─── Filter Tabs ─────────────────────────────────────────────
 
-const FILTER_TABS = ['All', 'Upcoming', 'Completed', 'Cancelled'] as const;
+const FILTER_TABS = ['All', 'Upcoming', 'Completed', 'Cancelled', 'No Show'] as const;
 type FilterTab = typeof FILTER_TABS[number];
 
 // ─── Component ───────────────────────────────────────────────
@@ -289,6 +289,8 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
   const [calendarMonth, setCalendarMonth] = useState<Date>(() => new Date());
   const [activeFilter, setActiveFilter] = useState<FilterTab>('All');
   const [searchQuery, setSearchQuery] = useState('');
+  const [filterService, setFilterService] = useState<string>('all');
+  const [filterSpecies, setFilterSpecies] = useState<string>('all');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'schedule' | 'month'>('list');
   const [showAllDates, setShowAllDates] = useState(false);
@@ -380,6 +382,34 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
     });
     setLocalOverrides(newOverrides);
   };
+  // Auto-detect no-shows: if 1h has passed since appointment start and patient
+  // hasn't arrived (still Scheduled/Confirmed/Pending), mark as No Show.
+  const noShowIdsRef = useRef(new Set<string>());
+  useEffect(() => {
+    const pending = appointments.filter(
+      (a) =>
+        (a.status === 'Scheduled' || a.status === 'Confirmed' || a.status === 'Pending') &&
+        !noShowIdsRef.current.has(a.id),
+    );
+    if (pending.length === 0) return;
+
+    const now = new Date();
+    pending.forEach((appt) => {
+      // Parse "3:30 PM" style timeStart + date into a real Date
+      const [tp, ap] = appt.timeStart.split(' ');
+      let [h, m] = tp.split(':').map(Number);
+      if (ap === 'PM' && h !== 12) h += 12;
+      if (ap === 'AM' && h === 12) h = 0;
+      const apptDate = new Date(appt.date + 'T00:00:00');
+      apptDate.setHours(h, m, 0, 0);
+      const elapsed = now.getTime() - apptDate.getTime();
+      if (elapsed >= 60 * 60 * 1000) {
+        noShowIdsRef.current.add(appt.id);
+        updateApptStatus(appt.id, 'No Show');
+      }
+    });
+  }, [appointments, updateApptStatus]);
+
   const [detailOpen, setDetailOpen] = useState(false);
   const [arrivedToast, setArrivedToast] = useState<string | null>(null);
   // Payment checkout dialog
@@ -657,7 +687,13 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
     return (a as any).vetId === selectedVetFilter;
   });
 
-  const filteredAppointments = filteredByVet.filter((a) => {
+  const filteredByPanel = filteredByVet.filter((a) => {
+    if (filterService !== 'all' && a.service !== filterService) return false;
+    if (filterSpecies !== 'all' && a.species !== filterSpecies) return false;
+    return true;
+  });
+
+  const filteredAppointments = filteredByPanel.filter((a) => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -667,6 +703,11 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
       a.vet.toLowerCase().includes(q)
     );
   });
+
+  // Derive unique services & species for filter dropdowns
+  const uniqueServices = useMemo(() => [...new Set(appointments.map(a => a.service))].sort(), [appointments]);
+  const uniqueSpecies = useMemo(() => [...new Set(appointments.map(a => a.species).filter(Boolean))].sort(), [appointments]);
+  const hasActiveFilters = selectedVetFilter !== 'all' || filterService !== 'all' || filterSpecies !== 'all';
 
   const totalToday = dayAppointments.length;
   const completedToday = dayAppointments.filter((a) => a.status === 'Completed').length;
@@ -1372,19 +1413,6 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
                     {totalToday} booking{totalToday !== 1 ? 's' : ''}{showAllDates ? ' total' : ''}
                   </span>
                 )}
-                {/* Doctor Filter – always visible */}
-                <Select value={selectedVetFilter} onValueChange={setSelectedVetFilter}>
-                  <SelectTrigger className="w-[180px] h-9">
-                    <Stethoscope className="w-4 h-4 text-[var(--text-secondary)] mr-1" />
-                    <SelectValue placeholder="All Doctors" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Doctors</SelectItem>
-                    {staffList.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
                 <div className="flex gap-1 p-1 bg-[var(--surface-elevated)]" style={{ borderRadius: '8px' }}>
                   <button
                     onClick={() => setViewMode('list')}
@@ -1430,8 +1458,9 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
             </div>
 
             {viewMode !== 'month' && (
+              <>
+              {/* Row 1: Status tabs + Search */}
               <div className="flex flex-wrap items-center gap-3">
-                {/* Filter Tabs */}
                 <div className="flex gap-1 p-1 bg-[var(--surface-elevated)] flex-shrink-0" style={{ borderRadius: '8px' }}>
                   {FILTER_TABS.map((tab) => (
                     <button
@@ -1451,18 +1480,68 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
                     </button>
                   ))}
                 </div>
-
-                {/* Search */}
-                <div className="relative flex-1" style={{ minWidth: '200px' }}>
+                <div className="relative flex-1" style={{ minWidth: '180px' }}>
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-secondary)]" />
                   <Input
                     placeholder="Search pet, owner, or service..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-9 h-9"
+                    className="pl-9 h-8"
+                    style={{ fontSize: '13px' }}
                   />
                 </div>
               </div>
+              {/* Row 2: Doctor + Service + Species filters */}
+              <div className="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t border-[var(--border-color)]">
+                <SlidersHorizontal className="w-3.5 h-3.5 text-[var(--text-secondary)] flex-shrink-0" />
+                <Select value={selectedVetFilter} onValueChange={setSelectedVetFilter}>
+                  <SelectTrigger className="h-7 w-auto min-w-[140px]" style={{ fontSize: '12px' }}>
+                    <SelectValue placeholder="All Doctors" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Doctors</SelectItem>
+                    {staffList.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={filterService} onValueChange={setFilterService}>
+                  <SelectTrigger className="h-7 w-auto min-w-[130px]" style={{ fontSize: '12px' }}>
+                    <SelectValue placeholder="Service" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Services</SelectItem>
+                    {uniqueServices.map((s) => (
+                      <SelectItem key={s} value={s}>{s}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={filterSpecies} onValueChange={setFilterSpecies}>
+                  <SelectTrigger className="h-7 w-auto min-w-[110px]" style={{ fontSize: '12px' }}>
+                    <SelectValue placeholder="Species" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Species</SelectItem>
+                    {uniqueSpecies.map((s) => (
+                      <SelectItem key={s} value={s}>{s}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {hasActiveFilters && (
+                  <>
+                    <div className="w-px h-4 bg-[var(--border-color)]" />
+                    <button
+                      onClick={() => { setSelectedVetFilter('all'); setFilterService('all'); setFilterSpecies('all'); }}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 hover:opacity-80 transition-opacity"
+                      style={{ fontSize: '11px', fontWeight: 600, color: '#d4183d', cursor: 'pointer', background: 'none', border: 'none' }}
+                    >
+                      <X className="w-3 h-3" />
+                      Clear
+                    </button>
+                  </>
+                )}
+              </div>
+              </>
             )}
           </div>
 
