@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router';
 import {
   Search, Upload, FlaskConical, FileText, Image as ImageIcon, File,
   Eye, CheckCircle2, Clock, ChevronRight, Download, X, Check, Loader2, Trash2, Send,
+  CalendarDays,
 } from 'lucide-react';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
@@ -15,6 +16,7 @@ import { useTenantDb } from '../context/TenantContext';
 import { useAuth } from '../context/AuthContext';
 import { getOrgContext } from '../hooks/useOrgContext';
 import { useProfile } from '../hooks/useProfile';
+import { StatCard } from '../components/StatCard';
 
 // ─── Types ─────────────────────────────────────────────────────
 
@@ -84,18 +86,6 @@ const statusStyles = {
     label: 'Reviewed', icon: CheckCircle2,
   },
 };
-
-// ─── Stat Card ────────────────────────────────────────────────
-
-function StatCard({ label, value, color, sub }: { label: string; value: number; color: string; sub?: string }) {
-  return (
-    <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-5" style={{ borderRadius: '12px' }}>
-      <p className="text-[var(--text-secondary)] mb-1" style={{ fontSize: '13px', fontWeight: 500 }}>{label}</p>
-      <p style={{ fontSize: '32px', fontWeight: 700, color, lineHeight: 1.1 }}>{value}</p>
-      {sub && <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: '12px' }}>{sub}</p>}
-    </div>
-  );
-}
 
 // ─── Component ────────────────────────────────────────────────
 
@@ -396,10 +386,10 @@ export default function LabPage() {
 
       {/* ─── Stat Cards ─── */}
       <div className="grid grid-cols-4 gap-4 mb-6">
-        <StatCard label="Total Files" value={total} color="var(--text-primary)" sub="All time" />
-        <StatCard label="Awaiting Review" value={awaiting} color="#D97706" sub="Need vet attention" />
-        <StatCard label="Reviewed" value={reviewed} color="var(--brand-green-text)" sub={total > 0 ? `${Math.round((reviewed / total) * 100)}% complete` : '0%'} />
-        <StatCard label="This Week" value={thisWeek} color="#3B82F6" sub="Last 7 days" />
+        <StatCard title="Total Files" value={total} icon={FlaskConical} iconColor="#64748B" subtitle="All time" />
+        <StatCard title="Awaiting Review" value={awaiting} icon={Clock} iconColor="#D97706" subtitle="Need vet attention" />
+        <StatCard title="Reviewed" value={reviewed} icon={CheckCircle2} iconColor="#16A34A" subtitle={total > 0 ? `${Math.round((reviewed / total) * 100)}% complete` : '0%'} />
+        <StatCard title="This Week" value={thisWeek} icon={CalendarDays} iconColor="#3B82F6" subtitle="Last 7 days" />
       </div>
 
       {/* ─── Filter Bar ─── */}
