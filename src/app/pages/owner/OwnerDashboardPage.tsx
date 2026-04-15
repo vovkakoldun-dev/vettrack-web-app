@@ -1,14 +1,15 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import {
   Calendar, Clock, AlertCircle, Syringe,
-  FileText, MessageCircle, ChevronRight, Shield, Sparkles, PawPrint,
+  FileText, MessageCircle, ChevronRight, Shield, PawPrint,
 } from 'lucide-react';
 import { Avatar, AvatarImage, AvatarFallback } from '../../components/ui/avatar';
 import { Badge } from '../../components/ui/badge';
 import { usePets } from '../../hooks/usePets';
 import { useAppointments } from '../../hooks/useAppointments';
 import { useOwnerClient } from '../../hooks/useOwnerClient';
+import { supabase } from '../../../lib/supabase';
 
 // ─── Brand ────────────────────────────────────────────────────
 
@@ -16,27 +17,20 @@ const BRAND = 'var(--brand-green-text)';
 // For text/icon use — adapts to bright green in dark mode
 const BRAND_TEXT = 'var(--brand-green-text)';
 
-const mockInsurance = {
-  provider: 'PetPlan',
-  policyNumber: 'PP-2024-78432',
-  coverageType: 'Comprehensive',
-  expiryDate: 'Dec 31, 2026',
-};
-
 type PetStatus = 'Healthy' | 'Follow-up';
 type VaxStatus = 'Up to date' | 'Due soon';
 type ConditionStatus = 'active' | 'resolved';
 type VisitStatus = 'Completed' | 'Upcoming';
 
 interface Condition {
-  id: number;
+  id: string;
   name: string;
   dateDiagnosed: string;
   status: ConditionStatus;
 }
 
 interface Treatment {
-  id: number;
+  id: string;
   name: string;
   date: string;
   vet: string;
@@ -54,7 +48,7 @@ interface Visit {
 }
 
 interface Vaccination {
-  id: number;
+  id: string;
   name: string;
   status: VaxStatus;
   lastGiven: string;
@@ -90,8 +84,6 @@ interface Pet {
   upcomingAppointments: UpcomingAppt[];
   vaccinations: Vaccination[];
 }
-
-const mockPetsStatic: Pet[] = []
 
 // ─── Helpers ──────────────────────────────────────────────────
 
@@ -163,20 +155,6 @@ function StatCard({
 // BRAND_TEXT for text/border, '#3B82F6' for Hugo
 const PET_COLORS = [BRAND_TEXT, '#3B82F6'];
 
-// ─── Recommended Services ─────────────────────────────────────
-interface RecommendedService {
-  id: number;
-  title: string;
-  pet: string;
-  petImage: string;
-  description: string;
-  priority: 'Urgent' | 'Recommended' | 'Preventive';
-  icon: string;
-  color: string;
-}
-
-const RECOMMENDED_SERVICES: RecommendedService[] = []
-
 // ─── Main Component ──────────────────────────────────────────
 
 export default function OwnerDashboardPage() {
@@ -192,7 +170,37 @@ export default function OwnerDashboardPage() {
     [allPets, clientId],
   );
 
-  const mockPets: (Pet & { supaId: string })[] = useMemo(() =>
+  // ── Fetch pet health data from Supabase ──
+  const [petHealthData, setPetHealthData] = useState<Record<string, {
+    conditions: any[];
+    allergies: string[];
+    vaccinations: any[];
+    medications: any[];
+  }>>({});
+
+  useEffect(() => {
+    if (supaPets.length === 0) return;
+    const petIds = supaPets.map(p => p.id);
+    Promise.all([
+      supabase.from('pet_conditions').select('id, pet_id, name, severity, status, date_diagnosed').in('pet_id', petIds),
+      supabase.from('pet_allergies').select('pet_id, allergen').in('pet_id', petIds),
+      supabase.from('vaccinations').select('id, pet_id, vaccine_name, administered_date, next_due_date').in('pet_id', petIds).order('administered_date', { ascending: false }),
+      supabase.from('medications').select('id, pet_id, name, dosage, frequency, is_active').in('pet_id', petIds).eq('is_active', true),
+    ]).then(([condRes, allergyRes, vaxRes, medRes]) => {
+      const map: Record<string, { conditions: any[]; allergies: string[]; vaccinations: any[]; medications: any[] }> = {};
+      for (const pid of petIds) {
+        map[pid] = {
+          conditions: (condRes.data || []).filter((c: any) => c.pet_id === pid),
+          allergies: (allergyRes.data || []).filter((a: any) => a.pet_id === pid).map((a: any) => a.allergen),
+          vaccinations: (vaxRes.data || []).filter((v: any) => v.pet_id === pid),
+          medications: (medRes.data || []).filter((m: any) => m.pet_id === pid),
+        };
+      }
+      setPetHealthData(map);
+    });
+  }, [supaPets]);
+
+  const pets: (Pet & { supaId: string })[] = useMemo(() =>
     supaPets.map((p, idx) => {
       const age = p.date_of_birth
         ? `${Math.floor((Date.now() - new Date(p.date_of_birth).getTime()) / (365.25 * 24 * 60 * 60 * 1000))} years`
@@ -223,6 +231,9 @@ export default function OwnerDashboardPage() {
           notes: a.reason ?? '',
           status: 'Completed' as VisitStatus,
         }));
+      const health = petHealthData[p.id];
+      const today = new Date();
+      const dueSoonMs = 30 * 24 * 60 * 60 * 1000;
       return {
         id: idx + 1,
         supaId: p.id,
@@ -234,33 +245,60 @@ export default function OwnerDashboardPage() {
         sex: p.sex ?? '—',
         weight: p.weight_kg ? `${p.weight_kg} kg` : '—',
         microchip: p.microchip_no ?? '—',
-        color: '—',
+        color: p.color ?? '—',
         image: p.photo_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.name)}&background=74C69D&color=fff&size=400`,
-        status: 'Healthy' as PetStatus,
-        conditions: [],
-        treatments: [],
-        allergies: [],
+        status: (health?.conditions.some((c: any) => c.status === 'active') ? 'Follow-up' : 'Healthy') as PetStatus,
+        conditions: (health?.conditions || []).map((c: any) => ({
+          id: c.id,
+          name: c.name,
+          dateDiagnosed: c.date_diagnosed
+            ? new Date(c.date_diagnosed).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+            : '—',
+          status: c.status as ConditionStatus,
+        })),
+        treatments: (health?.medications || []).map((m: any) => ({
+          id: m.id,
+          name: m.dosage ? `${m.name} (${m.dosage})` : m.name,
+          date: '',
+          vet: '',
+          notes: m.frequency || '',
+        })),
+        allergies: health?.allergies || [],
         visits: pastAppts,
         vetNotes: '',
         clientNotes: pastAppts.length > 0 ? pastAppts[0].summary : '',
         upcomingAppointments: petAppts,
-        vaccinations: [],
+        vaccinations: (health?.vaccinations || []).map((v: any) => {
+          const nextDue = v.next_due_date ? new Date(v.next_due_date) : null;
+          const isDueSoon = nextDue && (nextDue.getTime() - today.getTime() < dueSoonMs);
+          return {
+            id: v.id,
+            name: v.vaccine_name,
+            status: (isDueSoon ? 'Due soon' : 'Up to date') as VaxStatus,
+            lastGiven: v.administered_date
+              ? new Date(v.administered_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+              : '—',
+            nextDue: v.next_due_date
+              ? new Date(v.next_due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+              : '—',
+          };
+        }),
       };
     }),
-    [supaPets, supaAppts],
+    [supaPets, supaAppts, petHealthData],
   );
 
-  const allConditionsCount = mockPets.reduce(
+  const allConditionsCount = pets.reduce(
     (acc, p) => acc + p.conditions.filter(c => c.status === 'active').length,
     0,
   );
 
-  const allVaxDueSoon = mockPets.reduce<{ petName: string; vax: Vaccination }[]>((acc, p) => {
+  const allVaxDueSoon = pets.reduce<{ petName: string; vax: Vaccination }[]>((acc, p) => {
     const due = p.vaccinations.filter(v => v.status === 'Due soon');
     return [...acc, ...due.map(v => ({ petName: p.name, vax: v }))];
   }, []);
 
-  const allVisits = mockPets
+  const allVisits = pets
     .flatMap(p => p.visits.map(v => ({ ...v, petName: p.name, petImage: p.image })))
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     .slice(0, 3);
@@ -325,11 +363,11 @@ export default function OwnerDashboardPage() {
             color={BRAND}
             label="Next Appointment"
             value={(() => {
-              const next = mockPets.flatMap(p => p.upcomingAppointments).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0];
+              const next = pets.flatMap(p => p.upcomingAppointments).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0];
               return next ? `${next.date.replace(/,\s*\d{4}$/, '')} · ${next.time}` : 'None scheduled';
             })()}
             sub={(() => {
-              const next = mockPets.flatMap(p => p.upcomingAppointments)[0];
+              const next = pets.flatMap(p => p.upcomingAppointments)[0];
               return next ? next.reason : 'Book an appointment';
             })()}
           />
@@ -345,7 +383,7 @@ export default function OwnerDashboardPage() {
             color="#F59E0B"
             label="Active Conditions"
             value={String(allConditionsCount)}
-            sub={allConditionsCount > 0 ? `Across ${mockPets.length > 1 ? 'all pets' : 'your pet'}` : 'None recorded'}
+            sub={allConditionsCount > 0 ? `Across ${pets.length > 1 ? 'all pets' : 'your pet'}` : 'None recorded'}
           />
           <StatCard
             icon={Syringe}
@@ -364,7 +402,7 @@ export default function OwnerDashboardPage() {
 
             {/* Pet Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {mockPets.map((pet, idx) => {
+              {pets.map((pet, idx) => {
                 const activeConditions = pet.conditions.filter(c => c.status === 'active');
                 const recentMeds = pet.treatments.slice(0, 2);
                 const statusColors = pet.status === 'Healthy'
@@ -576,7 +614,7 @@ export default function OwnerDashboardPage() {
                 }
               />
               <div style={{ padding: '0 16px 16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {mockPets.map((pet, idx) =>
+                {pets.map((pet, idx) =>
                   pet.upcomingAppointments.map(appt => (
                     <div
                       key={`${pet.id}-${appt.id}`}
@@ -637,8 +675,8 @@ export default function OwnerDashboardPage() {
             <Card>
               <CardHeader title="Vaccination Status" />
               <div style={{ padding: '0 16px 16px' }}>
-                {mockPets.map((pet, pidx) => (
-                  <div key={pet.id} style={{ marginBottom: pidx < mockPets.length - 1 ? '16px' : 0 }}>
+                {pets.map((pet, pidx) => (
+                  <div key={pet.id} style={{ marginBottom: pidx < pets.length - 1 ? '16px' : 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
                       <Avatar style={{ width: '24px', height: '24px' }}>
                         <AvatarImage src={pet.image} alt={pet.name} style={{ objectFit: 'cover' }} />
@@ -661,7 +699,7 @@ export default function OwnerDashboardPage() {
                         </div>
                       ))}
                     </div>
-                    {pidx < mockPets.length - 1 && (
+                    {pidx < pets.length - 1 && (
                       <div style={{ height: '1px', backgroundColor: 'var(--border-color)', marginTop: '12px' }} />
                     )}
                   </div>
@@ -673,143 +711,55 @@ export default function OwnerDashboardPage() {
             <Card>
               <CardHeader title="Insurance" />
               <div style={{ padding: '0 16px 16px' }}>
-                <div style={{
-                  padding: '14px', borderRadius: '10px',
-                  background: 'linear-gradient(135deg, color-mix(in srgb, var(--brand-green-text) 7%, transparent), #52B78812)',
-                  border: '1px solid var(--border-color)',
-                  marginBottom: '12px',
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <div style={{
-                        width: '34px', height: '34px', borderRadius: '8px',
-                        backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      }}>
-                        <Shield style={{ width: '18px', height: '18px', color: BRAND_TEXT }} />
-                      </div>
-                      <div>
-                        <p style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                          {ownerClient.firstName || 'My'}'s Pets
-                        </p>
-                        <p style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Pet Insurance</p>
-                      </div>
-                    </div>
-                    <span style={{
-                      fontSize: '11px', fontWeight: 700, padding: '3px 8px',
-                      borderRadius: '9999px',
-                      backgroundColor: '#74C69D20',
-                      color: BRAND_TEXT,
-                    }}>
-                      Active
-                    </span>
-                  </div>
-
-                  {[
-                    ['Provider', mockInsurance.provider],
-                    ['Policy #', mockInsurance.policyNumber],
-                    ['Coverage', mockInsurance.coverageType],
-                    ['Expires', mockInsurance.expiryDate],
-                  ].map(([label, val]) => (
-                    <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
-                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{label}</span>
-                      <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)' }}>{val}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </Card>
-          </div>
-        </div>
-
-        {/* ── D. Recommended Services ── */}
-        <div style={{ marginTop: '24px' }}>
-          <Card>
-            <div className="p-5 md:px-6" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', borderBottom: '1px solid var(--border-color)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div style={{ width: '34px', height: '34px', borderRadius: '8px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Sparkles style={{ width: '18px', height: '18px', color: BRAND_TEXT }} />
-                </div>
-                <div>
-                  <h2 style={{ fontSize: '17px', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>Recommended Services</h2>
-                  <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0 }}>Based on your pets' health records and upcoming care needs</p>
-                </div>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 p-5 md:px-6">
-              {RECOMMENDED_SERVICES.map(svc => {
-                const priorityStyle = svc.priority === 'Urgent'
-                  ? { bg: '#d4183d12', text: '#d4183d', border: '#d4183d30' }
-                  : svc.priority === 'Recommended'
-                  ? { bg: '#F59E0B12', text: '#D97706', border: '#F59E0B30' }
-                  : { bg: 'color-mix(in srgb, var(--brand-green-text) 7%, transparent)', text: BRAND_TEXT, border: 'color-mix(in srgb, var(--brand-green-text) 19%, transparent)' };
-
-                return (
-                  <div
-                    key={svc.id}
-                    style={{
-                      padding: '16px', borderRadius: '10px',
-                      border: '1px solid var(--border-color)',
-                      backgroundColor: 'var(--surface-elevated)',
-                      display: 'flex', flexDirection: 'column', gap: '10px',
-                      transition: 'border-color 0.15s',
-                    }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = svc.color + '60'; }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-color)'; }}
-                  >
-                    {/* Header row */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                {supaPets.some(p => p.insurance_no) ? (
+                  <div style={{
+                    padding: '14px', borderRadius: '10px',
+                    background: 'linear-gradient(135deg, color-mix(in srgb, var(--brand-green-text) 7%, transparent), #52B78812)',
+                    border: '1px solid var(--border-color)',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontSize: '22px', lineHeight: 1 }}>{svc.icon}</span>
+                        <div style={{
+                          width: '34px', height: '34px', borderRadius: '8px',
+                          backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}>
+                          <Shield style={{ width: '18px', height: '18px', color: BRAND_TEXT }} />
+                        </div>
                         <div>
-                          <p style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>{svc.title}</p>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '2px' }}>
-                            <Avatar style={{ width: '16px', height: '16px' }}>
-                              <AvatarImage src={svc.petImage} alt={svc.pet} style={{ objectFit: 'cover' }} />
-                              <AvatarFallback style={{ fontSize: '8px' }}>{svc.pet[0]}</AvatarFallback>
-                            </Avatar>
-                            <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 500 }}>{svc.pet}</span>
-                          </div>
+                          <p style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>Pet Insurance</p>
+                          <p style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Policy on file</p>
                         </div>
                       </div>
                       <span style={{
-                        fontSize: '10px', fontWeight: 700, padding: '2px 7px',
-                        borderRadius: '9999px', whiteSpace: 'nowrap',
-                        backgroundColor: priorityStyle.bg,
-                        color: priorityStyle.text,
-                        border: `1px solid ${priorityStyle.border}`,
+                        fontSize: '11px', fontWeight: 700, padding: '3px 8px',
+                        borderRadius: '9999px',
+                        backgroundColor: '#74C69D20',
+                        color: BRAND_TEXT,
                       }}>
-                        {svc.priority}
+                        Active
                       </span>
                     </div>
-
-                    {/* Description */}
-                    <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0, flex: 1 }}>
-                      {svc.description}
-                    </p>
-
-                    {/* CTA */}
-                    <button
-                      onClick={() => navigate('/owner/appointments')}
-                      style={{
-                        width: '100%', padding: '7px 12px', borderRadius: '7px',
-                        backgroundColor: `${svc.color}15`,
-                        border: `1px solid ${svc.color}30`,
-                        color: svc.color, fontSize: '12px', fontWeight: 700,
-                        cursor: 'pointer', transition: 'background-color 0.15s',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
-                      }}
-                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.backgroundColor = `${svc.color}25`; }}
-                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.backgroundColor = `${svc.color}15`; }}
-                    >
-                      <Calendar style={{ width: '12px', height: '12px' }} />
-                      {svc.priority === 'Urgent' ? 'Book Now' : 'Schedule'}
-                    </button>
+                    {supaPets.filter(p => p.insurance_no).map(p => (
+                      <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{p.name}</span>
+                        <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)' }}>{p.insurance_no}</span>
+                      </div>
+                    ))}
                   </div>
-                );
-              })}
-            </div>
-          </Card>
+                ) : (
+                  <div style={{
+                    padding: '20px', borderRadius: '10px',
+                    border: '1px dashed var(--border-color)',
+                    textAlign: 'center',
+                  }}>
+                    <Shield style={{ width: '24px', height: '24px', color: 'var(--text-secondary)', margin: '0 auto 8px', opacity: 0.4 }} />
+                    <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: 0 }}>No insurance on file</p>
+                  </div>
+                )}
+              </div>
+            </Card>
+          </div>
         </div>
 
       </div>

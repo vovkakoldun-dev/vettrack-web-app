@@ -239,16 +239,6 @@ const DEFAULT_WORK_SCHEDULE: WorkSchedule = {
   Sun: { enabled: false, start: '09:00', end: '13:00' },
 };
 
-const INITIAL_BLOCKS: TimeBlock[] = [
-  { id: 1, type: 'Work Hours',  date: '2026-03-11', timeStart: '8:00 AM',  timeEnd: '12:00 PM', notes: 'Morning shift', status: 'Confirmed' },
-  { id: 2, type: 'Lunch Break', date: '2026-03-11', timeStart: '12:00 PM', timeEnd: '1:00 PM',  notes: '',              status: 'Confirmed' },
-  { id: 3, type: 'Work Hours',  date: '2026-03-11', timeStart: '1:00 PM',  timeEnd: '5:00 PM',  notes: 'Afternoon shift',status: 'Confirmed' },
-  { id: 4, type: 'Meeting',     date: '2026-03-12', timeStart: '9:00 AM',  timeEnd: '9:30 AM',  notes: 'Morning standup — case reviews', status: 'Confirmed' },
-  { id: 5, type: 'Lunch Break', date: '2026-03-12', timeStart: '12:00 PM', timeEnd: '1:00 PM',  notes: '',              status: 'Confirmed' },
-  { id: 6, type: 'PTO',         date: '2026-03-17', timeStart: '8:00 AM',  timeEnd: '5:00 PM',  notes: 'Family day — full day off', status: 'Approved'  },
-  { id: 7, type: 'PTO',         date: '2026-03-21', timeStart: '8:00 AM',  timeEnd: '5:00 PM',  notes: 'Personal appointment',      status: 'Pending'   },
-  { id: 8, type: 'Sick Day',    date: '2026-03-05', timeStart: '8:00 AM',  timeEnd: '5:00 PM',  notes: 'Flu — stayed home',         status: 'Approved'  },
-];
 
 // Schedule slots: full 24-hour day (12:00 AM → 11:30 PM) in 30-min increments (48 slots)
 const SCHEDULE_SLOTS = Array.from({ length: 48 }, (_, i) => {
@@ -300,7 +290,7 @@ function formatActivityTime(date: Date): string {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-// ─── Mock Data ────────────────────────────────────────────────
+// ─── Types ─────────────────────────────────────────��──────────
 
 type AdminProfile = {
   name: string;
@@ -313,13 +303,13 @@ type AdminProfile = {
 };
 
 const DEFAULT_ADMIN_PROFILE: AdminProfile = {
-  name: 'Sarah Mitchell',
-  role: 'Front Desk Admin',
-  email: 'sarah.mitchell@vettrack.com',
-  phone: '(555) 201-4400',
+  name: '',
+  role: '',
+  email: '',
+  phone: '',
   photo_url: '',
-  shift: '8:00 AM – 5:00 PM',
-  since: 'Jan 2022',
+  shift: '',
+  since: '',
 };
 
 // GLOW_CARDS are now built dynamically inside the component using useDashboardStats
@@ -385,29 +375,38 @@ export default function AdminMyPortalPage() {
         db.from('clients').select('id, first_name, last_name, created_at, pets(id)').eq('organization_id', organizationId).gte('created_at', weekAgoStr).order('created_at', { ascending: false }).limit(2),
         // Time blocks
         db.from('staff_time_blocks').select('*').eq('organization_id', organizationId).eq('staff_id', user.id).order('date'),
-        // Staff record (PTO/sick allowance)
-        db.from('staff').select('pto_allowance, sick_allowance').eq('id', user.id).single(),
+        // Staff record (PTO/sick allowance, schedule, created_at)
+        db.from('staff').select('pto_allowance, sick_allowance, created_at, schedule, job_title').eq('id', user.id).single(),
       ]);
 
-      // Profile
+      // Profile + staff record
+      const staffData = staffRes.data;
       if (profileRes.data) {
         const data = profileRes.data;
+        const roleName = (data.role || '').replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+        const jobTitle = staffData?.job_title;
+        const displayRole = jobTitle || roleName || 'Admin';
+        const joinDate = staffData?.created_at ? new Date(staffData.created_at) : null;
+        const sinceStr = joinDate ? joinDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : '';
         setAdminProfile({
-          name: (data.first_name && data.last_name) ? `${data.first_name} ${data.last_name}` : 'Sarah Mitchell',
-          role: 'Front Desk Admin',
-          email: data.email || 'sarah.mitchell@vettrack.com',
-          phone: data.phone || '(555) 201-4400',
+          name: (data.first_name && data.last_name) ? `${data.first_name} ${data.last_name}` : '',
+          role: displayRole,
+          email: data.email || '',
+          phone: data.phone || '',
           photo_url: data.avatar_url || '',
-          shift: '8:00 AM – 5:00 PM',
-          since: 'Jan 2022',
+          shift: '',
+          since: sinceStr,
         });
       }
       setProfileLoading(false);
 
-      // PTO / Sick allowance from staff record
-      if (staffRes.data) {
-        setPtoAllowance(staffRes.data.pto_allowance ?? 20);
-        setSickAllowance(staffRes.data.sick_allowance ?? 10);
+      // PTO / Sick allowance + work schedule from staff record
+      if (staffData) {
+        setPtoAllowance(staffData.pto_allowance ?? 20);
+        setSickAllowance(staffData.sick_allowance ?? 10);
+        if (staffData.schedule && typeof staffData.schedule === 'object') {
+          setWorkSchedule(prev => ({ ...prev, ...(staffData.schedule as Partial<WorkSchedule>) }));
+        }
       }
 
       // Tasks
@@ -663,8 +662,9 @@ export default function AdminMyPortalPage() {
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
   const [blockDialogOpen, setBlockDialogOpen] = useState(false);
   const [blockType, setBlockType] = useState<BlockType>('Lunch Break');
-  const [blockDateFrom, setBlockDateFrom] = useState('2026-03-15');
-  const [blockDateTo, setBlockDateTo] = useState('2026-03-15');
+  const todayStr = dateToStr(new Date());
+  const [blockDateFrom, setBlockDateFrom] = useState(todayStr);
+  const [blockDateTo, setBlockDateTo] = useState(todayStr);
   const [blockTimeStart, setBlockTimeStart] = useState('12:00');
   const [blockTimeEnd, setBlockTimeEnd] = useState('13:00');
   const [blockNotes, setBlockNotes] = useState('');
@@ -931,7 +931,7 @@ export default function AdminMyPortalPage() {
               <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 9%, transparent)', color: 'var(--brand-green-text)', padding: '3px 10px', borderRadius: 999 }}>Admin</span>
             </div>
             <p className="text-[var(--brand-green-text)]" style={{ fontSize: '15px', fontWeight: 600, marginBottom: 4 }}>
-              {ADMIN_PROFILE.role} · Since {ADMIN_PROFILE.since}
+              {ADMIN_PROFILE.role}{ADMIN_PROFILE.since ? ` · Since ${ADMIN_PROFILE.since}` : ''}
             </p>
             <div className="flex items-center gap-3 flex-wrap">
               <span className="text-[var(--text-secondary)] flex items-center gap-1" style={{ fontSize: '13px' }}>
@@ -1367,7 +1367,12 @@ export default function AdminMyPortalPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setWorkHoursDialogOpen(false)}>Cancel</Button>
-            <Button onClick={() => setWorkHoursDialogOpen(false)}>Save Schedule</Button>
+            <Button onClick={async () => {
+              if (user) {
+                await db.from('staff').update({ schedule: workSchedule }).eq('id', user.id);
+              }
+              setWorkHoursDialogOpen(false);
+            }}>Save Schedule</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

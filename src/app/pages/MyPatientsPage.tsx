@@ -1,26 +1,34 @@
 import { Link } from 'react-router';
 import { Search, ChevronLeft, Filter } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '../components/ui/select';
+import { supabase } from '../../lib/supabase';
+import { getOrgContext } from '../hooks/useOrgContext';
 
-// ─── Mock Data ───────────────────────────────────────────────
+// ─── Helpers ────────────────────────────────────────────────
 
-const MY_PATIENTS = [
-  { id: 1, petImage: 'https://images.unsplash.com/photo-1734966213753-1b361564bab4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxnb2xkZW4lMjByZXRyaWV2ZXIlMjBkb2clMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyNDMxMzB8MA&ixlib=rb-4.1.0&q=80&w=400', petName: 'Max', ownerName: 'John Smith', species: 'Dog', breed: 'Golden Retriever', age: '5 yrs', lastVisit: 'Mar 11, 2026', nextVisit: 'Apr 8, 2026', status: 'Healthy' as const, notes: 'Routine annual exam — all clear' },
-  { id: 3, petImage: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400', petName: 'Cooper', ownerName: 'Michael Brown', species: 'Dog', breed: 'Beagle', age: '3 yrs', lastVisit: 'Mar 11, 2026', nextVisit: 'Mar 25, 2026', status: 'Follow-up' as const, notes: 'Post-dental cleaning check' },
-  { id: 4, petImage: 'https://images.unsplash.com/photo-1513360371669-4adf3dd7dff8?w=400', petName: 'Bella', ownerName: 'Sarah Williams', species: 'Cat', breed: 'Siamese', age: '2 yrs', lastVisit: 'Mar 11, 2026', nextVisit: 'Jun 11, 2026', status: 'Healthy' as const, notes: 'Surgery recovery complete' },
-  { id: 7, petImage: 'https://images.unsplash.com/photo-1589883661923-6476cb0ae9f2?w=400', petName: 'Milo', ownerName: 'Jessica Taylor', species: 'Cat', breed: 'Maine Coon', age: '4 yrs', lastVisit: 'Mar 10, 2026', nextVisit: 'Sep 10, 2026', status: 'Healthy' as const, notes: 'FVRCP booster administered' },
-  { id: 8, petImage: 'https://images.unsplash.com/photo-1518717758536-85ae29035b6d?w=400', petName: 'Daisy', ownerName: 'Robert Anderson', species: 'Dog', breed: 'Labrador', age: '7 yrs', lastVisit: 'Mar 11, 2026', nextVisit: 'Mar 18, 2026', status: 'Critical' as const, notes: 'Post-surgery monitoring — check wound site' },
-  { id: 11, petImage: 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?w=400', petName: 'Coco', ownerName: 'Amanda White', species: 'Dog', breed: 'Poodle', age: '1 yr', lastVisit: 'Mar 9, 2026', nextVisit: 'Apr 9, 2026', status: 'Healthy' as const, notes: 'Puppy vaccination series on track' },
-  { id: 12, petImage: 'https://images.unsplash.com/photo-1526336024174-e58f5cdd8e13?w=400', petName: 'Oliver', ownerName: 'Lisa Martinez', species: 'Cat', breed: 'Tabby', age: '6 yrs', lastVisit: 'Mar 8, 2026', nextVisit: 'Mar 22, 2026', status: 'Follow-up' as const, notes: 'Dental cleaning needed' },
-  { id: 13, petImage: 'https://images.unsplash.com/photo-1558788353-f76d92427f16?w=400', petName: 'Buddy', ownerName: 'Kevin Lee', species: 'Dog', breed: 'Corgi', age: '3 yrs', lastVisit: 'Mar 7, 2026', nextVisit: 'Jun 7, 2026', status: 'Healthy' as const, notes: 'Weight management plan — on track' },
-  { id: 14, petImage: 'https://images.unsplash.com/photo-1574158622682-e40e69881006?w=400', petName: 'Luna', ownerName: 'Emily Davis', species: 'Cat', breed: 'Persian', age: '8 yrs', lastVisit: 'Mar 5, 2026', nextVisit: 'Mar 19, 2026', status: 'Follow-up' as const, notes: 'Kidney function follow-up' },
-  { id: 15, petImage: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400', petName: 'Rocky', ownerName: 'David Johnson', species: 'Dog', breed: 'Boxer', age: '5 yrs', lastVisit: 'Mar 3, 2026', nextVisit: 'Sep 3, 2026', status: 'Healthy' as const, notes: 'Annual vaccinations complete' },
-];
+function getAge(dob: string | null): string {
+  if (!dob) return '—';
+  const birth = new Date(dob);
+  const now = new Date();
+  let years = now.getFullYear() - birth.getFullYear();
+  const monthDiff = now.getMonth() - birth.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < birth.getDate())) years--;
+  if (years < 1) {
+    const months = (now.getFullYear() - birth.getFullYear()) * 12 + monthDiff;
+    return months <= 0 ? 'Newborn' : `${months} mo`;
+  }
+  return `${years} yr${years > 1 ? 's' : ''}`;
+}
+
+function fmtDate(d: string | null): string {
+  if (!d) return '—';
+  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
 
 const statusStyles: Record<string, { bg: string; text: string }> = {
   Healthy: { bg: '#74C69D20', text: 'var(--brand-green-text)' },
@@ -28,24 +36,194 @@ const statusStyles: Record<string, { bg: string; text: string }> = {
   Critical: { bg: '#d4183d20', text: '#d4183d' },
 };
 
-// ─── Component ───────────────────────────────────────────────
+// ─── Types ──────────────────────────────────────────────────
+
+interface PatientRow {
+  id: string;
+  name: string;
+  species: string;
+  breed: string | null;
+  date_of_birth: string | null;
+  photo_url: string | null;
+  clientId: string;
+  ownerName: string;
+  lastVisit: string | null;
+  nextVisit: string | null;
+  status: 'Healthy' | 'Follow-up' | 'Critical';
+  notes: string;
+}
+
+// ─── Component ──────────────────────────────────────────────
 
 export default function MyPatientsPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [patients, setPatients] = useState<PatientRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [doctorName, setDoctorName] = useState('');
 
-  const filtered = MY_PATIENTS.filter((p) => {
+  useEffect(() => {
+    async function load() {
+      try {
+        const { organizationId } = await getOrgContext();
+        const { data: { session } } = await supabase.auth.getSession();
+        const userId = session?.user?.id;
+        if (!userId) return;
+
+        // Get doctor's name
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('first_name, last_name')
+          .eq('id', userId)
+          .single();
+        if (profile) {
+          setDoctorName(`Dr. ${profile.first_name} ${profile.last_name}`.trim());
+        }
+
+        // Fetch assigned pets with client/owner info
+        const { data: petsData } = await supabase
+          .from('pets')
+          .select(`
+            id, name, species, breed, date_of_birth, photo_url,
+            client_id,
+            clients!inner(id, profile_id, profiles!inner(first_name, last_name))
+          `)
+          .eq('organization_id', organizationId)
+          .eq('assigned_vet_id', userId)
+          .eq('is_active', true)
+          .order('name');
+
+        const pets = (petsData || []) as any[];
+        if (pets.length === 0) { setPatients([]); return; }
+
+        const petIds = pets.map(p => p.id);
+        const now = new Date().toISOString();
+
+        // Fetch appointments for these pets (last + upcoming)
+        const [pastRes, futureRes, notesRes] = await Promise.all([
+          supabase
+            .from('appointments')
+            .select('pet_id, scheduled_at, reason, status')
+            .eq('organization_id', organizationId)
+            .in('pet_id', petIds)
+            .lt('scheduled_at', now)
+            .order('scheduled_at', { ascending: false }),
+          supabase
+            .from('appointments')
+            .select('pet_id, scheduled_at, reason')
+            .eq('organization_id', organizationId)
+            .in('pet_id', petIds)
+            .gte('scheduled_at', now)
+            .order('scheduled_at', { ascending: true }),
+          supabase
+            .from('pet_notes')
+            .select('pet_id, content, created_at')
+            .in('pet_id', petIds)
+            .order('created_at', { ascending: false }),
+        ]);
+
+        const pastAppts = pastRes.data || [];
+        const futureAppts = futureRes.data || [];
+        const petNotes = notesRes.data || [];
+
+        // Build lookup maps (first match per pet = most recent/nearest)
+        const lastVisitMap = new Map<string, string>();
+        const nextVisitMap = new Map<string, { date: string; reason: string }>();
+        const noteMap = new Map<string, string>();
+
+        for (const a of pastAppts) {
+          if (!lastVisitMap.has(a.pet_id)) lastVisitMap.set(a.pet_id, a.scheduled_at);
+        }
+        for (const a of futureAppts) {
+          if (!nextVisitMap.has(a.pet_id)) nextVisitMap.set(a.pet_id, { date: a.scheduled_at, reason: a.reason || '' });
+        }
+        for (const n of petNotes) {
+          if (!noteMap.has(n.pet_id)) noteMap.set(n.pet_id, n.content);
+        }
+
+        // Build patient rows
+        const rows: PatientRow[] = pets.map(p => {
+          const client = p.clients;
+          const ownerProfile = client?.profiles;
+          const ownerName = ownerProfile
+            ? `${ownerProfile.first_name || ''} ${ownerProfile.last_name || ''}`.trim()
+            : 'Unknown';
+
+          const upcoming = nextVisitMap.get(p.id);
+          const note = noteMap.get(p.id) || (upcoming?.reason ? upcoming.reason : '');
+
+          // Derive status: upcoming appointment within 14 days = Follow-up, else Healthy
+          let status: PatientRow['status'] = 'Healthy';
+          if (upcoming) {
+            const daysUntil = (new Date(upcoming.date).getTime() - Date.now()) / (1000 * 60 * 60 * 24);
+            if (daysUntil <= 14) status = 'Follow-up';
+          }
+
+          return {
+            id: p.id,
+            name: p.name,
+            species: p.species || '—',
+            breed: p.breed,
+            date_of_birth: p.date_of_birth,
+            photo_url: p.photo_url,
+            clientId: client?.id || p.client_id,
+            ownerName,
+            lastVisit: lastVisitMap.get(p.id) || null,
+            nextVisit: upcoming?.date || null,
+            status,
+            notes: note || 'No notes',
+          };
+        });
+
+        setPatients(rows);
+      } catch (err) {
+        console.error('Failed to load patients:', err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, []);
+
+  const filtered = patients.filter((p) => {
+    const q = search.toLowerCase();
     const matchSearch =
-      p.petName.toLowerCase().includes(search.toLowerCase()) ||
-      p.ownerName.toLowerCase().includes(search.toLowerCase()) ||
-      p.breed.toLowerCase().includes(search.toLowerCase());
+      p.name.toLowerCase().includes(q) ||
+      p.ownerName.toLowerCase().includes(q) ||
+      (p.breed || '').toLowerCase().includes(q);
     const matchStatus = statusFilter === 'all' || p.status === statusFilter;
     return matchSearch && matchStatus;
   });
 
-  const healthyCount = MY_PATIENTS.filter((p) => p.status === 'Healthy').length;
-  const followUpCount = MY_PATIENTS.filter((p) => p.status === 'Follow-up').length;
-  const criticalCount = MY_PATIENTS.filter((p) => p.status === 'Critical').length;
+  const healthyCount = patients.filter((p) => p.status === 'Healthy').length;
+  const followUpCount = patients.filter((p) => p.status === 'Follow-up').length;
+  const criticalCount = patients.filter((p) => p.status === 'Critical').length;
+
+  if (loading) {
+    return (
+      <div className="max-w-[1440px] mx-auto p-8">
+        <div className="mb-6">
+          <div className="h-4 w-32 rounded bg-[var(--border-color)] mb-3" style={{ animation: 'pulse 1.5s ease-in-out infinite' }} />
+          <div className="h-8 w-48 rounded bg-[var(--border-color)] mb-2" style={{ animation: 'pulse 1.5s ease-in-out infinite' }} />
+          <div className="h-4 w-64 rounded bg-[var(--border-color)]" style={{ animation: 'pulse 1.5s ease-in-out infinite' }} />
+        </div>
+        <div className="flex gap-3 mb-6">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="h-10 w-28 rounded-full bg-[var(--border-color)]" style={{ animation: 'pulse 1.5s ease-in-out infinite' }} />
+          ))}
+        </div>
+        <div className="bg-[var(--surface-white)] border border-[var(--border-color)] rounded-xl p-6">
+          {[1, 2, 3, 4, 5].map(i => (
+            <div key={i} className="flex gap-4 mb-4">
+              <div className="w-9 h-9 rounded-full bg-[var(--border-color)]" style={{ animation: 'pulse 1.5s ease-in-out infinite' }} />
+              <div className="flex-1 h-9 rounded bg-[var(--border-color)]" style={{ animation: 'pulse 1.5s ease-in-out infinite' }} />
+            </div>
+          ))}
+        </div>
+        <style>{`@keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.8; } }`}</style>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-[1440px] mx-auto p-8">
@@ -62,7 +240,7 @@ export default function MyPatientsPage() {
           My Patients
         </h1>
         <p className="text-[var(--text-secondary)] mt-1" style={{ fontSize: '16px' }}>
-          {MY_PATIENTS.length} patients under Dr. Sarah Chen's care
+          {patients.length} patient{patients.length !== 1 ? 's' : ''} under {doctorName || 'your'} care
         </p>
       </div>
 
@@ -134,15 +312,28 @@ export default function MyPatientsPage() {
                     className="border-b border-[var(--border-color)] last:border-0 hover:bg-[var(--surface-elevated)] transition-colors cursor-pointer"
                   >
                     <td className="py-3 px-4">
-                      <Link to={`/clients/${p.id}`} className="flex items-center gap-3">
-                        <img
-                          src={p.petImage}
-                          alt={p.petName}
-                          className="w-9 h-9 object-cover flex-shrink-0"
-                          style={{ borderRadius: '9999px' }}
-                        />
+                      <Link to={`/clients/${p.clientId}`} className="flex items-center gap-3">
+                        {p.photo_url ? (
+                          <img
+                            src={p.photo_url}
+                            alt={p.name}
+                            className="w-9 h-9 object-cover flex-shrink-0"
+                            style={{ borderRadius: '9999px' }}
+                          />
+                        ) : (
+                          <div
+                            className="w-9 h-9 flex-shrink-0 flex items-center justify-center text-white"
+                            style={{
+                              borderRadius: '9999px',
+                              background: p.species === 'Cat' ? 'linear-gradient(135deg, #818CF8, #6366F1)' : 'linear-gradient(135deg, #F4A261, #E76F51)',
+                              fontSize: '13px', fontWeight: 700,
+                            }}
+                          >
+                            {p.name.charAt(0)}
+                          </div>
+                        )}
                         <span className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 600 }}>
-                          {p.petName}
+                          {p.name}
                         </span>
                       </Link>
                     </td>
@@ -151,16 +342,16 @@ export default function MyPatientsPage() {
                     </td>
                     <td className="py-3 px-4">
                       <span className="text-[var(--text-primary)]" style={{ fontSize: '14px' }}>{p.species}</span>
-                      <p className="text-[var(--text-secondary)]" style={{ fontSize: '11px' }}>{p.breed}</p>
+                      <p className="text-[var(--text-secondary)]" style={{ fontSize: '11px' }}>{p.breed || '—'}</p>
                     </td>
                     <td className="py-3 px-4">
-                      <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>{p.age}</span>
+                      <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>{getAge(p.date_of_birth)}</span>
                     </td>
                     <td className="py-3 px-4">
-                      <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>{p.lastVisit}</span>
+                      <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>{fmtDate(p.lastVisit)}</span>
                     </td>
                     <td className="py-3 px-4">
-                      <span className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 500 }}>{p.nextVisit}</span>
+                      <span className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 500 }}>{fmtDate(p.nextVisit)}</span>
                     </td>
                     <td className="py-3 px-4">
                       <span
@@ -187,7 +378,9 @@ export default function MyPatientsPage() {
               {filtered.length === 0 && (
                 <tr>
                   <td colSpan={8} className="py-12 text-center">
-                    <p className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>No patients found matching your search.</p>
+                    <p className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>
+                      {patients.length === 0 ? 'No patients assigned to you yet.' : 'No patients found matching your search.'}
+                    </p>
                   </td>
                 </tr>
               )}

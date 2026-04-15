@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import {
   Search, FileText, CalendarDays, FlaskConical, Lock, Clock3, CheckCircle2,
@@ -11,6 +11,9 @@ import {
 import {
   Table, TableHeader, TableBody, TableHead, TableRow, TableCell,
 } from '../../components/ui/table';
+import { usePets } from '../../hooks/usePets';
+import { useOwnerClient } from '../../hooks/useOwnerClient';
+import { supabase } from '../../../lib/supabase';
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -18,7 +21,7 @@ type RecordType = 'Visit' | 'Vaccination' | 'Lab Result' | 'Surgery' | 'Prescrip
 type RecordStatus = 'Final' | 'Pending Vet Review' | 'In Progress';
 
 interface OwnerMedicalRecord {
-  id: number;
+  id: string;
   petName: string;
   petImage: string;
   breed: string;
@@ -60,17 +63,21 @@ const STATUS_CONFIG: Record<RecordStatus, {
   },
 };
 
-// ─── Mock Data ───────────────────────────────────────────────
-
-const MAX_IMAGE = 'https://images.unsplash.com/photo-1734966213753-1b361564bab4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxnb2xkZW4lMjByZXRyaWV2ZXIlMjBkb2clMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyNDMxMzB8MA&ixlib=rb-4.1.0&q=80&w=400';
-const HUGO_IMAGE = 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=400';
-
-const OWNER_RECORDS: OwnerMedicalRecord[] = []
-
 // ─── Component ───────────────────────────────────────────────
+
+const PET_EMOJI: Record<string, string> = { Dog: '🐕', Cat: '🐈' };
 
 export default function OwnerRecordsPage() {
   const navigate = useNavigate();
+  const { pets: allPets } = usePets();
+  const { clientId } = useOwnerClient();
+
+  const supaPets = useMemo(() =>
+    clientId ? allPets.filter(p => p.client_id === clientId) : allPets,
+    [allPets, clientId],
+  );
+
+  const [records, setRecords] = useState<OwnerMedicalRecord[]>([]);
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -78,7 +85,39 @@ export default function OwnerRecordsPage() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
 
-  const filtered = OWNER_RECORDS.filter((r) => {
+  // Fetch medical records for owner's pets
+  useEffect(() => {
+    if (supaPets.length === 0) return;
+    const petIds = supaPets.map(p => p.id);
+    (async () => {
+      const { data } = await supabase
+        .from('medical_records')
+        .select('id, record_type, status, visit_date, reason, clinical_notes, pets!left(id, name, species, breed, photo_url), staff!medical_records_vet_id_fkey!left(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
+        .in('pet_id', petIds)
+        .order('visit_date', { ascending: false });
+      if (data) {
+        setRecords(data.map((r: any) => {
+          const d = new Date(r.visit_date + 'T12:00:00');
+          return {
+            id: r.id,
+            petName: r.pets?.name ?? '—',
+            petImage: r.pets?.photo_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(r.pets?.name || 'P')}&background=74C69D&color=fff&size=400`,
+            breed: r.pets?.breed ?? '—',
+            recordType: (r.record_type || 'Visit') as RecordType,
+            date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+            dateISO: r.visit_date,
+            vet: r.staff?.profiles ? `Dr. ${r.staff.profiles.first_name} ${r.staff.profiles.last_name}` : '—',
+            summary: r.reason || r.clinical_notes || '—',
+            status: (r.status || 'Final') as RecordStatus,
+          };
+        }));
+      }
+    })();
+  }, [supaPets]);
+
+  const petNames = supaPets.map(p => p.name).join(' & ') || 'your pets';
+
+  const filtered = records.filter((r) => {
     const q = search.toLowerCase();
     const matchesSearch =
       r.petName.toLowerCase().includes(q) ||
@@ -92,9 +131,12 @@ export default function OwnerRecordsPage() {
     return matchesSearch && matchesType && matchesStatus && matchesPet && matchesDateFrom && matchesDateTo;
   });
 
-  const thisMonthCount  = OWNER_RECORDS.filter((r) => r.dateISO >= '2026-03-01').length;
-  const labCount        = OWNER_RECORDS.filter((r) => r.recordType === 'Lab Result').length;
-  const pendingCount    = OWNER_RECORDS.filter((r) => r.status === 'Pending Vet Review' || r.status === 'In Progress').length;
+  const now = new Date();
+  const thisMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  const thisMonthCount  = records.filter((r) => r.dateISO >= thisMonthStr).length;
+  const labCount        = records.filter((r) => r.recordType === 'Lab Result').length;
+  const pendingCount    = records.filter((r) => r.status === 'Pending Vet Review' || r.status === 'In Progress').length;
+  const labInProgress   = records.filter((r) => r.recordType === 'Lab Result' && r.status === 'In Progress').length;
 
   return (
     <div className="max-w-[1440px] mx-auto p-8">
@@ -103,7 +145,7 @@ export default function OwnerRecordsPage() {
       <div className="mb-8">
         <h1 className="text-[var(--text-primary)] mb-2" style={{ fontSize: '32px', fontWeight: 700 }}>My Records</h1>
         <p className="text-[var(--text-secondary)]" style={{ fontSize: '16px' }}>
-          Medical history for Max &amp; Hugo
+          Medical history for {petNames}
         </p>
       </div>
 
@@ -111,7 +153,7 @@ export default function OwnerRecordsPage() {
       <div className="grid grid-cols-4 gap-6 mb-8">
         <StatCard
           title="Total Records"
-          value={OWNER_RECORDS.length.toString()}
+          value={records.length.toString()}
           icon={FileText}
           trend={{ value: `${thisMonthCount} this month`, isPositive: true }}
           iconColor="var(--brand-green-text)"
@@ -127,7 +169,7 @@ export default function OwnerRecordsPage() {
           title="Lab Results"
           value={labCount.toString()}
           icon={FlaskConical}
-          trend={{ value: '1 in progress', isPositive: false }}
+          trend={{ value: labInProgress > 0 ? `${labInProgress} in progress` : 'None in progress', isPositive: labInProgress === 0 }}
           iconColor="#8B5CF6"
         />
         <StatCard
@@ -182,8 +224,9 @@ export default function OwnerRecordsPage() {
           <SelectTrigger className="w-[140px]"><SelectValue placeholder="All Pets" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Pets</SelectItem>
-            <SelectItem value="Max">🐕 Max</SelectItem>
-            <SelectItem value="Hugo">🐈 Hugo</SelectItem>
+            {supaPets.map(p => (
+              <SelectItem key={p.id} value={p.name}>{PET_EMOJI[p.species] || '🐾'} {p.name}</SelectItem>
+            ))}
           </SelectContent>
         </Select>
         <Select value={typeFilter} onValueChange={setTypeFilter}>
@@ -316,12 +359,12 @@ export default function OwnerRecordsPage() {
         {/* Footer */}
         <div className="px-6 py-4 border-t border-[var(--border-color)] flex items-center justify-between">
           <p className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>
-            Showing {filtered.length} of {OWNER_RECORDS.length} records
+            Showing {filtered.length} of {records.length} records
           </p>
           <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
             <Lock style={{ width: 12, height: 12, color: 'var(--text-secondary)' }} />
             <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-              {OWNER_RECORDS.filter(r => r.status !== 'Final').length} record{OWNER_RECORDS.filter(r => r.status !== 'Final').length !== 1 ? 's' : ''} locked
+              {records.filter(r => r.status !== 'Final').length} record{records.filter(r => r.status !== 'Final').length !== 1 ? 's' : ''} locked
             </span>
           </div>
         </div>

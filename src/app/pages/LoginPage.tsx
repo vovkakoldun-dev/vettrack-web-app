@@ -157,14 +157,42 @@ export default function LoginPage() {
   }
 
   const pageBg = isDark
-    ? 'linear-gradient(135deg, #0F172A 0%, #1E293B 50%, #0F2A1A 100%)'
-    : 'linear-gradient(135deg, #f0fdf4 0%, #f8fafc 50%, #ecfdf5 100%)';
+    ? '#08090E'
+    : '#E3E8FF';
 
   return (
     <div
       className="min-h-screen flex flex-col items-center justify-center"
-      style={{ background: pageBg, padding: '24px', transition: 'background 0.3s' }}
+      style={{ background: pageBg, padding: '24px', transition: 'background 0.3s', overflow: 'hidden', position: 'relative' }}
     >
+      <style>{`
+        @keyframes blobFloat1 {
+          0%, 100% { transform: translate(0, 0) scale(1); }
+          20% { transform: translate(120px, -80px) scale(1.1); }
+          40% { transform: translate(-60px, 100px) scale(0.95); }
+          60% { transform: translate(80px, 60px) scale(1.05); }
+          80% { transform: translate(-100px, -40px) scale(0.9); }
+        }
+        @keyframes blobFloat2 {
+          0%, 100% { transform: translate(0, 0) scale(1); }
+          20% { transform: translate(-100px, 60px) scale(1.08); }
+          40% { transform: translate(70px, -90px) scale(0.92); }
+          60% { transform: translate(-80px, -50px) scale(1.12); }
+          80% { transform: translate(110px, 80px) scale(0.95); }
+        }
+        @keyframes blobFloat3 {
+          0%, 100% { transform: translate(0, 0) scale(1); }
+          25% { transform: translate(90px, 70px) scale(1.15); }
+          50% { transform: translate(-110px, -30px) scale(0.9); }
+          75% { transform: translate(50px, -80px) scale(1.05); }
+        }
+        @keyframes blobFloat4 {
+          0%, 100% { transform: translate(0, 0) scale(1); }
+          20% { transform: translate(-70px, -90px) scale(1.1); }
+          50% { transform: translate(100px, 50px) scale(0.88); }
+          80% { transform: translate(-50px, 70px) scale(1.08); }
+        }
+      `}</style>
       {/* ── Theme toggle ── */}
       <button
         onClick={toggle}
@@ -188,29 +216,101 @@ export default function LoginPage() {
         }
       </button>
 
-      {/* Ambient glow blobs */}
-      <div
-        style={{
-          position: 'fixed', top: '10%', left: '15%',
-          width: '420px', height: '420px',
-          background: isDark
-            ? 'radial-gradient(circle, color-mix(in srgb, var(--brand-green-text) 18%, transparent) 0%, transparent 70%)'
-            : 'radial-gradient(circle, color-mix(in srgb, var(--brand-green-text) 12%, transparent) 0%, transparent 70%)',
+      {/* Flying gradient blobs — logo colors */}
+      {isDark && <>
+        {/* Blue #1184FF — large, center-left */}
+        <div style={{
+          position: 'fixed', top: '-10%', left: '-5%',
+          width: '900px', height: '900px',
+          background: 'radial-gradient(circle, rgba(17,132,255,0.35) 0%, rgba(17,132,255,0.08) 50%, transparent 70%)',
           borderRadius: '50%', pointerEvents: 'none',
-          filter: 'blur(60px)',
-        }}
-      />
-      <div
-        style={{
-          position: 'fixed', bottom: '15%', right: '10%',
-          width: '340px', height: '340px',
-          background: isDark
-            ? 'radial-gradient(circle, rgba(116,198,157,0.12) 0%, transparent 70%)'
-            : 'radial-gradient(circle, rgba(116,198,157,0.18) 0%, transparent 70%)',
+          filter: 'blur(100px)',
+          animation: 'blobFloat1 18s ease-in-out infinite',
+        }} />
+        {/* Teal #0ACEA9 — bottom-left */}
+        <div style={{
+          position: 'fixed', bottom: '-15%', left: '-10%',
+          width: '800px', height: '800px',
+          background: 'radial-gradient(circle, rgba(10,206,169,0.40) 0%, rgba(10,206,169,0.08) 50%, transparent 70%)',
           borderRadius: '50%', pointerEvents: 'none',
-          filter: 'blur(50px)',
-        }}
-      />
+          filter: 'blur(100px)',
+          animation: 'blobFloat3 20s ease-in-out infinite',
+        }} />
+        {/* Purple #845FEE — center */}
+        <div style={{
+          position: 'fixed', top: '10%', left: '30%',
+          width: '850px', height: '850px',
+          background: 'radial-gradient(circle, rgba(132,95,238,0.30) 0%, rgba(132,95,238,0.06) 50%, transparent 70%)',
+          borderRadius: '50%', pointerEvents: 'none',
+          filter: 'blur(100px)',
+          animation: 'blobFloat2 22s ease-in-out infinite',
+        }} />
+        {/* Orange #FF8315 — right */}
+        <div style={{
+          position: 'fixed', top: '5%', right: '-10%',
+          width: '800px', height: '800px',
+          background: 'radial-gradient(circle, rgba(255,131,21,0.28) 0%, rgba(255,131,21,0.05) 50%, transparent 70%)',
+          borderRadius: '50%', pointerEvents: 'none',
+          filter: 'blur(100px)',
+          animation: 'blobFloat4 24s ease-in-out infinite',
+        }} />
+        {/* Deep blue #3E3CFF — subtle accent */}
+        <div style={{
+          position: 'fixed', bottom: '10%', left: '20%',
+          width: '600px', height: '600px',
+          background: 'radial-gradient(circle, rgba(62,60,255,0.18) 0%, transparent 60%)',
+          borderRadius: '50%', pointerEvents: 'none',
+          filter: 'blur(100px)',
+          animation: 'blobFloat1 26s ease-in-out infinite',
+        }} />
+      </>}
+      {!isDark && <>
+        {/* Blue #1184FF — large, center-left */}
+        <div style={{
+          position: 'fixed', top: '-10%', left: '-5%',
+          width: '900px', height: '900px',
+          background: 'radial-gradient(circle, rgba(17,132,255,0.45) 0%, rgba(17,132,255,0.10) 50%, transparent 70%)',
+          borderRadius: '50%', pointerEvents: 'none',
+          filter: 'blur(100px)',
+          animation: 'blobFloat1 18s ease-in-out infinite',
+        }} />
+        {/* Teal #0ACEA9 — bottom-left */}
+        <div style={{
+          position: 'fixed', bottom: '-15%', left: '-10%',
+          width: '800px', height: '800px',
+          background: 'radial-gradient(circle, rgba(10,206,169,0.55) 0%, rgba(10,206,169,0.12) 50%, transparent 70%)',
+          borderRadius: '50%', pointerEvents: 'none',
+          filter: 'blur(100px)',
+          animation: 'blobFloat3 20s ease-in-out infinite',
+        }} />
+        {/* Purple #845FEE — center */}
+        <div style={{
+          position: 'fixed', top: '10%', left: '30%',
+          width: '850px', height: '850px',
+          background: 'radial-gradient(circle, rgba(132,95,238,0.40) 0%, rgba(132,95,238,0.08) 50%, transparent 70%)',
+          borderRadius: '50%', pointerEvents: 'none',
+          filter: 'blur(100px)',
+          animation: 'blobFloat2 22s ease-in-out infinite',
+        }} />
+        {/* Orange #FF8315 — right */}
+        <div style={{
+          position: 'fixed', top: '5%', right: '-10%',
+          width: '800px', height: '800px',
+          background: 'radial-gradient(circle, rgba(255,131,21,0.38) 0%, rgba(255,131,21,0.08) 50%, transparent 70%)',
+          borderRadius: '50%', pointerEvents: 'none',
+          filter: 'blur(100px)',
+          animation: 'blobFloat4 24s ease-in-out infinite',
+        }} />
+        {/* Deep blue #3E3CFF — subtle accent */}
+        <div style={{
+          position: 'fixed', bottom: '10%', left: '20%',
+          width: '600px', height: '600px',
+          background: 'radial-gradient(circle, rgba(62,60,255,0.25) 0%, transparent 60%)',
+          borderRadius: '50%', pointerEvents: 'none',
+          filter: 'blur(100px)',
+          animation: 'blobFloat1 26s ease-in-out infinite',
+        }} />
+      </>}
 
       {/* Logo */}
       <div className="flex items-center justify-center mb-10" style={{ position: 'relative', zIndex: 1 }}>
@@ -261,7 +361,9 @@ export default function LoginPage() {
                       outline: 'none',
                     }}
                     onMouseEnter={e => {
-                      (e.currentTarget as HTMLElement).style.boxShadow = `0 0 0 2px ${role.ring}, 0 8px 32px rgba(0,0,0,0.3)`;
+                      (e.currentTarget as HTMLElement).style.boxShadow = isDark
+                        ? `0 0 0 2px ${role.ring}, 0 8px 32px rgba(0,0,0,0.3)`
+                        : `0 0 0 2px ${role.ring}, 0 8px 28px rgba(0,0,0,0.08)`;
                       (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)';
                     }}
                     onMouseLeave={e => {
@@ -519,7 +621,7 @@ export default function LoginPage() {
       </div>
 
       {/* Footer */}
-      <p style={{ position: 'relative', zIndex: 1, marginTop: '40px', fontSize: '12px', color: isDark ? '#334155' : '#94A3B8' }}>
+      <p style={{ position: 'relative', zIndex: 1, marginTop: '40px', fontSize: '12px', color: isDark ? '#94A3B8' : '#475569' }}>
         © 2026 HugoIT · Secure veterinary management platform
       </p>
     </div>

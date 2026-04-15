@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import {
   PawPrint, Calendar, AlertCircle, CheckCircle2,
@@ -7,7 +7,9 @@ import {
 import { Avatar, AvatarImage, AvatarFallback } from '../../components/ui/avatar';
 import { Badge } from '../../components/ui/badge';
 import { usePets } from '../../hooks/usePets';
+import { useAppointments } from '../../hooks/useAppointments';
 import { useOwnerClient } from '../../hooks/useOwnerClient';
+import { supabase } from '../../../lib/supabase';
 
 // ─── Brand ───────────────────────────────────────────────────
 const BRAND = 'var(--brand-green-text)';
@@ -24,6 +26,7 @@ const PET_EMOJI = { Dog: '🐕', Cat: '🐈', default: '🐾' };
 export default function OwnerPetsPage() {
   const navigate = useNavigate();
   const { pets: allPets } = usePets();
+  const { appointments: supaAppts } = useAppointments();
   const { client: ownerClient, clientId } = useOwnerClient();
 
   // Filter to only this owner's pets
@@ -32,11 +35,79 @@ export default function OwnerPetsPage() {
     [allPets, clientId],
   );
 
+  // ── Fetch pet health data from Supabase ──
+  const [petHealthData, setPetHealthData] = useState<Record<string, {
+    conditions: any[];
+    allergies: string[];
+    vaccinations: any[];
+    medications: any[];
+  }>>({});
+
+  useEffect(() => {
+    if (supaPets.length === 0) return;
+    const petIds = supaPets.map(p => p.id);
+    Promise.all([
+      supabase.from('pet_conditions').select('id, pet_id, name, severity, status, date_diagnosed').in('pet_id', petIds),
+      supabase.from('pet_allergies').select('pet_id, allergen').in('pet_id', petIds),
+      supabase.from('vaccinations').select('id, pet_id, vaccine_name, administered_date, next_due_date').in('pet_id', petIds).order('administered_date', { ascending: false }),
+      supabase.from('medications').select('id, pet_id, name, dosage, frequency, is_active').in('pet_id', petIds).eq('is_active', true),
+    ]).then(([condRes, allergyRes, vaxRes, medRes]) => {
+      const map: Record<string, { conditions: any[]; allergies: string[]; vaccinations: any[]; medications: any[] }> = {};
+      for (const pid of petIds) {
+        map[pid] = {
+          conditions: (condRes.data || []).filter((c: any) => c.pet_id === pid),
+          allergies: (allergyRes.data || []).filter((a: any) => a.pet_id === pid).map((a: any) => a.allergen),
+          vaccinations: (vaxRes.data || []).filter((v: any) => v.pet_id === pid),
+          medications: (medRes.data || []).filter((m: any) => m.pet_id === pid),
+        };
+      }
+      setPetHealthData(map);
+    });
+  }, [supaPets]);
+
   const PETS = useMemo(() =>
     supaPets.map((p) => {
       const age = p.date_of_birth
         ? `${Math.floor((Date.now() - new Date(p.date_of_birth).getTime()) / (365.25 * 24 * 60 * 60 * 1000))}y`
         : '—';
+      const health = petHealthData[p.id];
+      const dueSoonMs = 30 * 24 * 60 * 60 * 1000;
+      const now = Date.now();
+      const vaxList = health?.vaccinations || [];
+      const vaxUpToDate = vaxList.filter((v: any) => {
+        const nd = v.next_due_date ? new Date(v.next_due_date).getTime() : null;
+        return !nd || nd > now;
+      }).length;
+      const vaxDue = vaxList.filter((v: any) => {
+        const nd = v.next_due_date ? new Date(v.next_due_date).getTime() : null;
+        return nd && nd <= now + dueSoonMs;
+      }).length;
+      const activeConds = (health?.conditions || []).filter((c: any) => c.status === 'active');
+
+      // Next upcoming appointment
+      const upcoming = supaAppts
+        .filter(a => a.pet_id === p.id && new Date(a.scheduled_at) >= new Date())
+        .sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime())[0];
+      const nextAppt = upcoming
+        ? {
+            reason: upcoming.reason ?? (upcoming as any).services?.name ?? 'Checkup',
+            date: new Date(upcoming.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+            time: new Date(upcoming.scheduled_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
+          }
+        : { reason: 'No upcoming', date: '—', time: '—' };
+
+      // Last visit
+      const pastAppt = supaAppts
+        .filter(a => a.pet_id === p.id && new Date(a.scheduled_at) < new Date())
+        .sort((a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime())[0];
+
+      const vetName = p.assigned_vet
+        ? `Dr. ${p.assigned_vet.first_name} ${p.assigned_vet.last_name}`.trim()
+        : '—';
+      const vetInitials = p.assigned_vet
+        ? `${(p.assigned_vet.first_name || '')[0] || ''}${(p.assigned_vet.last_name || '')[0] || ''}`.toUpperCase()
+        : '—';
+
       return {
         id: p.id,
         name: p.name,
@@ -44,22 +115,23 @@ export default function OwnerPetsPage() {
         breed: p.breed ?? '—',
         age,
         weight: p.weight_kg ? `${p.weight_kg} kg` : '—',
-        sex: '—',
+        sex: p.sex ?? '—',
         image: p.photo_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.name)}&background=74C69D&color=fff&size=400`,
-        status: 'Healthy' as const,
-        vaccinesUpToDate: 0,
-        vaccinesDue: 0,
-        activeConditions: [] as string[],
-        allergies: [] as string[],
-        nextAppointment: { reason: 'No upcoming', date: '—', time: '—' },
-        vet: p.assigned_vet
-          ? `Dr. ${p.assigned_vet.first_name} ${p.assigned_vet.last_name}`.trim()
+        status: (activeConds.length > 0 ? 'Follow-up' : 'Healthy') as keyof typeof STATUS_CONFIG,
+        vaccinesUpToDate: vaxUpToDate,
+        vaccinesDue: vaxDue,
+        activeConditions: activeConds.map((c: any) => c.name as string),
+        allergies: health?.allergies || [],
+        nextAppointment: nextAppt,
+        vet: vetName,
+        vetInitials,
+        lastVisit: pastAppt
+          ? new Date(pastAppt.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
           : '—',
-        lastVisit: new Date(p.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
         microchip: p.microchip_no ?? '—',
       };
     }),
-    [supaPets],
+    [supaPets, supaAppts, petHealthData],
   );
 
   return (
@@ -195,23 +267,25 @@ export default function OwnerPetsPage() {
                   )}
 
                   {/* Allergies */}
-                  <div style={{ marginBottom: '14px' }}>
-                    <p style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '7px' }}>Allergies</p>
-                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                      {pet.allergies.map((a) => (
-                        <Badge
-                          key={a}
-                          style={{
-                            fontSize: '11px', fontWeight: 600,
-                            backgroundColor: '#d4183d10', color: '#d4183d',
-                            border: '1px solid #d4183d25',
-                          }}
-                        >
-                          {a}
-                        </Badge>
-                      ))}
+                  {pet.allergies.length > 0 && (
+                    <div style={{ marginBottom: '14px' }}>
+                      <p style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '7px' }}>Allergies</p>
+                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                        {pet.allergies.map((a) => (
+                          <Badge
+                            key={a}
+                            style={{
+                              fontSize: '11px', fontWeight: 600,
+                              backgroundColor: '#d4183d10', color: '#d4183d',
+                              border: '1px solid #d4183d25',
+                            }}
+                          >
+                            {a}
+                          </Badge>
+                        ))}
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* Next appointment */}
                   <div style={{
@@ -243,7 +317,7 @@ export default function OwnerPetsPage() {
                         background: 'linear-gradient(135deg, var(--brand-green-text), #52B788)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                       }}>
-                        <span style={{ fontSize: '9px', fontWeight: 700, color: '#fff' }}>DC</span>
+                        <span style={{ fontSize: '9px', fontWeight: 700, color: '#fff' }}>{pet.vetInitials}</span>
                       </div>
                       <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
                         Attending: <strong style={{ color: 'var(--text-primary)' }}>{pet.vet}</strong>

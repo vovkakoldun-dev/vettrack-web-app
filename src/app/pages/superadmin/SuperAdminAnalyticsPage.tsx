@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   TrendingUp, TrendingDown, DollarSign, Calendar, Users, PawPrint,
-  Download, ChevronDown, ChevronRight,
+  Download, ChevronDown, ChevronRight, Pencil, Check, X,
 } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import { getOrgContext } from '../../hooks/useOrgContext';
@@ -31,53 +31,9 @@ function spline(pts: { x: number; y: number }[]) {
   return d;
 }
 
-// ─── Data (defaults / fallbacks) ──────────────────────────────
-
-const MONTHS = ['Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'];
-
-const REVENUE_DATA = [28400, 31200, 29800, 33500, 35100, 36800, 38200, 40100, 42800, 45200, 47300, 48920];
-const APPT_DATA    = [312,   334,   318,   356,   371,   389,   402,   421,   445,   468,   491,   510];
-const PATIENTS_DATA= [1080,  1110,  1140,  1175,  1210,  1240,  1265,  1284,  1295,  1308,  1272,  1284];
-
-const DAILY_APPTS = [
-  { day: 'Mon 3/3',  val: 32 },
-  { day: 'Tue 3/4',  val: 28 },
-  { day: 'Wed 3/5',  val: 35 },
-  { day: 'Thu 3/6',  val: 41 },
-  { day: 'Fri 3/7',  val: 38 },
-  { day: 'Mon 3/10', val: 29 },
-  { day: 'Tue 3/11', val: 36 },
-  { day: 'Wed 3/12', val: 33 },
-  { day: 'Thu 3/13', val: 42 },
-  { day: 'Fri 3/14', val: 38 },
-  { day: 'Today',    val: 38 },
-];
-
-const SERVICES = [
-  { name: 'Annual Checkup',  count: 124, color: '#818CF8', pct: 82 },
-  { name: 'Vaccination',     count: 98,  color: '#38BDF8', pct: 65 },
-  { name: 'Dental Cleaning', count: 67,  color: '#4ADE80', pct: 44 },
-  { name: 'Follow-up',       count: 54,  color: '#F4A261', pct: 36 },
-  { name: 'Surgery',         count: 31,  color: '#F472B6', pct: 21 },
-  { name: 'Lab / X-Ray',     count: 28,  color: '#A78BFA', pct: 19 },
-  { name: 'Emergency',       count: 18,  color: '#EF4444', pct: 12 },
-];
-
-const STAFF_PERF = [
-  { name: 'Dr. Sarah Chen',  role: 'Veterinarian', appts: 148, revenue: '$18,420', rating: 4.9, initials: 'SC', color: '#818CF8' },
-  { name: 'Dr. Raj Patel',   role: 'Veterinarian', appts: 132, revenue: '$16,890', rating: 4.8, initials: 'RP', color: '#38BDF8' },
-  { name: 'Dr. Luis Garcia', role: 'Veterinarian', appts: 89,  revenue: '$11,340', rating: 4.7, initials: 'LG', color: '#F4A261' },
-  { name: 'Emma Thompson',   role: 'Front Desk',   appts: 231, revenue: '—',       rating: 4.8, initials: 'ET', color: '#4ADE80' },
-  { name: 'James Wilson',    role: 'Front Desk',   appts: 208, revenue: '—',       rating: 4.6, initials: 'JW', color: '#F472B6' },
-];
-
 const AVATAR_COLORS = ['#818CF8', '#38BDF8', '#F4A261', '#4ADE80', '#F472B6', '#A78BFA', '#EF4444'];
 
 // ─── Helper functions ─────────────────────────────────────────
-
-function getMonthLabel(date: Date): string {
-  return date.toLocaleDateString('en-US', { month: 'short' });
-}
 
 function getLast12Months(): { labels: string[]; starts: Date[] } {
   const now = new Date();
@@ -400,7 +356,9 @@ export default function SuperAdminAnalyticsPage() {
   const [adminPerf, setAdminPerf] = useState<{ name: string; initials: string; color: string; role: string; booked: number; tasksCompleted: number }[]>([]);
   const [thisMonthRevenue, setThisMonthRevenue] = useState(0);
   const [thisMonthAppts, setThisMonthAppts] = useState(0);
-  const [revenueTarget] = useState(60000);
+  const [revenueTarget, setRevenueTarget] = useState(60000);
+  const [editingTarget, setEditingTarget] = useState(false);
+  const [targetInput, setTargetInput] = useState('');
   const [revenueTrend, setRevenueTrend] = useState('—');
   const [revenueTrendUp, setRevenueTrendUp] = useState(true);
   const [apptsTrend, setApptsTrend] = useState('—');
@@ -424,6 +382,18 @@ export default function SuperAdminAnalyticsPage() {
         const startOfYear = new Date(now.getFullYear(), 0, 1).toISOString();
         const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
         const { labels, starts } = getLast12Months();
+
+        // ── Load revenue target from org settings ──
+        const { data: targetRow } = await supabase
+          .from('organization_settings')
+          .select('value')
+          .eq('organization_id', organizationId)
+          .eq('key', 'revenue_target')
+          .maybeSingle();
+        if (targetRow?.value) {
+          const parsed = Number(targetRow.value);
+          if (!isNaN(parsed) && parsed > 0) setRevenueTarget(parsed);
+        }
 
         // ── Fetch all data in parallel ──
         const [invoicesRes, appointmentsRes, petsRes, serviceApptsRes, staffRes] = await Promise.all([
@@ -463,6 +433,10 @@ export default function SuperAdminAnalyticsPage() {
         const ytdInvoices = invoices.filter(inv => new Date(inv.created_at) >= new Date(startOfYear));
         const ytdRevenue = ytdInvoices.reduce((sum, inv) => sum + (inv.total || 0), 0);
         setRevenueYtd(ytdRevenue);
+
+        // Compute YTD appointment count & avg per visit locally (needed for staff revenue calc)
+        const localYtdAppts = appointments.filter(a => new Date(a.scheduled_at) >= new Date(startOfYear)).length;
+        const localAvgPerVisit = localYtdAppts > 0 && ytdRevenue > 0 ? ytdRevenue / localYtdAppts : 0;
 
         // Monthly revenue for last 12 months
         const monthlyRev = starts.map((start, i) => {
@@ -575,15 +549,13 @@ export default function SuperAdminAnalyticsPage() {
         }
 
         // ── Avg per Visit ──
-        if (appointments.length > 0 && ytdRevenue > 0) {
-          const ytdAppts = appointments.filter(a => new Date(a.scheduled_at) >= new Date(startOfYear)).length;
-          const avg = ytdAppts > 0 ? ytdRevenue / ytdAppts : 0;
-          setAvgPerVisit(avg);
+        if (localAvgPerVisit > 0) {
+          setAvgPerVisit(localAvgPerVisit);
 
           // Compare to last year avg
           if (lastYearAppts > 0 && lastYearRevenue > 0) {
             const lastYearAvg = lastYearRevenue / lastYearAppts;
-            const pct = ((avg - lastYearAvg) / lastYearAvg) * 100;
+            const pct = ((localAvgPerVisit - lastYearAvg) / lastYearAvg) * 100;
             setAvgTrend(`${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`);
             setAvgTrendUp(pct >= 0);
           }
@@ -669,13 +641,12 @@ export default function SuperAdminAnalyticsPage() {
               const completed = monthAppts.filter(a => a.vet_id === s.id && a.status === 'Completed').length;
               const uniquePets = assignedPets.filter(p => p.assigned_vet_id === s.id).length;
               // Estimate revenue: completed appointments * avg per visit
-              const rev = completed > 0 && avgPerVisit > 0
-                ? `$${(completed * avgPerVisit).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+              const rev = completed > 0 && localAvgPerVisit > 0
+                ? `$${(completed * localAvgPerVisit).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
                 : completed > 0 ? `$${(thisMonthInvoices.reduce((sum, i) => sum + (i.total || 0), 0) / Math.max(monthAppts.filter(a => a.status === 'Completed').length, 1) * completed).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '$0';
               doctors.push({ name: fullName, initials, color: AVATAR_COLORS[idx % AVATAR_COLORS.length], role, revenue: rev, completed, pets: uniquePets });
             } else if (ADMIN_ROLES.includes(role)) {
-              // Count appointments booked (created) — approximate via all appointments
-              const booked = monthAppts.length; // simplified: total booked this month
+              const booked = s.total_appointments || 0;
               const tasksCompleted = tasks.filter(t => t.assigned_to_id === s.id && t.status === 'Completed').length;
               admins.push({ name: fullName, initials, color: AVATAR_COLORS[idx % AVATAR_COLORS.length], role, booked, tasksCompleted });
             }
@@ -686,7 +657,6 @@ export default function SuperAdminAnalyticsPage() {
         }
       } catch (err) {
         console.error('Failed to load analytics:', err);
-        // Keep fallback mock data on error
       } finally {
         setLoading(false);
       }
@@ -698,7 +668,25 @@ export default function SuperAdminAnalyticsPage() {
   const currentMonth = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   const chartSubtitle = monthLabels.length > 0
     ? `${monthLabels[0]} ${new Date().getFullYear() - 1} – ${monthLabels[monthLabels.length - 1]} ${new Date().getFullYear()}`
-    : 'Apr 2025 – Mar 2026';
+    : '';
+
+  const prevMonthAppts = monthlyAppts.length >= 2 ? monthlyAppts[monthlyAppts.length - 2] : 0;
+  const apptProgressPct = prevMonthAppts > 0 ? Math.min((thisMonthAppts / prevMonthAppts) * 100, 100) : 0;
+
+  // ─── Save revenue target ───
+  async function saveRevenueTarget() {
+    const val = Number(targetInput.replace(/[^0-9.]/g, ''));
+    if (isNaN(val) || val <= 0) { setEditingTarget(false); return; }
+    setRevenueTarget(val);
+    setEditingTarget(false);
+    const { organizationId } = await getOrgContext();
+    await supabase
+      .from('organization_settings')
+      .upsert(
+        { organization_id: organizationId, key: 'revenue_target', value: String(val), updated_at: new Date().toISOString() },
+        { onConflict: 'organization_id,key' }
+      );
+  }
 
   // ─── PDF Export ───
   function handleExportPdf() {
@@ -1029,7 +1017,7 @@ export default function SuperAdminAnalyticsPage() {
   <table>
     <tr>
       <th>Staff Member</th>
-      <th class="text-center">Appts Booked</th>
+      <th class="text-center">Total Appts</th>
       <th class="text-center">Tasks Done</th>
     </tr>
     ${adminPerf.length === 0 ? '<tr><td colspan="3" class="text-center" style="color:#9ca3af;padding:16px;">No admin staff found</td></tr>' : adminPerf.map(s => {
@@ -1240,7 +1228,38 @@ export default function SuperAdminAnalyticsPage() {
               <p style={{ fontSize: '11px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600, marginBottom: '2px' }}>
                 Target
               </p>
-              <p style={{ fontSize: '24px', fontWeight: 800, color: '#4ADE80' }}>${revenueTarget.toLocaleString()}</p>
+              {editingTarget ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontSize: '24px', fontWeight: 800, color: '#4ADE80' }}>$</span>
+                  <input
+                    autoFocus
+                    type="text"
+                    value={targetInput}
+                    onChange={e => setTargetInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') saveRevenueTarget(); if (e.key === 'Escape') setEditingTarget(false); }}
+                    style={{
+                      width: '120px', fontSize: '22px', fontWeight: 800, color: '#4ADE80',
+                      backgroundColor: 'var(--surface-elevated)', border: '1.5px solid #4ADE80',
+                      borderRadius: '8px', padding: '2px 8px', outline: 'none', textAlign: 'right',
+                    }}
+                  />
+                  <button onClick={saveRevenueTarget} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', color: '#4ADE80' }}>
+                    <Check style={{ width: '16px', height: '16px' }} />
+                  </button>
+                  <button onClick={() => setEditingTarget(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', color: 'var(--text-secondary)' }}>
+                    <X style={{ width: '16px', height: '16px' }} />
+                  </button>
+                </div>
+              ) : (
+                <p
+                  onClick={() => { setTargetInput(revenueTarget.toLocaleString()); setEditingTarget(true); }}
+                  style={{ fontSize: '24px', fontWeight: 800, color: '#4ADE80', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }}
+                  title="Click to edit target"
+                >
+                  ${revenueTarget.toLocaleString()}
+                  <Pencil style={{ width: '14px', height: '14px', opacity: 0.5 }} />
+                </p>
+              )}
             </div>
           </div>
 
@@ -1294,9 +1313,17 @@ export default function SuperAdminAnalyticsPage() {
               <p style={{ fontSize: '24px', fontWeight: 800, color: '#F4A261' }}>~{dailyAvg}</p>
             </div>
           </div>
-          <div style={{ height: '6px', borderRadius: '9999px', backgroundColor: 'var(--border-color)', overflow: 'hidden', marginBottom: '16px' }}>
-            <div style={{ height: '100%', borderRadius: '9999px', background: 'linear-gradient(90deg, #F4A261, #C2671A)', width: '85%' }} />
+          <div style={{ height: '6px', borderRadius: '9999px', backgroundColor: 'var(--border-color)', overflow: 'hidden', marginBottom: '4px' }}>
+            <div style={{
+              height: '100%', borderRadius: '9999px',
+              background: 'linear-gradient(90deg, #F4A261, #C2671A)',
+              width: `${apptProgressPct}%`,
+              transition: 'width 0.6s',
+            }} />
           </div>
+          <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
+            {prevMonthAppts > 0 ? `${apptProgressPct.toFixed(0)}% of last month (${prevMonthAppts})` : ''}
+          </p>
           <LineChart data={monthlyAppts} labels={monthLabels} color="#F4A261" label="Appointments" />
         </ChartCard>
       </div>
@@ -1307,7 +1334,7 @@ export default function SuperAdminAnalyticsPage() {
         {/* Daily appointments - bar chart */}
         <ChartCard
           title="Daily Appointment Volume"
-          subtitle="Last 11 working days"
+          subtitle="Last 14 days"
           action={
             <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Today highlighted in dark</span>
           }
@@ -1501,7 +1528,7 @@ export default function SuperAdminAnalyticsPage() {
           padding: '8px 22px',
           borderBottom: '1px solid var(--border-color)',
         }}>
-          {['Staff Member', 'Appts Booked', 'Tasks Done'].map(h => (
+          {['Staff Member', 'Total Appts', 'Tasks Done'].map(h => (
             <span key={h} style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
               {h}
             </span>

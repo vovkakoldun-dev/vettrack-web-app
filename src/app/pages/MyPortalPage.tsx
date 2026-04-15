@@ -57,7 +57,7 @@ interface Appointment {
   durationMinutes?: number;
 }
 
-// ─── Mock Data ───────────────────────────────────────────────
+// ─── Default Profile ────────────────────────────────────────
 
 const VET_PROFILE = {
   name: '',
@@ -69,76 +69,6 @@ const VET_PROFILE = {
   joinedDate: '',
   image: '',
 };
-
-const MY_APPOINTMENTS: Appointment[] = [
-  {
-    id: 1, date: '2026-03-11', timeStart: '9:00 AM', timeEnd: '9:30 AM',
-    petName: 'Max', petImage: 'https://images.unsplash.com/photo-1734966213753-1b361564bab4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxnb2xkZW4lMjByZXRyaWV2ZXIlMjBkb2clMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyNDMxMzB8MA&ixlib=rb-4.1.0&q=80&w=400',
-    ownerName: 'John Smith', service: 'Annual Checkup', clientArrived: true,
-  },
-  {
-    id: 3, date: '2026-03-11', timeStart: '10:30 AM', timeEnd: '11:00 AM',
-    petName: 'Cooper', petImage: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400',
-    ownerName: 'Michael Brown', service: 'Dental Cleaning',
-  },
-  {
-    id: 4, date: '2026-03-11', timeStart: '11:30 AM', timeEnd: '12:00 PM',
-    petName: 'Bella', petImage: 'https://images.unsplash.com/photo-1513360371669-4adf3dd7dff8?w=400',
-    ownerName: 'Sarah Williams', service: 'Follow-up',
-  },
-  {
-    id: 7, date: '2026-03-11', timeStart: '3:00 PM', timeEnd: '3:30 PM',
-    petName: 'Milo', petImage: 'https://images.unsplash.com/photo-1589883661923-6476cb0ae9f2?w=400',
-    ownerName: 'Jessica Taylor', service: 'Checkup',
-  },
-  {
-    id: 8, date: '2026-03-11', timeStart: '3:30 PM', timeEnd: '4:00 PM',
-    petName: 'Daisy', petImage: 'https://images.unsplash.com/photo-1518717758536-85ae29035b6d?w=400',
-    ownerName: 'Robert Anderson', service: 'Surgery',
-  },
-  {
-    id: 9, date: '2026-03-12', timeStart: '9:00 AM', timeEnd: '9:30 AM',
-    petName: 'Oliver', petImage: 'https://images.unsplash.com/photo-1526336024174-e58f5cdd8e13?w=400',
-    ownerName: 'Lisa Martinez', service: 'Dental Cleaning',
-  },
-  {
-    id: 10, date: '2026-03-12', timeStart: '10:00 AM', timeEnd: '10:30 AM',
-    petName: 'Buddy', petImage: 'https://images.unsplash.com/photo-1558788353-f76d92427f16?w=400',
-    ownerName: 'Kevin Lee', service: 'Follow-up',
-  },
-  {
-    id: 11, date: '2026-03-13', timeStart: '11:00 AM', timeEnd: '11:30 AM',
-    petName: 'Coco', petImage: 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?w=400',
-    ownerName: 'Amanda White', service: 'Vaccination',
-  },
-];
-
-const INITIAL_BLOCKS: TimeBlock[] = [
-  { id: 1, type: 'Work Hours', date: '2026-03-11', timeStart: '8:00 AM', timeEnd: '8:30 AM', notes: 'Morning prep & chart review', status: 'Confirmed' },
-  { id: 2, type: 'Lunch Break', date: '2026-03-11', timeStart: '12:00 PM', timeEnd: '1:00 PM', notes: '', status: 'Confirmed' },
-  { id: 3, type: 'Meeting', date: '2026-03-11', timeStart: '2:00 PM', timeEnd: '2:30 PM', notes: 'Team standup — case reviews', status: 'Confirmed' },
-  { id: 4, type: 'Lunch Break', date: '2026-03-12', timeStart: '12:00 PM', timeEnd: '1:00 PM', notes: '', status: 'Confirmed' },
-  { id: 5, type: 'PTO', date: '2026-03-17', timeStart: '8:00 AM', timeEnd: '5:00 PM', notes: 'Family day — full day off', status: 'Approved' },
-  { id: 6, type: 'PTO', date: '2026-03-21', timeStart: '8:00 AM', timeEnd: '5:00 PM', notes: 'Personal appointment', status: 'Pending' },
-  { id: 7, type: 'Sick Day', date: '2026-03-05', timeStart: '8:00 AM', timeEnd: '5:00 PM', notes: 'Flu — stayed home', status: 'Approved' },
-];
-
-const MY_PATIENTS = [
-  { id: 1, petImage: 'https://images.unsplash.com/photo-1734966213753-1b361564bab4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxnb2xkZW4lMjByZXRyaWV2ZXIlMjBkb2clMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyNDMxMzB8MA&ixlib=rb-4.1.0&q=80&w=400', petName: 'Max', ownerName: 'John Smith', species: 'Dog', breed: 'Golden Retriever', lastVisit: 'Mar 11, 2026', status: 'Healthy' as const },
-  { id: 3, petImage: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400', petName: 'Cooper', ownerName: 'Michael Brown', species: 'Dog', breed: 'Beagle', lastVisit: 'Mar 11, 2026', status: 'Follow-up' as const },
-  { id: 4, petImage: 'https://images.unsplash.com/photo-1513360371669-4adf3dd7dff8?w=400', petName: 'Bella', ownerName: 'Sarah Williams', species: 'Cat', breed: 'Siamese', lastVisit: 'Mar 11, 2026', status: 'Healthy' as const },
-  { id: 7, petImage: 'https://images.unsplash.com/photo-1589883661923-6476cb0ae9f2?w=400', petName: 'Milo', ownerName: 'Jessica Taylor', species: 'Cat', breed: 'Maine Coon', lastVisit: 'Mar 10, 2026', status: 'Healthy' as const },
-  { id: 8, petImage: 'https://images.unsplash.com/photo-1518717758536-85ae29035b6d?w=400', petName: 'Daisy', ownerName: 'Robert Anderson', species: 'Dog', breed: 'Labrador', lastVisit: 'Mar 11, 2026', status: 'Critical' as const },
-  { id: 11, petImage: 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?w=400', petName: 'Coco', ownerName: 'Amanda White', species: 'Dog', breed: 'Poodle', lastVisit: 'Mar 9, 2026', status: 'Healthy' as const },
-];
-
-const RECENT_ACTIVITY = [
-  { description: 'Completed annual checkup for Max', time: '2 hours ago', icon: Stethoscope, color: 'var(--brand-green-text)' },
-  { description: 'Administered FVRCP booster to Milo', time: '3 hours ago', icon: Syringe, color: '#3B82F6' },
-  { description: 'Performed dental cleaning on Cooper', time: '5 hours ago', icon: Scissors, color: '#EC4899' },
-  { description: 'Prescribed pain medication for Daisy', time: 'Yesterday', icon: Pill, color: '#F4A261' },
-  { description: 'Post-surgery follow-up with Bella', time: 'Yesterday', icon: Stethoscope, color: 'var(--brand-green-text)' },
-];
 
 // ─── Style Maps ──────────────────────────────────────────────
 
@@ -1649,7 +1579,7 @@ export default function MyPortalPage() {
           <div className="bg-[var(--surface-white)] border border-[var(--border-color)] mt-4" style={{ borderRadius: '12px' }}>
             <div className="p-5 border-b border-[var(--border-color)] flex items-center justify-between">
               <h3 className="text-[var(--text-primary)]" style={{ fontSize: '18px', fontWeight: 600 }}>My Patients</h3>
-              <Link to="/clients" className="text-[var(--text-secondary)] flex items-center gap-1 hover:opacity-75 transition-opacity" style={{ fontSize: '12px', fontWeight: 600 }}>
+              <Link to="/my-portal/patients" className="text-[var(--text-secondary)] flex items-center gap-1 hover:opacity-75 transition-opacity" style={{ fontSize: '12px', fontWeight: 600 }}>
                 View all <ChevronRight className="w-[13px] h-[13px]" />
               </Link>
             </div>
