@@ -174,9 +174,34 @@ async function fetchNotificationsFromSupabase(db: any, isAdmin: boolean, userId?
     ] : []),
   ]);
   const rawNotifEvents = userId ? (rest[0] as any)?.data : null;
+
+  // Load user's notification preferences to filter by enabled types
+  let disabledTypes = new Set<string>();
+  if (userId) {
+    const { data: prefs } = await db
+      .from('notification_preferences')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
+    if (prefs) {
+      // Column names match event types — if column is false, disable that type
+      const prefCols: Record<string, string> = {
+        appt_assign: 'appt_assign', patient_arrived: 'patient_arrived',
+        vet_assign: 'vet_assign', vet_unassign: 'vet_unassign',
+        task_reminder: 'task_reminder', lab_ready: 'lab_ready',
+        request_resolved: 'request_resolved', pto_coverage_needed: 'pto_coverage_needed',
+      };
+      for (const [eventType, col] of Object.entries(prefCols)) {
+        if (prefs[col] === false) disabledTypes.add(eventType);
+      }
+    }
+  }
+
   // Filter notification events — admins see all org events, vets only see their own
   const notifEvents = rawNotifEvents
     ? (rawNotifEvents as any[]).filter((evt: any) => {
+        // Respect per-user notification preferences
+        if (disabledTypes.has(evt.type)) return false;
         if (isAdmin) return true; // Admins see all notifications for the org
         const d = evt.data as any;
         // Skip admin-only events for non-admin users

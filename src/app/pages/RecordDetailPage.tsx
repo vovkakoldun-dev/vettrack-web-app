@@ -1,8 +1,8 @@
-import { useParams, Link, useLocation } from 'react-router';
+import { useParams, Link, useLocation, useNavigate } from 'react-router';
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import {
-  ArrowLeft, Download, Share2, Printer, Copy, Mail, Check,
+  ArrowLeft, Download, Share2, Printer, Copy, Mail, Check, Trash2,
   Heart, Thermometer, Activity, Wind, Gauge, Scale,
   Stethoscope, Pill, FlaskConical, CalendarCheck, FileText,
   AlertTriangle, ChevronRight, Clock, MapPin, Phone, User,
@@ -601,8 +601,11 @@ export default function RecordDetailPage() {
     })();
   }, [id, mockRecord]);
 
+  const navigate = useNavigate();
   const record = mockRecord || realRecord || DEFAULT_RECORD;
   const [linkCopied, setLinkCopied] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   if (loading) {
     return (
@@ -630,6 +633,24 @@ export default function RecordDetailPage() {
     const subject = encodeURIComponent(`Medical Record — ${record.patient.name}`);
     const body = encodeURIComponent(`View the medical record for ${record.patient.name}: ${url}`);
     window.open(`mailto:${record.owner.email}?subject=${subject}&body=${body}`);
+  };
+
+  const handleDelete = async () => {
+    if (!id) return;
+    setDeleting(true);
+    // For real (UUID) records, delete from Supabase
+    if (id.includes('-')) {
+      // Delete related records first, then the main record
+      await Promise.all([
+        supabase.from('record_vitals').delete().eq('record_id', id),
+        supabase.from('record_diagnoses').delete().eq('record_id', id),
+        supabase.from('record_treatments').delete().eq('record_id', id),
+        supabase.from('medications').delete().eq('record_id', id),
+        supabase.from('lab_results').delete().eq('record_id', id),
+      ]);
+      await supabase.from('medical_records').delete().eq('id', id);
+    }
+    navigate(basePath, { replace: true });
   };
 
   return (
@@ -857,6 +878,49 @@ export default function RecordDetailPage() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          <div style={{ position: 'relative' }}>
+            <Button
+              variant="outline"
+              className="gap-2"
+              style={{ borderColor: '#EF4444', color: '#EF4444' }}
+              onClick={() => setDeleteConfirmOpen(true)}
+            >
+              <Trash2 className="w-4 h-4" />
+              Delete
+            </Button>
+            {deleteConfirmOpen && (
+              <>
+                <div style={{ position: 'fixed', inset: 0, zIndex: 40, backgroundColor: 'rgba(0,0,0,0.4)' }} onClick={() => setDeleteConfirmOpen(false)} />
+                <div style={{
+                  position: 'absolute', top: 'calc(100% + 8px)', right: 0, zIndex: 50,
+                  width: 320, padding: 20, borderRadius: 12,
+                  backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)',
+                  boxShadow: '0 12px 40px rgba(0,0,0,0.2)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                    <div style={{ width: 36, height: 36, borderRadius: 8, backgroundColor: 'rgba(239,68,68,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Trash2 style={{ width: 18, height: 18, color: '#EF4444' }} />
+                    </div>
+                    <h4 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>Delete Record?</h4>
+                  </div>
+                  <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 16 }}>
+                    This will permanently delete record <strong style={{ color: 'var(--text-primary)' }}>{record.id}</strong> and all associated data (vitals, diagnoses, treatments, medications, lab results). This action cannot be undone.
+                  </p>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                      onClick={() => setDeleteConfirmOpen(false)}
+                      style={{ flex: 1, padding: '8px 0', borderRadius: 8, border: '1px solid var(--border-color)', backgroundColor: 'transparent', color: 'var(--text-secondary)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+                    >Cancel</button>
+                    <button
+                      onClick={handleDelete}
+                      disabled={deleting}
+                      style={{ flex: 1, padding: '8px 0', borderRadius: 8, border: 'none', backgroundColor: '#EF4444', color: '#fff', fontSize: 13, fontWeight: 700, cursor: deleting ? 'wait' : 'pointer', opacity: deleting ? 0.7 : 1 }}
+                    >{deleting ? 'Deleting…' : 'Delete Record'}</button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 

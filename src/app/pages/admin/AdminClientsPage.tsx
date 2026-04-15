@@ -97,6 +97,7 @@ export default function AdminClientsPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [copiedEmail, setCopiedEmail] = useState<string | null>(null);
   const [emailMenuOpen, setEmailMenuOpen] = useState<string | null>(null);
+  const [emailMenuPos, setEmailMenuPos] = useState<{ top: number; left: number } | null>(null);
 
   // Bulk select
   const [selectMode, setSelectMode] = useState(false);
@@ -1142,25 +1143,30 @@ export default function AdminClientsPage() {
                                 cursor: 'pointer',
                                 padding: 0,
                               }}
-                              onClick={() =>
-                                setEmailMenuOpen(
-                                  emailMenuOpen === client.ownerEmail ? null : client.ownerEmail,
-                                )
-                              }
+                              onClick={(e) => {
+                                if (emailMenuOpen === client.ownerEmail) {
+                                  setEmailMenuOpen(null);
+                                  setEmailMenuPos(null);
+                                } else {
+                                  const rect = (e.target as HTMLElement).getBoundingClientRect();
+                                  setEmailMenuPos({ top: rect.bottom + 4, left: rect.left });
+                                  setEmailMenuOpen(client.ownerEmail);
+                                }
+                              }}
                             >
                               {copiedEmail === client.ownerEmail
                                 ? '✓ Copied!'
                                 : client.ownerEmail || '—'}
                             </button>
-                            {emailMenuOpen === client.ownerEmail && client.ownerEmail && (
+                            {emailMenuOpen === client.ownerEmail && client.ownerEmail && emailMenuPos && (
                               <>
                                 <div
                                   className="fixed inset-0 z-40"
-                                  onClick={() => setEmailMenuOpen(null)}
+                                  onClick={() => { setEmailMenuOpen(null); setEmailMenuPos(null); }}
                                 />
                                 <div
-                                  className="absolute left-0 top-6 z-50 min-w-[140px] rounded-md border bg-popover p-1 shadow-md"
-                                  style={{ color: 'var(--text-primary)' }}
+                                  className="fixed z-50 min-w-[140px] rounded-md border bg-popover p-1 shadow-md"
+                                  style={{ color: 'var(--text-primary)', top: emailMenuPos.top, left: emailMenuPos.left }}
                                 >
                                   <div
                                     className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-[var(--surface-elevated)]"
@@ -1172,6 +1178,7 @@ export default function AdminClientsPage() {
                                     className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-[var(--surface-elevated)]"
                                     onClick={() => {
                                       setEmailMenuOpen(null);
+                                      setEmailMenuPos(null);
                                       navigate('/admin/communications', {
                                         state: {
                                           composeTo: client.ownerEmail,

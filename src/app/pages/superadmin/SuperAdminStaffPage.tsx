@@ -246,7 +246,7 @@ function StaffDetailDrawer({
         onClick={onClose}
       />
       {/* Drawer */}
-      <div style={{
+      <div role="dialog" aria-modal="true" style={{
         position: 'fixed', top: 0, right: 0, bottom: 0, zIndex: 50,
         width: 460, backgroundColor: 'var(--surface-white)',
         borderLeft: '1px solid var(--border-color)',
@@ -534,7 +534,7 @@ function StaffFormDrawer({
   return (
     <>
       <div style={{ position: 'fixed', inset: 0, zIndex: 40, backgroundColor: 'rgba(0,0,0,0.35)' }} onClick={onClose} />
-      <div style={{
+      <div role="dialog" aria-modal="true" style={{
         position: 'fixed', top: 0, right: 0, bottom: 0, zIndex: 50,
         width: 500, backgroundColor: 'var(--surface-white)',
         borderLeft: '1px solid var(--border-color)',

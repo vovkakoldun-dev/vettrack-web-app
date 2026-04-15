@@ -31,23 +31,23 @@ const NAV_SECTIONS: NavSection[] = [
     label: 'Overview',
     items: [
       { name: 'Dashboard',      icon: Home,            path: '/admin' },
-      { name: 'My Portal',      icon: UserCircle,     path: '/admin/my-portal' },
-      { name: 'Shifts',         icon: Clock,          path: '/admin/shifts' },
-      { name: 'Team Chat',      icon: MessageCircle,  path: '/admin/chat' },
-      { name: 'Communications', icon: MessageSquare,  path: '/admin/communications' },
-      { name: 'Notifications',  icon: Bell,           path: '/admin/notifications' },
+      { name: 'My Portal',      icon: UserCircle,      path: '/admin/my-portal' },
+      { name: 'HugoChat',       icon: MessageCircle,   path: '/admin/chat' },
+      { name: 'Communications', icon: MessageSquare,    path: '/admin/communications' },
+      { name: 'Tasks',          icon: CheckSquare,      path: '/admin/tasks' },
+      { name: 'Shifts',         icon: Clock,            path: '/admin/shifts' },
+      { name: 'Notifications',  icon: Bell,             path: '/admin/notifications' },
     ],
   },
   {
     id: 'management',
     label: 'Management',
     items: [
-      { name: 'Bookings', icon: Calendar,    path: '/admin/bookings' },
-      { name: 'Payments', icon: CreditCard,  path: '/admin/payments' },
-      { name: 'Clients',  icon: Users,        path: '/admin/clients' },
+      { name: 'Bookings', icon: Calendar,      path: '/admin/bookings' },
+      { name: 'Payments', icon: CreditCard,     path: '/admin/payments' },
+      { name: 'Clients',  icon: Users,          path: '/admin/clients' },
       { name: 'Records',  icon: FileText,       path: '/admin/records' },
       { name: 'Lab',      icon: FlaskConical,   path: '/admin/lab' },
-      { name: 'Tasks',    icon: CheckSquare,    path: '/admin/tasks' },
     ],
   },
 ];
@@ -354,24 +354,65 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
     return () => window.removeEventListener('adminEmailRead', handler);
   }, []);
 
-  // Update sections when chatUnread, emailUnread, or notifUnread changes
+  // ── Task pending badge from Supabase ──────────
+  const [taskPending, setTaskPending] = useState(0);
+
   useEffect(() => {
-    setSections(NAV_SECTIONS.map(s => s.id === 'overview' ? {
-      ...s,
-      items: s.items.map(item => {
-        if (item.path === '/admin/chat') return { ...item, badge: chatUnread || undefined };
-        if (item.path === '/admin/communications') {
-          const showBadge = pathname !== '/admin/communications' ? emailUnread : undefined;
-          return { ...item, badge: showBadge || undefined };
-        }
-        if (item.path === '/admin/notifications') {
-          const showBadge = pathname !== '/admin/notifications' ? notifUnread : undefined;
-          return { ...item, badge: showBadge || undefined };
-        }
-        return item;
-      }),
-    } : s));
-  }, [chatUnread, emailUnread, notifUnread, pathname]);
+    if (!user) return;
+    let mounted = true;
+    let interval: ReturnType<typeof setInterval>;
+
+    async function checkTaskPending() {
+      if (!mounted) return;
+      try {
+        const { organizationId } = await getOrgContext();
+        const { count } = await supabase
+          .from('tasks')
+          .select('id', { count: 'exact', head: true })
+          .eq('organization_id', organizationId)
+          .in('status', ['Pending', 'In Progress']);
+        if (mounted) setTaskPending(count || 0);
+      } catch { /* silent */ }
+    }
+
+    checkTaskPending();
+    interval = setInterval(checkTaskPending, 30000);
+
+    return () => { mounted = false; if (interval) clearInterval(interval); };
+  }, [user]);
+
+  // Listen for task status changes from AdminTasksPage
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const count = (e as CustomEvent).detail?.count;
+      if (typeof count === 'number') setTaskPending(count);
+    };
+    window.addEventListener('taskCountChanged', handler);
+    return () => window.removeEventListener('taskCountChanged', handler);
+  }, []);
+
+  // Update sections when chatUnread, emailUnread, notifUnread, or taskPending changes
+  useEffect(() => {
+    setSections(NAV_SECTIONS.map(s => {
+      if (s.id === 'overview') return {
+        ...s,
+        items: s.items.map(item => {
+          if (item.path === '/admin/chat') return { ...item, badge: chatUnread || undefined };
+          if (item.path === '/admin/communications') {
+            const showBadge = pathname !== '/admin/communications' ? emailUnread : undefined;
+            return { ...item, badge: showBadge || undefined };
+          }
+          if (item.path === '/admin/tasks') return { ...item, badge: taskPending || undefined };
+          if (item.path === '/admin/notifications') {
+            const showBadge = pathname !== '/admin/notifications' ? notifUnread : undefined;
+            return { ...item, badge: showBadge || undefined };
+          }
+          return item;
+        }),
+      };
+      return s;
+    }));
+  }, [chatUnread, emailUnread, notifUnread, taskPending, pathname]);
 
   const profileRef = useRef<HTMLDivElement>(null);
   useEffect(() => {

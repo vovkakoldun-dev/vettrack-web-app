@@ -49,11 +49,16 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'security',      label: 'Security',       icon: Shield },
 ];
 
-// Map frontend notification keys to DB column names
+// Map frontend notification keys to DB column names — matches real notification_events types
 const NOTIF_DB_MAP: Record<string, string> = {
-  apptNew: 'appt_new', apptCancel: 'appt_cancel', apptReminder: 'appt_reminder', apptReschedule: 'appt_reschedule',
-  labReady: 'lab_ready', labCritical: 'lab_critical',
-  invoiceGen: 'invoice_gen', paymentRecv: 'payment_recv', planExpiry: 'plan_expiry',
+  apptAssign: 'appt_assign',
+  patientArrived: 'patient_arrived',
+  vetAssign: 'vet_assign',
+  vetUnassign: 'vet_unassign',
+  taskReminder: 'task_reminder',
+  labReady: 'lab_ready',
+  requestResolved: 'request_resolved',
+  ptoCoverage: 'pto_coverage_needed',
   systemUpdates: 'system_updates',
 };
 
@@ -783,18 +788,16 @@ export default function AdminSettingsPage() {
 
   // ── Notification state ─────────────────────────────────────────────────────
   const [notifs, setNotifs] = useState({
-    apptNew:        true,
-    apptCancel:     true,
-    apptReminder:   true,
-    apptReschedule: true,
-    labReady:       true,
-    labCritical:    true,
-    invoiceGen:     false,
-    paymentRecv:    true,
-    planExpiry:     true,
-    systemUpdates:  true,
+    apptAssign:      true,
+    patientArrived:  true,
+    vetAssign:       true,
+    vetUnassign:     true,
+    taskReminder:    true,
+    labReady:        true,
+    requestResolved: true,
+    ptoCoverage:     true,
+    systemUpdates:   true,
   });
-
 
   const toggleNotif = (key: keyof typeof notifs) => {
     setNotifs((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -810,12 +813,11 @@ export default function AdminSettingsPage() {
         .eq('user_id', user.id)
         .single();
       if (data) {
-        setNotifs({
-          apptNew: data.appt_new, apptCancel: data.appt_cancel, apptReminder: data.appt_reminder, apptReschedule: data.appt_reschedule,
-          labReady: data.lab_ready, labCritical: data.lab_critical,
-          invoiceGen: data.invoice_gen, paymentRecv: data.payment_recv, planExpiry: data.plan_expiry,
-          systemUpdates: data.system_updates,
-        });
+        const loaded: Record<string, boolean> = {};
+        for (const [key, col] of Object.entries(NOTIF_DB_MAP)) {
+          loaded[key] = data[col] !== false; // default true if column missing
+        }
+        setNotifs(prev => ({ ...prev, ...loaded }));
       }
     })();
   }, [user]);
@@ -1105,25 +1107,34 @@ export default function AdminSettingsPage() {
                   {
                     title: 'Appointments',
                     rows: [
-                      { key: 'apptNew'       as const, label: 'New booking',      desc: 'When a client books a new appointment' },
-                      { key: 'apptCancel'    as const, label: 'Cancellation',      desc: 'When a client cancels their appointment' },
-                      { key: 'apptReminder'  as const, label: 'Reminder (1 hr)',   desc: 'Reminder 1 hour before each appointment' },
-                      { key: 'apptReschedule'as const, label: 'Rescheduled',       desc: 'When an appointment time is changed' },
+                      { key: 'apptAssign'     as const, label: 'New appointment',   desc: 'When a new appointment is scheduled' },
+                      { key: 'patientArrived'  as const, label: 'Patient check-in',  desc: 'When a patient arrives and checks in at the clinic' },
+                    ],
+                  },
+                  {
+                    title: 'Patients',
+                    rows: [
+                      { key: 'vetAssign'   as const, label: 'Patient assigned',   desc: 'When a patient is assigned to you' },
+                      { key: 'vetUnassign' as const, label: 'Patient unassigned', desc: 'When a patient is removed from your care' },
+                    ],
+                  },
+                  {
+                    title: 'Tasks',
+                    rows: [
+                      { key: 'taskReminder' as const, label: 'Task reminders', desc: 'Reminders for assigned and pending tasks' },
                     ],
                   },
                   {
                     title: 'Lab Results',
                     rows: [
-                      { key: 'labReady'    as const, label: 'Lab result ready',    desc: 'When lab results are available for review' },
-                      { key: 'labCritical' as const, label: 'Critical value alert', desc: 'Immediate alert for out-of-range critical values' },
+                      { key: 'labReady' as const, label: 'Results ready', desc: 'When lab results are available for review' },
                     ],
                   },
                   {
-                    title: 'Billing',
+                    title: 'Staff & Requests',
                     rows: [
-                      { key: 'invoiceGen'  as const, label: 'Invoice generated',   desc: 'When an invoice is created for a visit' },
-                      { key: 'paymentRecv' as const, label: 'Payment received',    desc: 'When a client completes a payment' },
-                      { key: 'planExpiry'  as const, label: 'Plan expiring soon',  desc: '30 days before subscription renewal' },
+                      { key: 'requestResolved' as const, label: 'Request updates',  desc: 'When PTO or shift swap requests are approved or declined' },
+                      { key: 'ptoCoverage'     as const, label: 'Coverage needed',   desc: 'When appointments need reassignment due to time off' },
                     ],
                   },
                   {

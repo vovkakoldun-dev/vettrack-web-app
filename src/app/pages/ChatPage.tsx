@@ -1192,6 +1192,9 @@ export default function ChatPage() {
         .hugo-glow-border > div {
           border-radius: 14px 14px 14px 2px;
         }
+        .theme-glass .hugo-glow-border > div {
+          background-color: #1E2946 !important;
+        }
       `}</style>
 
       {/* ── Left panel ──────────────────────────────────────────────────────── */}

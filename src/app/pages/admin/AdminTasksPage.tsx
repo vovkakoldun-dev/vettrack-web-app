@@ -747,9 +747,15 @@ export default function AdminTasksPage() {
 
   const handleStatusChange = async (id: string, status: TaskStatus) => {
     const isCompleting = status === 'Completed';
+    const isStarting = status === 'In Progress';
     const completedAt = isCompleting ? new Date().toISOString() : null;
     const completedById = isCompleting ? user?.id || null : null;
     const completedByName = isCompleting ? currentUserName : undefined;
+
+    // When starting a task, auto-assign to the current user if unassigned
+    const task = tasks.find(t => t.id === id);
+    const shouldAutoAssign = isStarting && task && !task.assignedToId;
+
     // Update locally immediately
     setTasks(prev => prev.map(t =>
       t.id === id
@@ -759,16 +765,21 @@ export default function AdminTasksPage() {
             completedAt: completedAt ?? undefined,
             completedBy: completedByName,
             completedById: completedById ?? undefined,
+            ...(shouldAutoAssign ? { assignedToId: currentUserId, assignedTo: currentUserName } : {}),
           }
         : t
     ));
     // Persist to Supabase
     const { organizationId } = await getOrgContext();
-    await db.from('tasks').update({
+    const updatePayload: Record<string, unknown> = {
       status,
       completed_at: completedAt,
       completed_by_id: completedById,
-    }).eq('id', id).eq('organization_id', organizationId);
+    };
+    if (shouldAutoAssign) {
+      updatePayload.assigned_to_id = currentUserId;
+    }
+    await db.from('tasks').update(updatePayload).eq('id', id).eq('organization_id', organizationId);
   };
 
   const handleDelete = async (id: string) => {
