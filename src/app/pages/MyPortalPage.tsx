@@ -12,6 +12,7 @@ import {
   Syringe, Stethoscope, Pill, Scissors,
   UtensilsCrossed, Palmtree, ThermometerSun, Briefcase, UsersRound,
   AlertCircle, CheckCircle2, Send, ArrowUpRight, Camera, Pencil, Trash2, X,
+  DoorOpen, Loader2, Microscope, Bed, Bath, Coffee, Sparkles, Building2,
 } from 'lucide-react';
 import { Avatar, AvatarImage, AvatarFallback } from '../components/ui/avatar';
 import { AddClientDialog } from '../components/AddClientDialog';
@@ -55,6 +56,31 @@ interface Appointment {
   service: string;
   clientArrived?: boolean;
   durationMinutes?: number;
+  room?: string;
+  roomId?: string;
+}
+
+// ─── Floor-plan Room Types ────────────────────────────────────
+type RoomTypeKey =
+  | 'exam' | 'surgery' | 'reception' | 'lab' | 'kennel'
+  | 'office' | 'restroom' | 'lobby' | 'storage' | 'other';
+
+const ROOM_TYPES: Record<RoomTypeKey, { label: string; icon: React.ElementType; color: string; bg: string }> = {
+  exam:      { label: 'Exam Room',  icon: Stethoscope, color: 'var(--brand-green-text)', bg: 'color-mix(in srgb, var(--brand-green-text) 18%, transparent)' },
+  surgery:   { label: 'Surgery',    icon: Scissors,    color: '#EC4899',                  bg: 'color-mix(in srgb, #EC4899 18%, transparent)' },
+  reception: { label: 'Reception',  icon: DoorOpen,    color: '#F4A261',                  bg: 'color-mix(in srgb, #F4A261 18%, transparent)' },
+  lab:       { label: 'Lab',        icon: Microscope,  color: '#8B5CF6',                  bg: 'color-mix(in srgb, #8B5CF6 18%, transparent)' },
+  kennel:    { label: 'Kennel',     icon: Bed,         color: '#06B6D4',                  bg: 'color-mix(in srgb, #06B6D4 18%, transparent)' },
+  office:    { label: 'Office',     icon: Briefcase,   color: '#3B82F6',                  bg: 'color-mix(in srgb, #3B82F6 18%, transparent)' },
+  restroom:  { label: 'Restroom',   icon: Bath,        color: '#6B7280',                  bg: 'color-mix(in srgb, #6B7280 22%, transparent)' },
+  lobby:     { label: 'Lobby',      icon: Coffee,      color: '#F59E0B',                  bg: 'color-mix(in srgb, #F59E0B 18%, transparent)' },
+  storage:   { label: 'Storage',    icon: Sparkles,    color: '#94A3B8',                  bg: 'color-mix(in srgb, #94A3B8 22%, transparent)' },
+  other:     { label: 'Other',      icon: Building2,   color: '#64748B',                  bg: 'color-mix(in srgb, #64748B 22%, transparent)' },
+};
+
+interface ClinicRoom {
+  id: string; clinic_id: string; name: string; type: RoomTypeKey;
+  pos_x: number; pos_y: number; width: number; height: number; color: string | null;
 }
 
 // ─── Default Profile ────────────────────────────────────────
@@ -559,6 +585,10 @@ export default function MyPortalPage() {
 
   // ── Real appointments from Supabase ──
   const [realAppointments, setRealAppointments] = useState<Appointment[]>([]);
+  const [roomInfoOpen, setRoomInfoOpen] = useState(false);
+  const [roomInfoAppt, setRoomInfoAppt] = useState<Appointment | null>(null);
+  const [clinicRooms, setClinicRooms] = useState<ClinicRoom[]>([]);
+  const [roomsLoading, setRoomsLoading] = useState(false);
 
   // Real clients from Supabase
   const [realPatients, setRealPatients] = useState<any[]>([]);
@@ -640,7 +670,7 @@ export default function MyPortalPage() {
         // Fetch appointments for this vet
         const { data: apptData } = await db
           .from('appointments')
-          .select('id, scheduled_at, duration_minutes, status, reason, notes, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name, phone)')
+          .select('id, scheduled_at, duration_minutes, status, reason, notes, room, room_id, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name, phone)')
           .eq('vet_id', staffData.id)
           .order('scheduled_at', { ascending: true });
         if (apptData) {
@@ -670,6 +700,8 @@ export default function MyPortalPage() {
               service: a.reason ?? '—',
               clientArrived: a.status === 'Checked In' || a.status === 'In Progress',
               durationMinutes: a.duration_minutes ?? 30,
+              room: a.room ?? '',
+              roomId: a.room_id ?? '',
             };
           });
           setRealAppointments(mapped);
@@ -774,6 +806,52 @@ export default function MyPortalPage() {
       setDataLoaded(true);
     })();
   }, [user]);
+
+  // ── Load clinic rooms for floor plan ──
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        setRoomsLoading(true);
+        const { organizationId, clinicId } = await getOrgContext();
+        let q = db.from('clinic_rooms').select('id, clinic_id, name, type, pos_x, pos_y, width, height, color').eq('organization_id', organizationId);
+        if (clinicId) q = q.eq('clinic_id', clinicId);
+        const { data } = await q.order('sort_order', { ascending: true });
+        if (alive) setClinicRooms((data ?? []) as ClinicRoom[]);
+      } catch {} finally { if (alive) setRoomsLoading(false); }
+    })();
+    return () => { alive = false; };
+  }, [db]);
+
+  // ── Start visit helpers ──
+  const proceedToVisit = async (appt: Appointment) => {
+    const apptId = appt.dbId || String(appt.id);
+    // Update status in DB
+    try {
+      const { organizationId } = await getOrgContext();
+      await db.from('appointments').update({ status: 'In Progress' }).eq('id', apptId).eq('organization_id', organizationId);
+    } catch {}
+    startVisit({
+      apptId,
+      petName: appt.petName,
+      petImage: appt.petImage,
+      ownerName: appt.ownerName,
+      service: appt.service,
+      durationMinutes: appt.durationMinutes ?? 30,
+    });
+    setRoomInfoOpen(false);
+    setRoomInfoAppt(null);
+    navigate(`/appointments/${apptId}/visit`);
+  };
+
+  const handleStartVisit = (appt: Appointment) => {
+    if (appt.room) {
+      setRoomInfoAppt(appt);
+      setRoomInfoOpen(true);
+      return;
+    }
+    proceedToVisit(appt);
+  };
 
   // Listen for profile changes from settings pages → update vet profile card instantly
   useEffect(() => {
@@ -1434,17 +1512,7 @@ export default function MyPortalPage() {
 
                         {/* Start Appointment CTA */}
                         <button
-                          onClick={() => {
-                            startVisit({
-                              apptId: appt.dbId || appt.id,
-                              petName: appt.petName,
-                              petImage: appt.petImage,
-                              ownerName: appt.ownerName,
-                              service: appt.service,
-                              durationMinutes: appt.durationMinutes ?? 30,
-                            });
-                            navigate(`/appointments/${appt.dbId || appt.id}/visit`);
-                          }}
+                          onClick={() => handleStartVisit(appt)}
                           className="w-full flex items-center justify-center gap-2 py-2 transition-all hover:opacity-90 active:scale-[0.98]"
                           style={{
                             backgroundColor: 'var(--brand-green-text)',
@@ -1948,6 +2016,134 @@ export default function MyPortalPage() {
         </DialogContent>
       </Dialog>
       <AddClientDialog open={addClientOpen} onOpenChange={setAddClientOpen} onSave={handleAddClient} />
+
+      {/* ─── Room Info Dialog with Floor Plan ─── */}
+      <Dialog open={roomInfoOpen} onOpenChange={(v) => { if (!v) { setRoomInfoOpen(false); setRoomInfoAppt(null); } }}>
+        <DialogContent
+          className="p-0 overflow-hidden gap-0 [&>button]:top-[14px] [&>button]:right-[14px] [&>button]:w-8 [&>button]:h-8 [&>button]:flex [&>button]:items-center [&>button]:justify-center [&>button]:rounded-[8px] [&>button]:!bg-[var(--surface-white)] [&>button]:!text-[var(--text-secondary)] [&>button]:!opacity-100 [&>button]:hover:!bg-[var(--surface-elevated)] [&>button]:!border [&>button]:!border-[var(--border-color)] [&>button]:transition-colors [&>button>svg]:w-4 [&>button>svg]:h-4"
+          style={{ maxWidth: 640, width: '95vw', maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}
+        >
+          {roomInfoAppt && (() => {
+            const cols = clinicRooms.reduce((mx, r) => Math.max(mx, r.pos_x + r.width), 0);
+            const rowsCount = clinicRooms.reduce((mx, r) => Math.max(mx, r.pos_y + r.height), 0);
+            const CANVAS_W = 560;
+            const cellPx = cols > 0 ? Math.max(14, Math.min(28, Math.floor(CANVAS_W / Math.max(cols, 12)))) : 22;
+            const canvasW = (cols || 12) * cellPx;
+            const canvasH = (rowsCount || 8) * cellPx;
+            const targetRoom = (roomInfoAppt.roomId && clinicRooms.find(r => r.id === roomInfoAppt.roomId)) || clinicRooms.find(r => r.name === roomInfoAppt.room);
+
+            return (
+              <>
+                {/* Header */}
+                <div style={{ padding: '16px 22px', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: 14, background: 'linear-gradient(135deg, color-mix(in srgb, var(--brand-green-text) 10%, transparent), transparent 60%)' }}>
+                  <div style={{ width: 38, height: 38, borderRadius: 10, backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 14%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <DoorOpen style={{ width: 18, height: 18, color: 'var(--brand-green-text)' }} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
+                      Go to <span style={{ color: 'var(--brand-green-text)' }}>{roomInfoAppt.room}</span>
+                    </p>
+                    <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '2px 0 0' }}>
+                      {roomInfoAppt.petName} ({roomInfoAppt.ownerName}) is waiting &middot; {roomInfoAppt.service}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Floor Plan */}
+                <div style={{ padding: '16px 22px', overflowY: 'auto' }}>
+                  <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 10px' }}>
+                    Floor Plan
+                  </p>
+                  {roomsLoading ? (
+                    <div style={{ padding: '30px 0', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                      <Loader2 className="animate-spin" style={{ width: 18, height: 18, margin: '0 auto 8px' }} />
+                      <p style={{ fontSize: 12, margin: 0 }}>Loading rooms...</p>
+                    </div>
+                  ) : clinicRooms.length === 0 ? (
+                    <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-secondary)', border: '1.5px dashed var(--border-color)', borderRadius: 12 }}>
+                      <p style={{ fontSize: 13, fontWeight: 600, margin: 0 }}>No floor plan available</p>
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        position: 'relative', width: canvasW, height: canvasH, margin: '0 auto',
+                        backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)', borderRadius: 10,
+                        backgroundImage: `linear-gradient(to right, color-mix(in srgb, var(--border-color) 50%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in srgb, var(--border-color) 50%, transparent) 1px, transparent 1px)`,
+                        backgroundSize: `${cellPx}px ${cellPx}px`,
+                      }}
+                    >
+                      {clinicRooms.map((room) => {
+                        const cfg = ROOM_TYPES[room.type] ?? ROOM_TYPES.other;
+                        const RoomIcon = cfg.icon;
+                        const isTarget = targetRoom?.id === room.id;
+                        const baseColor = isTarget ? 'var(--brand-green-text)' : '#94A3B8';
+                        const baseBg = isTarget
+                          ? 'color-mix(in srgb, var(--brand-green-text) 18%, transparent)'
+                          : 'color-mix(in srgb, #94A3B8 8%, transparent)';
+                        const borderColor = isTarget
+                          ? 'var(--brand-green-text)'
+                          : 'color-mix(in srgb, #94A3B8 35%, transparent)';
+
+                        return (
+                          <div
+                            key={room.id}
+                            style={{
+                              position: 'absolute',
+                              left: room.pos_x * cellPx, top: room.pos_y * cellPx,
+                              width: room.width * cellPx, height: room.height * cellPx,
+                              backgroundColor: baseBg,
+                              border: `2px solid ${borderColor}`,
+                              borderRadius: 6, padding: '4px 6px',
+                              display: 'flex', flexDirection: 'column',
+                              alignItems: 'flex-start', justifyContent: 'space-between',
+                              overflow: 'hidden',
+                              opacity: isTarget ? 1 : 0.45,
+                              animation: isTarget ? 'roomPulse 1.5s ease-in-out infinite' : 'none',
+                              boxShadow: isTarget ? '0 0 12px color-mix(in srgb, var(--brand-green-text) 40%, transparent)' : 'none',
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, width: '100%' }}>
+                              <RoomIcon style={{ width: 11, height: 11, color: baseColor, flexShrink: 0 }} />
+                              <span style={{ fontSize: 10, fontWeight: 700, color: isTarget ? 'var(--text-primary)' : 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.1 }}>
+                                {room.name}
+                              </span>
+                            </div>
+                            {isTarget ? (
+                              <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--brand-green-text)', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: 1.1 }}>
+                                Go Here
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em', lineHeight: 1.1, opacity: 0.7 }}>
+                                {cfg.label}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Footer */}
+                <div style={{ padding: '14px 22px', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--surface-elevated)' }}>
+                  <Button
+                    className="w-full hover:opacity-90"
+                    onClick={() => proceedToVisit(roomInfoAppt)}
+                    style={{
+                      backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)', border: 'none',
+                      height: 42, fontSize: 14, fontWeight: 600,
+                      boxShadow: '0 0 16px color-mix(in srgb, var(--brand-green-text) 50%, transparent)',
+                    }}
+                  >
+                    <Stethoscope className="w-4 h-4 mr-2" />
+                    Start Visit
+                  </Button>
+                </div>
+              </>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

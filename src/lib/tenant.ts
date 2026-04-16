@@ -28,9 +28,14 @@ type AnyRecord = Record<string, unknown>;
 // Last updated: 2026-04-05 after composite FK + RLS child-table migrations
 // which added organization_id to 16 tables previously in this set.
 const TABLES_WITHOUT_ORG_ID = new Set([
+  'diet_restrictions',         // child of diet_plans (org via parent FK)
+  'imaging_study_files',       // child of imaging_studies (org via parent FK)
   'login_activity',            // per-user auth log, no org column
   'notification_preferences',  // per-user prefs, no org column
   'organizations',             // IS the organization table itself
+  'treatment_plan_goals',      // child of treatment_plans (org via parent FK)
+  'treatment_plan_medications',// child of treatment_plans (org via parent FK)
+  'treatment_plan_milestones', // child of treatment_plans (org via parent FK)
   'user_sessions',             // session tracking, scoped by user_id
   'vet_conditions_reference',  // global reference data, not org-scoped
 ]);

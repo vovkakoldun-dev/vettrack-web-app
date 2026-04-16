@@ -6,6 +6,7 @@ import {
   Heart, Thermometer, Activity, Wind, Gauge, Scale,
   Stethoscope, Pill, FlaskConical, CalendarCheck, FileText,
   AlertTriangle, ChevronRight, Clock, MapPin, Phone, User,
+  Syringe, Image, Scissors, ClipboardList, Utensils, Camera, StickyNote, Shield,
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Separator } from '../components/ui/separator';
@@ -58,6 +59,47 @@ interface DetailedRecord {
   followUp: {
     nextVisitDate: string; nextVisitReason: string; notes: string; reminderSet: boolean;
   };
+  // ── Additional tab data (fetched by pet_id + visit_date) ──
+  vaccinations: {
+    name: string; manufacturer: string; lotNumber: string; serialNumber: string;
+    site: string; date: string; nextDue: string; notes: string; administeredBy: string;
+  }[];
+  imagingStudies: {
+    title: string; modality: string; region: string; date: string;
+    findings: string; impression: string; status: string;
+    images: { url: string; label: string }[];
+  }[];
+  surgeries: {
+    name: string; date: string; duration: string; surgeon: string;
+    status: string; anesthesia: string; preOp: string; procedureNotes: string;
+    postOp: string; complications: string; followUp: string;
+  }[];
+  treatmentPlans: {
+    title: string; status: string; notes: string;
+    goals: { text: string; progress: number; status: string }[];
+    medications: { name: string; dose: string; purpose: string }[];
+    milestones: { title: string; date: string; status: string; note: string }[];
+  }[];
+  dietPlans: {
+    food: string; foodType: string; amount: string; meals: string;
+    calories: string; targetWeight: string; waterNote: string;
+    treatsNote: string; restrictions: { item: string; reason: string; severity: string }[];
+    notes: string;
+  }[];
+  photos: {
+    title: string; category: string; url: string; date: string; caption: string;
+  }[];
+  conditions: {
+    name: string; severity: string; status: string; diagnosed: string;
+    resolvedDate: string; notes: string;
+  }[];
+  allergies: string[];
+  petTreatments: {
+    name: string; date: string; vet: string; notes: string;
+  }[];
+  visitNotes: {
+    type: string; content: string; date: string;
+  }[];
   createdAt: string;
   lastModified: string;
   modifiedBy: string;
@@ -144,6 +186,27 @@ export default function RecordDetailPage() {
         .eq('id', id)
         .single();
       if (data) {
+        // ── Fetch ALL related tab data in parallel ──
+        const petId = data.pet_id;
+        const vDate = data.visit_date;
+        const [
+          { data: vaxData }, { data: imgData }, { data: surgData },
+          { data: planData }, { data: dietData }, { data: photoData },
+          { data: condData }, { data: allergyData }, { data: petTxData },
+          { data: noteData },
+        ] = await Promise.all([
+          supabase.from('vaccinations').select('*').eq('pet_id', petId).eq('administered_date', vDate),
+          supabase.from('imaging_studies').select('*, imaging_study_files(*)').eq('pet_id', petId).eq('study_date', vDate),
+          supabase.from('surgeries').select('*').eq('pet_id', petId).eq('surgery_date', vDate),
+          supabase.from('treatment_plans').select('*, treatment_plan_goals(*), treatment_plan_milestones(*), treatment_plan_medications(*)').eq('pet_id', petId).eq('status', 'active'),
+          supabase.from('diet_plans').select('*, diet_restrictions(*)').eq('pet_id', petId).eq('status', 'active'),
+          supabase.from('pet_photos').select('*').eq('pet_id', petId).eq('photo_date', vDate),
+          supabase.from('pet_conditions').select('*').eq('pet_id', petId).eq('status', 'active'),
+          supabase.from('pet_allergies').select('*').eq('pet_id', petId),
+          supabase.from('pet_treatments').select('*').eq('pet_id', petId).eq('date', vDate),
+          supabase.from('pet_notes').select('*').eq('pet_id', petId).gte('created_at', vDate + 'T00:00:00').lte('created_at', vDate + 'T23:59:59'),
+        ]);
+
         const visitDate = new Date(data.visit_date + 'T12:00:00');
         setRealRecord({
           id: 0,
@@ -290,6 +353,58 @@ export default function RecordDetailPage() {
             notes: data.follow_up_notes ?? '',
             reminderSet: !!data.follow_up_date,
           },
+          // ── Additional tab data ──
+          vaccinations: (vaxData || []).map((v: any) => ({
+            name: v.vaccine_name || '—', manufacturer: v.manufacturer || '—',
+            lotNumber: v.lot_number || '—', serialNumber: v.serial_number || '—',
+            site: v.injection_site || '—', date: v.administered_date || '—',
+            nextDue: v.next_due_date || '—', notes: v.notes || '',
+            administeredBy: '—',
+          })),
+          imagingStudies: (imgData || []).map((s: any) => ({
+            title: s.title || '—', modality: s.modality || '—', region: s.region || '—',
+            date: s.study_date || '—', findings: s.findings || '', impression: s.impression || '',
+            status: s.status || '—',
+            images: (s.imaging_study_files || []).map((f: any) => ({ url: f.file_url || '', label: f.view_label || f.file_name || '' })),
+          })),
+          surgeries: (surgData || []).map((s: any) => ({
+            name: s.name || '—', date: s.surgery_date || '—',
+            duration: s.duration_minutes ? `${s.duration_minutes} min` : '—',
+            surgeon: '—', status: s.status || '—', anesthesia: s.anesthesia || '—',
+            preOp: s.pre_op || '', procedureNotes: s.procedure_notes || '',
+            postOp: s.post_op || '', complications: s.complications || '', followUp: s.follow_up || '',
+          })),
+          treatmentPlans: (planData || []).map((p: any) => ({
+            title: p.title || '—', status: p.status || '—', notes: p.notes || '',
+            goals: (p.treatment_plan_goals || []).map((g: any) => ({ text: g.text || '—', progress: g.progress || 0, status: g.status || '—' })),
+            medications: (p.treatment_plan_medications || []).map((m: any) => ({ name: m.name || '—', dose: m.dose || '—', purpose: m.purpose || '' })),
+            milestones: (p.treatment_plan_milestones || []).map((ms: any) => ({ title: ms.title || '—', date: ms.milestone_date || '—', status: ms.status || '—', note: ms.note || '' })),
+          })),
+          dietPlans: (dietData || []).map((d: any) => ({
+            food: [d.food_brand, d.food_name].filter(Boolean).join(' ') || '—',
+            foodType: d.food_type || '—', amount: d.daily_amount || '—',
+            meals: d.meals ? `${d.meals} per day` : '—', calories: d.calories ? `${d.calories} kcal` : '—',
+            targetWeight: d.target_weight_kg ? `${d.target_weight_kg} kg` : '—',
+            waterNote: d.water_note || '', treatsNote: d.treats_note || '',
+            restrictions: (d.diet_restrictions || []).map((r: any) => ({ item: r.item || '—', reason: r.reason || '', severity: r.severity || '—' })),
+            notes: d.notes || '',
+          })),
+          photos: (photoData || []).map((p: any) => ({
+            title: p.title || '—', category: p.category || 'general',
+            url: p.file_url || '', date: p.photo_date || '—', caption: p.caption || '',
+          })),
+          conditions: (condData || []).map((c: any) => ({
+            name: c.name || '—', severity: c.severity || '—', status: c.status || '—',
+            diagnosed: c.date_diagnosed || '—', resolvedDate: c.resolved_date || '', notes: c.notes || '',
+          })),
+          allergies: (allergyData || []).map((a: any) => a.name || '—'),
+          petTreatments: (petTxData || []).map((t: any) => ({
+            name: t.name || '—', date: t.date || '—', vet: t.vet || '—', notes: t.notes || '',
+          })),
+          visitNotes: (noteData || []).map((n: any) => ({
+            type: n.type || 'vet', content: n.content || '',
+            date: n.created_at ? new Date(n.created_at).toLocaleString() : '—',
+          })),
           createdAt: new Date(data.created_at).toLocaleString(),
           lastModified: new Date(data.updated_at).toLocaleString(),
           modifiedBy: '—',
@@ -420,6 +535,64 @@ export default function RecordDetailPage() {
                 ? r.diagnosis.icdCodes.map(c => `<span class="icd-tag">${c.code} — ${c.description}</span>`).join(' ')
                 : '';
 
+              // ── Helpers for new tab sections ──
+              const hasDiagnosis = r.diagnosis.primary && r.diagnosis.primary !== '—';
+              const hasTreatment = r.treatmentPlan.procedures.length > 0 || r.treatmentPlan.instructions || r.treatmentPlan.homeCarePlan;
+              const hasMeds = r.medications.length > 0;
+              const hasLabs = r.labResults.length > 0;
+              const hasFollowUp = r.followUp.nextVisitDate !== '—';
+
+              const vaxHtml = r.vaccinations.length > 0
+                ? r.vaccinations.map(v => `<tr><td><strong>${v.name}</strong></td><td>${v.manufacturer}</td><td>${v.lotNumber}</td><td>${v.site}</td><td>${v.date}</td><td>${v.nextDue}</td><td>${v.notes || '—'}</td></tr>`).join('')
+                : '';
+              const imgHtml = r.imagingStudies.map(s => {
+                const imgs = s.images.length > 0 ? `<p style="font-size:11px;color:#888;margin-top:4px;">${s.images.length} image(s) attached</p>` : '';
+                return `<div style="background:#f8faf9;border:1px solid #dce8e0;border-radius:8px;padding:12px;margin-bottom:8px;">
+                  <div style="display:flex;justify-content:space-between;"><strong>${s.title}</strong><span class="badge badge-normal">${s.status}</span></div>
+                  <p style="font-size:12px;color:#666;margin-top:4px;">${s.modality} · ${s.region} · ${s.date}</p>
+                  ${s.findings ? `<div class="dx-notes" style="margin-top:8px;">${s.findings}</div>` : ''}
+                  ${s.impression ? `<p style="font-size:13px;color:#444;margin-top:6px;"><strong>Impression:</strong> ${s.impression}</p>` : ''}
+                  ${imgs}
+                </div>`;
+              }).join('');
+              const surgHtml = r.surgeries.map(s => {
+                return `<div style="background:#f8faf9;border:1px solid #dce8e0;border-radius:8px;padding:12px;margin-bottom:8px;">
+                  <div style="display:flex;justify-content:space-between;"><strong>${s.name}</strong><span class="badge ${s.status === 'Recovered' ? 'badge-normal' : s.status === 'Complications' ? 'badge-critical' : 'badge-high'}">${s.status}</span></div>
+                  <p style="font-size:12px;color:#666;margin-top:4px;">${s.date} · ${s.duration}${s.anesthesia !== '—' ? ` · Anesthesia: ${s.anesthesia}` : ''}</p>
+                  ${s.procedureNotes ? `<div class="dx-notes" style="margin-top:8px;">${s.procedureNotes}</div>` : ''}
+                  ${s.postOp ? `<p style="font-size:13px;color:#444;margin-top:6px;"><strong>Post-Op:</strong> ${s.postOp}</p>` : ''}
+                  ${s.complications ? `<p style="font-size:13px;color:#d4183d;margin-top:4px;"><strong>Complications:</strong> ${s.complications}</p>` : ''}
+                </div>`;
+              }).join('');
+              const planHtml = r.treatmentPlans.map(p => {
+                const goalsHtml = p.goals.length > 0 ? p.goals.map(g => `<li>${g.text} — <em>${g.progress}%</em></li>`).join('') : '';
+                const planMedsHtml = p.medications.length > 0 ? p.medications.map(m => `<li><strong>${m.name}</strong> ${m.dose} — ${m.purpose}</li>`).join('') : '';
+                return `<div style="background:#f8faf9;border:1px solid #dce8e0;border-radius:8px;padding:12px;margin-bottom:8px;">
+                  <div style="display:flex;justify-content:space-between;"><strong>${p.title}</strong><span class="badge badge-normal">${p.status}</span></div>
+                  ${goalsHtml ? `<div style="margin-top:8px;"><strong style="font-size:12px;">Goals:</strong><ul style="margin:4px 0 0 18px;font-size:13px;">${goalsHtml}</ul></div>` : ''}
+                  ${planMedsHtml ? `<div style="margin-top:8px;"><strong style="font-size:12px;">Medications:</strong><ul style="margin:4px 0 0 18px;font-size:13px;">${planMedsHtml}</ul></div>` : ''}
+                  ${p.notes ? `<p style="font-size:13px;color:#444;margin-top:8px;">${p.notes}</p>` : ''}
+                </div>`;
+              }).join('');
+              const dietHtml = r.dietPlans.map(d => {
+                const restrictHtml = d.restrictions.length > 0 ? d.restrictions.map(rx => `<span style="display:inline-block;background:#fff3cd;color:#856404;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;margin:2px 4px 2px 0;">${rx.item}</span>`).join('') : '';
+                return `<div style="background:#f8faf9;border:1px solid #dce8e0;border-radius:8px;padding:12px;margin-bottom:8px;">
+                  <strong>${d.food}</strong> (${d.foodType})
+                  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px;font-size:12px;">
+                    <div><span class="label">Amount</span><br/><strong>${d.amount}</strong></div>
+                    <div><span class="label">Meals</span><br/><strong>${d.meals}</strong></div>
+                    <div><span class="label">Calories</span><br/><strong>${d.calories}</strong></div>
+                  </div>
+                  ${d.targetWeight !== '—' ? `<p style="font-size:12px;color:#666;margin-top:6px;">Target Weight: <strong>${d.targetWeight}</strong></p>` : ''}
+                  ${restrictHtml ? `<div style="margin-top:8px;"><strong style="font-size:12px;">Restrictions:</strong><br/>${restrictHtml}</div>` : ''}
+                  ${d.notes ? `<p style="font-size:13px;color:#444;margin-top:6px;">${d.notes}</p>` : ''}
+                </div>`;
+              }).join('');
+              const condHtml = r.conditions.length > 0 || r.allergies.length > 0;
+              const notesHtml = r.visitNotes.length > 0
+                ? r.visitNotes.map(n => `<div style="background:#f8faf9;border-left:3px solid ${n.type === 'vet' ? '#2d6a4f' : '#3b82f6'};padding:10px 12px;border-radius:0 8px 8px 0;margin-bottom:6px;"><span style="font-size:11px;color:#888;text-transform:uppercase;">${n.type === 'vet' ? 'Vet Note' : 'Client Note'} — ${n.date}</span><p style="font-size:13px;color:#333;margin-top:4px;white-space:pre-wrap;">${n.content}</p></div>`).join('')
+                : '';
+
               const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Medical Record — ${r.patient.name} — ${r.recordNumber}</title>
               <style>
                 @page { margin: 18mm; size: A4; }
@@ -511,35 +684,81 @@ export default function RecordDetailPage() {
 
               ${vitalsRows ? `<div class="section"><h2>Vitals</h2><div class="vitals-grid">${vitalsRows}</div></div>` : ''}
 
-              <div class="section">
+              ${hasDiagnosis ? `<div class="section">
                 <h2>Diagnosis</h2>
                 <p class="dx-primary">${r.diagnosis.primary}</p>
                 ${r.diagnosis.secondary.length > 0 ? `<p class="dx-secondary">Secondary: ${r.diagnosis.secondary.join(', ')}</p>` : ''}
                 ${r.diagnosis.differentials.length > 0 ? `<p class="dx-secondary">Differentials: ${r.diagnosis.differentials.join(', ')}</p>` : ''}
                 ${icdHtml ? `<div style="margin-top:6px;">${icdHtml}</div>` : ''}
                 ${r.diagnosis.notes ? `<div class="dx-notes">${r.diagnosis.notes}</div>` : ''}
-              </div>
+              </div>` : ''}
 
-              <div class="section">
+              ${hasTreatment ? `<div class="section">
                 <h2>Treatment & Procedures</h2>
-                <table><thead><tr><th>Procedure</th><th>Notes</th><th>Status</th></tr></thead><tbody>${proceduresHtml}</tbody></table>
+                ${r.treatmentPlan.procedures.length > 0 ? `<table><thead><tr><th>Procedure</th><th>Notes</th><th>Status</th></tr></thead><tbody>${proceduresHtml}</tbody></table>` : ''}
                 ${r.treatmentPlan.instructions ? `<div class="instructions"><strong>Owner Instructions:</strong><br/>${r.treatmentPlan.instructions}</div>` : ''}
                 ${r.treatmentPlan.restrictions.length > 0 ? `<p style="font-size:13px;color:#444;margin-bottom:8px;"><strong>Restrictions:</strong> ${r.treatmentPlan.restrictions.join(', ')}</p>` : ''}
                 ${r.treatmentPlan.homeCarePlan ? `<p style="font-size:13px;color:#444;"><strong>Home Care:</strong> ${r.treatmentPlan.homeCarePlan}</p>` : ''}
-              </div>
+              </div>` : ''}
 
-              <div class="section">
-                <h2>Medications</h2>
+              ${hasMeds ? `<div class="section">
+                <h2>Medications Prescribed</h2>
                 <table><thead><tr><th>Medication</th><th>Dosage</th><th>Frequency</th><th>Route</th><th>Duration</th><th>Notes</th></tr></thead><tbody>${medsHtml}</tbody></table>
-              </div>
+              </div>` : ''}
 
-              <div class="section">
+              ${hasLabs ? `<div class="section">
                 <h2>Lab Results</h2>
                 <table><thead><tr><th>Test</th><th>Result</th><th>Reference</th><th>Flag</th><th>Date</th></tr></thead><tbody>${labsHtml}</tbody></table>
-              </div>
+              </div>` : ''}
 
-              ${r.followUp.nextVisitDate !== '—' ? `
-              <div class="section">
+              ${vaxHtml ? `<div class="section">
+                <h2>Vaccinations</h2>
+                <table><thead><tr><th>Vaccine</th><th>Manufacturer</th><th>Lot #</th><th>Site</th><th>Date</th><th>Next Due</th><th>Notes</th></tr></thead><tbody>${vaxHtml}</tbody></table>
+              </div>` : ''}
+
+              ${r.imagingStudies.length > 0 ? `<div class="section">
+                <h2>Imaging Studies</h2>
+                ${imgHtml}
+              </div>` : ''}
+
+              ${r.surgeries.length > 0 ? `<div class="section">
+                <h2>Surgeries</h2>
+                ${surgHtml}
+              </div>` : ''}
+
+              ${r.treatmentPlans.length > 0 ? `<div class="section">
+                <h2>Treatment Plans</h2>
+                ${planHtml}
+              </div>` : ''}
+
+              ${r.dietPlans.length > 0 ? `<div class="section">
+                <h2>Diet & Nutrition</h2>
+                ${dietHtml}
+              </div>` : ''}
+
+              ${condHtml ? `<div class="section">
+                <h2>Medical Conditions & Allergies</h2>
+                ${r.conditions.length > 0 ? `<div style="margin-bottom:10px;">
+                  <strong style="font-size:12px;">Active Conditions:</strong>
+                  <table style="margin-top:6px;"><thead><tr><th>Condition</th><th>Severity</th><th>Diagnosed</th><th>Notes</th></tr></thead>
+                  <tbody>${r.conditions.map(c => `<tr><td><strong>${c.name}</strong></td><td><span class="badge ${c.severity === 'severe' ? 'badge-critical' : c.severity === 'moderate' ? 'badge-high' : 'badge-normal'}">${c.severity}</span></td><td>${c.diagnosed}</td><td>${c.notes || '—'}</td></tr>`).join('')}</tbody></table>
+                </div>` : ''}
+                ${r.allergies.length > 0 ? `<div><strong style="font-size:12px;">Allergies:</strong><div style="margin-top:6px;">${r.allergies.map(a => `<span style="display:inline-block;background:#f8d7da;color:#721c24;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;margin:2px 4px 2px 0;">${a}</span>`).join('')}</div></div>` : ''}
+              </div>` : ''}
+
+              ${notesHtml ? `<div class="section">
+                <h2>Visit Notes</h2>
+                ${notesHtml}
+              </div>` : ''}
+
+              ${r.photos.length > 0 ? `<div class="section">
+                <h2>Photos</h2>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
+                  ${r.photos.map(p => `<div style="text-align:center;"><img src="${p.url}" style="width:100%;max-height:200px;object-fit:cover;border-radius:8px;border:1px solid #dce8e0;" /><p style="font-size:11px;color:#666;margin-top:4px;">${p.title}${p.caption ? ` — ${p.caption}` : ''}</p></div>`).join('')}
+                </div>
+              </div>` : ''}
+
+              ${hasFollowUp ? `<div class="section">
                 <h2>Follow-Up</h2>
                 <div class="followup">
                   <strong>Next Visit:</strong> ${r.followUp.nextVisitDate} — ${r.followUp.nextVisitReason}<br/>
@@ -708,29 +927,30 @@ export default function RecordDetailPage() {
       </div>
 
       {/* ───────── Section 2: Vitals ───────── */}
+      {[record.vitals.weight, record.vitals.temperature, record.vitals.heartRate, record.vitals.respiratoryRate].some(v => v && v !== '—') && (
       <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6 mb-6" style={{ borderRadius: '12px' }}>
         <SectionHeader icon={Activity} title="Vitals" />
         <div className="grid grid-cols-4 gap-4">
-          <VitalCard label="Weight" value={record.vitals.weight} icon={Scale} />
-          <VitalCard label="Temperature" value={record.vitals.temperature} icon={Thermometer} />
-          <VitalCard label="Heart Rate" value={record.vitals.heartRate} icon={Heart} isAbnormal={parseInt(record.vitals.heartRate) > 100} />
-          <VitalCard label="Respiratory Rate" value={record.vitals.respiratoryRate} icon={Wind} isAbnormal={parseInt(record.vitals.respiratoryRate) > 24} />
-          <VitalCard label="Blood Pressure" value={record.vitals.bloodPressure} icon={Gauge} isAbnormal={parseInt(record.vitals.bloodPressure) > 140} />
-          <VitalCard label="Body Condition" value={record.vitals.bodyConditionScore} icon={Activity} />
-          <VitalCard label="Pain Score" value={record.vitals.painScore} icon={AlertTriangle} isAbnormal={parseInt(record.vitals.painScore) > 3} />
-          <VitalCard label="Hydration" value={record.vitals.hydrationStatus} icon={Activity} />
+          {record.vitals.weight !== '—' && <VitalCard label="Weight" value={record.vitals.weight} icon={Scale} />}
+          {record.vitals.temperature !== '—' && <VitalCard label="Temperature" value={record.vitals.temperature} icon={Thermometer} />}
+          {record.vitals.heartRate !== '—' && <VitalCard label="Heart Rate" value={record.vitals.heartRate} icon={Heart} isAbnormal={parseInt(record.vitals.heartRate) > 100} />}
+          {record.vitals.respiratoryRate !== '—' && <VitalCard label="Respiratory Rate" value={record.vitals.respiratoryRate} icon={Wind} isAbnormal={parseInt(record.vitals.respiratoryRate) > 24} />}
+          {record.vitals.bloodPressure !== '—' && <VitalCard label="Blood Pressure" value={record.vitals.bloodPressure} icon={Gauge} isAbnormal={parseInt(record.vitals.bloodPressure) > 140} />}
+          {record.vitals.bodyConditionScore !== '—' && <VitalCard label="Body Condition" value={record.vitals.bodyConditionScore} icon={Activity} />}
+          {record.vitals.painScore !== '—' && <VitalCard label="Pain Score" value={record.vitals.painScore} icon={AlertTriangle} isAbnormal={parseInt(record.vitals.painScore) > 3} />}
+          {record.vitals.hydrationStatus !== '—' && <VitalCard label="Hydration" value={record.vitals.hydrationStatus} icon={Activity} />}
         </div>
       </div>
+      )}
 
       {/* ───────── Section 3: Diagnosis ───────── */}
+      {record.diagnosis.primary && record.diagnosis.primary !== '—' && (
       <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6 mb-6" style={{ borderRadius: '12px' }}>
         <SectionHeader icon={Stethoscope} title="Diagnosis" />
-
         <div className="mb-4">
           <span className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Primary Diagnosis</span>
           <p className="text-[var(--text-primary)] mt-1" style={{ fontSize: '16px', fontWeight: 600 }}>{record.diagnosis.primary}</p>
         </div>
-
         {record.diagnosis.secondary.length > 0 && (
           <div className="mb-4">
             <span className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Secondary Findings</span>
@@ -744,196 +964,142 @@ export default function RecordDetailPage() {
             </ul>
           </div>
         )}
-
-        {record.diagnosis.differentials.length > 0 && (
-          <div className="mb-4">
-            <span className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Differential Diagnoses</span>
-            <ul className="mt-1 space-y-1">
-              {record.diagnosis.differentials.map((d, i) => (
-                <li key={i} className="flex items-start gap-2">
-                  <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>•</span>
-                  <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>{d}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
+        {record.diagnosis.notes && (
+          <>
+            <Separator className="my-4" />
+            <div className="mb-4">
+              <span className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Clinical Notes</span>
+              <p className="text-[var(--text-primary)] mt-2 leading-relaxed" style={{ fontSize: '14px' }}>{record.diagnosis.notes}</p>
+            </div>
+          </>
         )}
+        {record.diagnosis.icdCodes.length > 0 && (
+          <>
+            <Separator className="my-4" />
+            <div>
+              <span className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>ICD Codes</span>
+              <div className="mt-2 overflow-x-auto">
+                <Table>
+                  <TableHeader><TableRow className="hover:bg-transparent">
+                    <TableHead className="py-2 px-3" style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Code</TableHead>
+                    <TableHead className="py-2 px-3" style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Description</TableHead>
+                  </TableRow></TableHeader>
+                  <TableBody>
+                    {record.diagnosis.icdCodes.map((code, i) => (
+                      <TableRow key={i} className="hover:bg-[var(--surface-elevated)]">
+                        <TableCell className="py-2 px-3"><span className="inline-block px-2 py-0.5 bg-[var(--surface-elevated)] text-[var(--text-primary)]" style={{ borderRadius: '4px', fontSize: '13px', fontWeight: 600, fontFamily: 'monospace' }}>{code.code}</span></TableCell>
+                        <TableCell className="py-2 px-3"><span className="text-[var(--text-primary)]" style={{ fontSize: '13px' }}>{code.description}</span></TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+      )}
 
-        <Separator className="my-4" />
-
-        <div className="mb-4">
-          <span className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Clinical Notes</span>
-          <p className="text-[var(--text-primary)] mt-2 leading-relaxed" style={{ fontSize: '14px' }}>{record.diagnosis.notes}</p>
-        </div>
-
-        <Separator className="my-4" />
-
-        <div>
-          <span className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>ICD Codes</span>
-          <div className="mt-2 overflow-x-auto">
+      {/* ───────── Section 4: Treatment Plan ───────── */}
+      {(record.treatmentPlan.procedures.length > 0 || record.treatmentPlan.instructions || record.treatmentPlan.homeCarePlan) && (
+      <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6 mb-6" style={{ borderRadius: '12px' }}>
+        <SectionHeader icon={FileText} title="Treatment Plan" />
+        {record.treatmentPlan.procedures.length > 0 && (
+          <div className="mb-5 overflow-x-auto">
+            <span className="text-[var(--text-secondary)] block mb-2" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Procedures</span>
             <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead className="py-2 px-3" style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Code</TableHead>
-                  <TableHead className="py-2 px-3" style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Description</TableHead>
-                </TableRow>
-              </TableHeader>
+              <TableHeader><TableRow className="hover:bg-transparent">
+                <TableHead className="py-2 px-3" style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Procedure</TableHead>
+                <TableHead className="py-2 px-3" style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Notes</TableHead>
+                <TableHead className="py-2 px-3" style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Status</TableHead>
+              </TableRow></TableHeader>
               <TableBody>
-                {record.diagnosis.icdCodes.map((code, i) => (
+                {record.treatmentPlan.procedures.map((proc, i) => (
                   <TableRow key={i} className="hover:bg-[var(--surface-elevated)]">
-                    <TableCell className="py-2 px-3">
-                      <span className="inline-block px-2 py-0.5 bg-[var(--surface-elevated)] text-[var(--text-primary)]" style={{ borderRadius: '4px', fontSize: '13px', fontWeight: 600, fontFamily: 'monospace' }}>{code.code}</span>
-                    </TableCell>
-                    <TableCell className="py-2 px-3">
-                      <span className="text-[var(--text-primary)]" style={{ fontSize: '13px' }}>{code.description}</span>
-                    </TableCell>
+                    <TableCell className="py-2 px-3"><span className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 500 }}>{proc.name}</span></TableCell>
+                    <TableCell className="py-2 px-3"><span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{proc.notes}</span></TableCell>
+                    <TableCell className="py-2 px-3"><span className="inline-block px-2 py-0.5" style={{ backgroundColor: proc.status === 'Completed' ? '#74C69D20' : '#F4A26120', color: proc.status === 'Completed' ? 'var(--brand-green-text)' : '#F4A261', borderRadius: '9999px', fontSize: '12px', fontWeight: 600 }}>{proc.status}</span></TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
           </div>
-        </div>
-      </div>
-
-      {/* ───────── Section 4: Treatment Plan ───────── */}
-      <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6 mb-6" style={{ borderRadius: '12px' }}>
-        <SectionHeader icon={FileText} title="Treatment Plan" />
-
-        <div className="mb-5 overflow-x-auto">
-          <span className="text-[var(--text-secondary)] block mb-2" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Procedures</span>
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead className="py-2 px-3" style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Procedure</TableHead>
-                <TableHead className="py-2 px-3" style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Notes</TableHead>
-                <TableHead className="py-2 px-3" style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {record.treatmentPlan.procedures.map((proc, i) => (
-                <TableRow key={i} className="hover:bg-[var(--surface-elevated)]">
-                  <TableCell className="py-2 px-3">
-                    <span className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 500 }}>{proc.name}</span>
-                  </TableCell>
-                  <TableCell className="py-2 px-3">
-                    <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{proc.notes}</span>
-                  </TableCell>
-                  <TableCell className="py-2 px-3">
-                    <span className="inline-block px-2 py-0.5" style={{
-                      backgroundColor: proc.status === 'Completed' ? '#74C69D20' : proc.status === 'Scheduled' ? '#3B82F620' : '#F4A26120',
-                      color: proc.status === 'Completed' ? 'var(--brand-green-text)' : proc.status === 'Scheduled' ? '#3B82F6' : '#F4A261',
-                      borderRadius: '9999px', fontSize: '12px', fontWeight: 600,
-                    }}>
-                      {proc.status}
-                    </span>
-                  </TableCell>
-                </TableRow>
+        )}
+        {record.treatmentPlan.instructions && (
+          <><Separator className="my-4" /><div className="mb-4">
+            <span className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Post-Visit Instructions</span>
+            <p className="text-[var(--text-primary)] mt-2 leading-relaxed" style={{ fontSize: '14px' }}>{record.treatmentPlan.instructions}</p>
+          </div></>
+        )}
+        {record.treatmentPlan.restrictions.length > 0 && (
+          <div className="mb-4">
+            <span className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Activity Restrictions</span>
+            <div className="flex flex-wrap gap-2 mt-2">
+              {record.treatmentPlan.restrictions.map((r, i) => (
+                <span key={i} className="inline-block px-3 py-1 border border-[var(--border-color)] text-[var(--text-primary)]" style={{ borderRadius: '8px', fontSize: '13px' }}>{r}</span>
               ))}
-            </TableBody>
-          </Table>
-        </div>
-
-        <Separator className="my-4" />
-
-        <div className="mb-4">
-          <span className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Post-Visit Instructions</span>
-          <p className="text-[var(--text-primary)] mt-2 leading-relaxed" style={{ fontSize: '14px' }}>{record.treatmentPlan.instructions}</p>
-        </div>
-
-        <div className="mb-4">
-          <span className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Activity Restrictions</span>
-          <div className="flex flex-wrap gap-2 mt-2">
-            {record.treatmentPlan.restrictions.map((r, i) => (
-              <span key={i} className="inline-block px-3 py-1 border border-[var(--border-color)] text-[var(--text-primary)]" style={{ borderRadius: '8px', fontSize: '13px' }}>
-                {r}
-              </span>
-            ))}
+            </div>
           </div>
-        </div>
-
-        <div>
-          <span className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Home Care Plan</span>
-          <p className="text-[var(--text-primary)] mt-2 leading-relaxed" style={{ fontSize: '14px' }}>{record.treatmentPlan.homeCarePlan}</p>
-        </div>
+        )}
+        {record.treatmentPlan.homeCarePlan && (
+          <div>
+            <span className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Home Care Plan</span>
+            <p className="text-[var(--text-primary)] mt-2 leading-relaxed" style={{ fontSize: '14px' }}>{record.treatmentPlan.homeCarePlan}</p>
+          </div>
+        )}
       </div>
+      )}
 
       {/* ───────── Section 5: Medications ───────── */}
+      {record.medications.length > 0 && (
       <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6 mb-6" style={{ borderRadius: '12px' }}>
-        <SectionHeader icon={Pill} title="Medications" />
+        <SectionHeader icon={Pill} title="Medications Prescribed" />
         <div className="overflow-x-auto">
           <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                {['Medication', 'Dosage', 'Frequency', 'Route', 'Duration', 'Start Date', 'Notes'].map((h) => (
-                  <TableHead key={h} className="py-2 px-3" style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>{h}</TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
+            <TableHeader><TableRow className="hover:bg-transparent">
+              {['Medication', 'Dosage', 'Frequency', 'Route', 'Duration', 'Start Date', 'Notes'].map((h) => (
+                <TableHead key={h} className="py-2 px-3" style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>{h}</TableHead>
+              ))}
+            </TableRow></TableHeader>
             <TableBody>
               {record.medications.map((med, i) => (
                 <TableRow key={i} className="hover:bg-[var(--surface-elevated)]">
-                  <TableCell className="py-3 px-3">
-                    <span className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 600 }}>{med.name}</span>
-                  </TableCell>
-                  <TableCell className="py-3 px-3">
-                    <span className="text-[var(--text-primary)]" style={{ fontSize: '13px' }}>{med.dosage}</span>
-                  </TableCell>
-                  <TableCell className="py-3 px-3">
-                    <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{med.frequency}</span>
-                  </TableCell>
-                  <TableCell className="py-3 px-3">
-                    <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{med.route}</span>
-                  </TableCell>
-                  <TableCell className="py-3 px-3">
-                    <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{med.duration}</span>
-                  </TableCell>
-                  <TableCell className="py-3 px-3">
-                    <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{med.startDate}</span>
-                  </TableCell>
-                  <TableCell className="py-3 px-3 max-w-[200px]">
-                    <span className="text-[var(--text-secondary)]" style={{ fontSize: '12px' }}>{med.notes}</span>
-                  </TableCell>
+                  <TableCell className="py-3 px-3"><span className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 600 }}>{med.name}</span></TableCell>
+                  <TableCell className="py-3 px-3"><span className="text-[var(--text-primary)]" style={{ fontSize: '13px' }}>{med.dosage}</span></TableCell>
+                  <TableCell className="py-3 px-3"><span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{med.frequency}</span></TableCell>
+                  <TableCell className="py-3 px-3"><span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{med.route}</span></TableCell>
+                  <TableCell className="py-3 px-3"><span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{med.duration}</span></TableCell>
+                  <TableCell className="py-3 px-3"><span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{med.startDate}</span></TableCell>
+                  <TableCell className="py-3 px-3 max-w-[200px]"><span className="text-[var(--text-secondary)]" style={{ fontSize: '12px' }}>{med.notes}</span></TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         </div>
       </div>
+      )}
 
       {/* ───────── Section 6: Lab Results ───────── */}
+      {record.labResults.length > 0 && (
       <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6 mb-6" style={{ borderRadius: '12px' }}>
         <SectionHeader icon={FlaskConical} title="Lab Results" />
         <div className="overflow-x-auto">
           <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                {['Test', 'Result', 'Reference Range', 'Unit', 'Flag'].map((h) => (
-                  <TableHead key={h} className="py-2 px-3" style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>{h}</TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
+            <TableHeader><TableRow className="hover:bg-transparent">
+              {['Test', 'Result', 'Reference Range', 'Unit', 'Flag'].map((h) => (
+                <TableHead key={h} className="py-2 px-3" style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>{h}</TableHead>
+              ))}
+            </TableRow></TableHeader>
             <TableBody>
               {record.labResults.map((lab, i) => {
                 const flagStyle = labFlagColors[lab.flag];
                 return (
                   <TableRow key={i} className="hover:bg-[var(--surface-elevated)]">
-                    <TableCell className="py-2.5 px-3">
-                      <span className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 500 }}>{lab.testName}</span>
-                    </TableCell>
-                    <TableCell className="py-2.5 px-3">
-                      <span style={{ fontSize: '14px', fontWeight: 600, color: flagStyle.text }}>{lab.result}</span>
-                    </TableCell>
-                    <TableCell className="py-2.5 px-3">
-                      <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{lab.referenceRange}</span>
-                    </TableCell>
-                    <TableCell className="py-2.5 px-3">
-                      <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{lab.unit}</span>
-                    </TableCell>
-                    <TableCell className="py-2.5 px-3">
-                      <span className="inline-block px-2 py-0.5" style={{ backgroundColor: flagStyle.bg, color: flagStyle.text, borderRadius: '9999px', fontSize: '12px', fontWeight: 600 }}>
-                        {flagStyle.label}
-                      </span>
-                    </TableCell>
+                    <TableCell className="py-2.5 px-3"><span className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 500 }}>{lab.testName}</span></TableCell>
+                    <TableCell className="py-2.5 px-3"><span style={{ fontSize: '14px', fontWeight: 600, color: flagStyle.text }}>{lab.result}</span></TableCell>
+                    <TableCell className="py-2.5 px-3"><span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{lab.referenceRange}</span></TableCell>
+                    <TableCell className="py-2.5 px-3"><span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{lab.unit}</span></TableCell>
+                    <TableCell className="py-2.5 px-3"><span className="inline-block px-2 py-0.5" style={{ backgroundColor: flagStyle.bg, color: flagStyle.text, borderRadius: '9999px', fontSize: '12px', fontWeight: 600 }}>{flagStyle.label}</span></TableCell>
                   </TableRow>
                 );
               })}
@@ -941,8 +1107,187 @@ export default function RecordDetailPage() {
           </Table>
         </div>
       </div>
+      )}
 
-      {/* ───────── Section 7: Follow-Up ───────── */}
+      {/* ───────── Section 7: Vaccinations ───────── */}
+      {record.vaccinations.length > 0 && (
+      <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6 mb-6" style={{ borderRadius: '12px' }}>
+        <SectionHeader icon={Syringe} title="Vaccinations" />
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader><TableRow className="hover:bg-transparent">
+              {['Vaccine', 'Manufacturer', 'Lot #', 'Injection Site', 'Date', 'Next Due', 'Notes'].map((h) => (
+                <TableHead key={h} className="py-2 px-3" style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>{h}</TableHead>
+              ))}
+            </TableRow></TableHeader>
+            <TableBody>
+              {record.vaccinations.map((v, i) => (
+                <TableRow key={i} className="hover:bg-[var(--surface-elevated)]">
+                  <TableCell className="py-3 px-3"><span className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 600 }}>{v.name}</span></TableCell>
+                  <TableCell className="py-3 px-3"><span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{v.manufacturer}</span></TableCell>
+                  <TableCell className="py-3 px-3"><span className="text-[var(--text-secondary)]" style={{ fontSize: '13px', fontFamily: 'monospace' }}>{v.lotNumber}</span></TableCell>
+                  <TableCell className="py-3 px-3"><span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{v.site}</span></TableCell>
+                  <TableCell className="py-3 px-3"><span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{v.date}</span></TableCell>
+                  <TableCell className="py-3 px-3"><span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{v.nextDue}</span></TableCell>
+                  <TableCell className="py-3 px-3 max-w-[200px]"><span className="text-[var(--text-secondary)]" style={{ fontSize: '12px' }}>{v.notes}</span></TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </div>
+      )}
+
+      {/* ───────── Section 8: Imaging Studies ───────── */}
+      {record.imagingStudies.length > 0 && (
+      <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6 mb-6" style={{ borderRadius: '12px' }}>
+        <SectionHeader icon={Image} title="Imaging Studies" />
+        <div className="space-y-4">
+          {record.imagingStudies.map((study, i) => (
+            <div key={i} className="border border-[var(--border-color)] p-4" style={{ borderRadius: '10px' }}>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[var(--text-primary)]" style={{ fontSize: '15px', fontWeight: 600 }}>{study.title}</span>
+                <span className="inline-block px-2 py-0.5" style={{ backgroundColor: study.status === 'reviewed' ? '#74C69D20' : '#F4A26120', color: study.status === 'reviewed' ? 'var(--brand-green-text)' : '#F4A261', borderRadius: '9999px', fontSize: '12px', fontWeight: 600 }}>{study.status}</span>
+              </div>
+              <p className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{study.modality} · {study.region} · {study.date}</p>
+              {study.findings && <div className="mt-3 p-3 bg-[var(--surface-elevated)]" style={{ borderRadius: '8px', borderLeft: '3px solid var(--brand-green-text)' }}><span className="text-[var(--text-secondary)]" style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' }}>Findings</span><p className="text-[var(--text-primary)] mt-1" style={{ fontSize: '13px' }}>{study.findings}</p></div>}
+              {study.impression && <p className="text-[var(--text-secondary)] mt-2" style={{ fontSize: '13px' }}><strong>Impression:</strong> {study.impression}</p>}
+              {study.images.length > 0 && <div className="flex gap-2 mt-3">{study.images.map((img, j) => (<img key={j} src={img.url} alt={img.label} className="object-cover" style={{ width: 100, height: 100, borderRadius: 8, border: '1px solid var(--border-color)' }} />))}</div>}
+            </div>
+          ))}
+        </div>
+      </div>
+      )}
+
+      {/* ───────── Section 9: Surgeries ───────── */}
+      {record.surgeries.length > 0 && (
+      <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6 mb-6" style={{ borderRadius: '12px' }}>
+        <SectionHeader icon={Scissors} title="Surgeries" />
+        <div className="space-y-4">
+          {record.surgeries.map((s, i) => (
+            <div key={i} className="border border-[var(--border-color)] p-4" style={{ borderRadius: '10px' }}>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[var(--text-primary)]" style={{ fontSize: '15px', fontWeight: 600 }}>{s.name}</span>
+                <span className="inline-block px-2 py-0.5" style={{ backgroundColor: s.status === 'Recovered' ? '#74C69D20' : s.status === 'Complications' ? '#d4183d20' : '#F4A26120', color: s.status === 'Recovered' ? 'var(--brand-green-text)' : s.status === 'Complications' ? '#d4183d' : '#F4A261', borderRadius: '9999px', fontSize: '12px', fontWeight: 600 }}>{s.status}</span>
+              </div>
+              <p className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{s.date} · {s.duration}{s.anesthesia !== '—' ? ` · Anesthesia: ${s.anesthesia}` : ''}</p>
+              {s.procedureNotes && <div className="mt-3 p-3 bg-[var(--surface-elevated)]" style={{ borderRadius: '8px', borderLeft: '3px solid var(--brand-green-text)' }}><span className="text-[var(--text-secondary)]" style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' }}>Procedure Notes</span><p className="text-[var(--text-primary)] mt-1" style={{ fontSize: '13px' }}>{s.procedureNotes}</p></div>}
+              {s.postOp && <p className="text-[var(--text-secondary)] mt-2" style={{ fontSize: '13px' }}><strong>Post-Op:</strong> {s.postOp}</p>}
+              {s.complications && <p className="mt-2" style={{ fontSize: '13px', color: '#d4183d' }}><strong>Complications:</strong> {s.complications}</p>}
+            </div>
+          ))}
+        </div>
+      </div>
+      )}
+
+      {/* ───────── Section 10: Treatment Plans ───────── */}
+      {record.treatmentPlans.length > 0 && (
+      <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6 mb-6" style={{ borderRadius: '12px' }}>
+        <SectionHeader icon={ClipboardList} title="Treatment Plans" />
+        <div className="space-y-4">
+          {record.treatmentPlans.map((plan, i) => (
+            <div key={i} className="border border-[var(--border-color)] p-4" style={{ borderRadius: '10px' }}>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[var(--text-primary)]" style={{ fontSize: '15px', fontWeight: 600 }}>{plan.title}</span>
+                <span className="inline-block px-2 py-0.5" style={{ backgroundColor: '#74C69D20', color: 'var(--brand-green-text)', borderRadius: '9999px', fontSize: '12px', fontWeight: 600 }}>{plan.status}</span>
+              </div>
+              {plan.goals.length > 0 && <div className="mt-3"><span className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase' }}>Goals</span><div className="mt-2 space-y-2">{plan.goals.map((g, j) => (<div key={j} className="flex items-center gap-3"><div className="flex-1"><p className="text-[var(--text-primary)]" style={{ fontSize: '13px' }}>{g.text}</p><div className="mt-1 h-1.5 w-full bg-[var(--surface-elevated)]" style={{ borderRadius: 4 }}><div style={{ width: `${g.progress}%`, height: '100%', backgroundColor: 'var(--brand-green-text)', borderRadius: 4 }} /></div></div><span className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600 }}>{g.progress}%</span></div>))}</div></div>}
+              {plan.medications.length > 0 && <div className="mt-3"><span className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase' }}>Plan Medications</span><div className="mt-1 space-y-1">{plan.medications.map((m, j) => (<p key={j} className="text-[var(--text-primary)]" style={{ fontSize: '13px' }}><strong>{m.name}</strong> {m.dose} — <em className="text-[var(--text-secondary)]">{m.purpose}</em></p>))}</div></div>}
+              {plan.notes && <p className="text-[var(--text-secondary)] mt-3" style={{ fontSize: '13px' }}>{plan.notes}</p>}
+            </div>
+          ))}
+        </div>
+      </div>
+      )}
+
+      {/* ───────── Section 11: Diet & Nutrition ───────── */}
+      {record.dietPlans.length > 0 && (
+      <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6 mb-6" style={{ borderRadius: '12px' }}>
+        <SectionHeader icon={Utensils} title="Diet & Nutrition" />
+        <div className="space-y-4">
+          {record.dietPlans.map((d, i) => (
+            <div key={i} className="border border-[var(--border-color)] p-4" style={{ borderRadius: '10px' }}>
+              <span className="text-[var(--text-primary)]" style={{ fontSize: '15px', fontWeight: 600 }}>{d.food}</span>
+              <span className="text-[var(--text-secondary)] ml-2" style={{ fontSize: '13px' }}>({d.foodType})</span>
+              <div className="grid grid-cols-3 gap-4 mt-3">
+                <div><span className="text-[var(--text-secondary)]" style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' }}>Amount</span><p className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 600 }}>{d.amount}</p></div>
+                <div><span className="text-[var(--text-secondary)]" style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' }}>Meals</span><p className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 600 }}>{d.meals}</p></div>
+                <div><span className="text-[var(--text-secondary)]" style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' }}>Calories</span><p className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 600 }}>{d.calories}</p></div>
+              </div>
+              {d.targetWeight !== '—' && <p className="text-[var(--text-secondary)] mt-2" style={{ fontSize: '13px' }}>Target Weight: <strong className="text-[var(--text-primary)]">{d.targetWeight}</strong></p>}
+              {d.restrictions.length > 0 && <div className="mt-3"><span className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase' }}>Restrictions</span><div className="flex flex-wrap gap-2 mt-1">{d.restrictions.map((rx, j) => (<span key={j} className="inline-block px-2.5 py-1" style={{ backgroundColor: '#FEF3C720', border: '1px solid #F59E0B40', color: '#92400E', borderRadius: '6px', fontSize: '12px', fontWeight: 600 }}>{rx.item}</span>))}</div></div>}
+              {d.notes && <p className="text-[var(--text-secondary)] mt-3" style={{ fontSize: '13px' }}>{d.notes}</p>}
+            </div>
+          ))}
+        </div>
+      </div>
+      )}
+
+      {/* ───────── Section 12: Conditions & Allergies ───────── */}
+      {(record.conditions.length > 0 || record.allergies.length > 0) && (
+      <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6 mb-6" style={{ borderRadius: '12px' }}>
+        <SectionHeader icon={Shield} title="Medical Conditions & Allergies" />
+        {record.conditions.length > 0 && (
+          <div className="mb-4">
+            <span className="text-[var(--text-secondary)] block mb-2" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Active Conditions</span>
+            <div className="overflow-x-auto">
+              <Table><TableHeader><TableRow className="hover:bg-transparent">
+                {['Condition', 'Severity', 'Diagnosed', 'Notes'].map((h) => (<TableHead key={h} className="py-2 px-3" style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>{h}</TableHead>))}
+              </TableRow></TableHeader><TableBody>
+                {record.conditions.map((c, i) => (<TableRow key={i} className="hover:bg-[var(--surface-elevated)]">
+                  <TableCell className="py-2 px-3"><span className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 600 }}>{c.name}</span></TableCell>
+                  <TableCell className="py-2 px-3"><span className="inline-block px-2 py-0.5" style={{ backgroundColor: c.severity === 'severe' ? '#d4183d20' : c.severity === 'moderate' ? '#F4A26120' : '#74C69D20', color: c.severity === 'severe' ? '#d4183d' : c.severity === 'moderate' ? '#F4A261' : 'var(--brand-green-text)', borderRadius: '9999px', fontSize: '12px', fontWeight: 600 }}>{c.severity}</span></TableCell>
+                  <TableCell className="py-2 px-3"><span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{c.diagnosed}</span></TableCell>
+                  <TableCell className="py-2 px-3"><span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>{c.notes}</span></TableCell>
+                </TableRow>))}
+              </TableBody></Table>
+            </div>
+          </div>
+        )}
+        {record.allergies.length > 0 && (
+          <div>
+            <span className="text-[var(--text-secondary)] block mb-2" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Allergies</span>
+            <div className="flex flex-wrap gap-2">
+              {record.allergies.map((a, i) => (<span key={i} className="inline-block px-3 py-1" style={{ backgroundColor: '#FEE2E220', border: '1px solid #EF444440', color: '#991B1B', borderRadius: '8px', fontSize: '13px', fontWeight: 600 }}>{a}</span>))}
+            </div>
+          </div>
+        )}
+      </div>
+      )}
+
+      {/* ───────── Section 13: Visit Notes ───────── */}
+      {record.visitNotes.length > 0 && (
+      <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6 mb-6" style={{ borderRadius: '12px' }}>
+        <SectionHeader icon={StickyNote} title="Visit Notes" />
+        <div className="space-y-3">
+          {record.visitNotes.map((n, i) => (
+            <div key={i} className="p-4" style={{ borderRadius: '8px', borderLeft: `3px solid ${n.type === 'vet' ? 'var(--brand-green-text)' : '#3B82F6'}`, backgroundColor: 'var(--surface-elevated)' }}>
+              <span className="text-[var(--text-secondary)]" style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' }}>{n.type === 'vet' ? 'Vet Note' : 'Client Note'} — {n.date}</span>
+              <p className="text-[var(--text-primary)] mt-2" style={{ fontSize: '14px', whiteSpace: 'pre-wrap' }}>{n.content}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+      )}
+
+      {/* ───────── Section 14: Photos ───────── */}
+      {record.photos.length > 0 && (
+      <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6 mb-6" style={{ borderRadius: '12px' }}>
+        <SectionHeader icon={Camera} title="Photos" />
+        <div className="grid grid-cols-4 gap-3">
+          {record.photos.map((p, i) => (
+            <div key={i} className="text-center">
+              <img src={p.url} alt={p.title} className="w-full object-cover" style={{ height: 140, borderRadius: 10, border: '1px solid var(--border-color)' }} />
+              <p className="text-[var(--text-primary)] mt-2" style={{ fontSize: '12px', fontWeight: 600 }}>{p.title}</p>
+              {p.caption && <p className="text-[var(--text-secondary)]" style={{ fontSize: '11px' }}>{p.caption}</p>}
+            </div>
+          ))}
+        </div>
+      </div>
+      )}
+
+      {/* ───────── Section 15: Follow-Up ───────── */}
+      {record.followUp.nextVisitDate !== '—' && (
       <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6 mb-6" style={{ borderRadius: '12px' }}>
         <SectionHeader icon={CalendarCheck} title="Follow-Up" />
         <div className="grid grid-cols-2 gap-6">
@@ -951,12 +1296,15 @@ export default function RecordDetailPage() {
             <InfoRow label="Reason" value={record.followUp.nextVisitReason} />
             <InfoRow label="Reminder Set" value={record.followUp.reminderSet ? 'Yes' : 'No'} />
           </div>
+          {record.followUp.notes && (
           <div>
             <span className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Additional Notes</span>
             <p className="text-[var(--text-primary)] mt-2 leading-relaxed" style={{ fontSize: '14px' }}>{record.followUp.notes}</p>
           </div>
+          )}
         </div>
       </div>
+      )}
 
       {/* ───────── Footer: Metadata ───────── */}
       <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6" style={{ borderRadius: '12px' }}>

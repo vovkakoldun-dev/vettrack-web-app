@@ -4,7 +4,7 @@ import { useActiveVisit } from '../context/ActiveVisitContext';
 import {
   ArrowLeft, ClipboardList, ChevronRight,
   Scale, Thermometer, Heart, Activity, AlertCircle,
-  Plus, X, Timer, ExternalLink,
+  Plus, X, Timer, ExternalLink, EyeOff, Settings2, RotateCcw,
   CheckSquare, Phone, Pill, FlaskConical, Bell, Calendar, FileText, Syringe, Shield, Ban,
   Download, Eye, CheckCircle2, Clock, Save, Loader2, Camera, Scissors, ImageIcon, Utensils, StickyNote, ClipboardCheck,
 } from 'lucide-react';
@@ -31,6 +31,7 @@ import {
   DietTab,
   PhotosTab,
 } from './ClientDetailPage';
+import { MedicalOverviewTab } from './MedicalOverviewTab';
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -116,9 +117,24 @@ const BODY_SYSTEMS = [
   'Musculoskeletal', 'Neurological', 'Urogenital', 'Rectum / Anal',
 ];
 
+// ─── General-tab section IDs (for show/hide) ────────────────
+type SectionId = 'chief' | 'vitals' | 'vaccination' | 'exam' | 'diagnosis' | 'lab' | 'meds' | 'notes' | 'tasks';
+
+const SECTION_LABELS: Record<SectionId, string> = {
+  chief: 'Chief Complaint',
+  vitals: 'Vitals',
+  vaccination: 'Vaccination Details',
+  exam: 'Physical Examination',
+  diagnosis: 'Diagnosis',
+  lab: 'Lab Samples Collected',
+  meds: 'Medications Prescribed',
+  notes: 'Treatment Notes',
+  tasks: 'Front Desk Tasks',
+};
+
 // ─── Section Header ──────────────────────────────────────────
 
-function SectionCard({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
+function SectionCard({ icon, title, children, onHide }: { icon: React.ReactNode; title: string; children: React.ReactNode; onHide?: () => void }) {
   return (
     <div
       className="bg-[var(--surface-white)] border border-[var(--border-color)]"
@@ -129,7 +145,17 @@ function SectionCard({ icon, title, children }: { icon: React.ReactNode; title: 
         style={{ backgroundColor: 'var(--surface-elevated)' }}
       >
         <span className="text-[var(--brand-green-text)]">{icon}</span>
-        <span className="text-[var(--text-primary)]" style={{ fontSize: '15px', fontWeight: 600 }}>{title}</span>
+        <span className="text-[var(--text-primary)] flex-1" style={{ fontSize: '15px', fontWeight: 600 }}>{title}</span>
+        {onHide && (
+          <button
+            onClick={onHide}
+            className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors p-1"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', borderRadius: '6px' }}
+            title={`Hide ${title} section`}
+          >
+            <EyeOff className="w-4 h-4" />
+          </button>
+        )}
       </div>
       <div className="p-6">{children}</div>
     </div>
@@ -212,6 +238,14 @@ export default function VisitPage() {
   }
   const draft = savedDraft.current!;
 
+  // ── Hidden sections (restored from draft) ──────────────────
+  const [hiddenSections, setHiddenSections] = useState<Set<SectionId>>(
+    new Set(draft.hiddenSections ?? [])
+  );
+  const hideSection = (s: SectionId) => setHiddenSections(prev => new Set([...prev, s]));
+  const showSection = (s: SectionId) => setHiddenSections(prev => { const n = new Set(prev); n.delete(s); return n; });
+  const showAllSections = () => setHiddenSections(new Set());
+
   // ── Form state (restored from draft if available) ──────────
   const [chiefComplaint, setChiefComplaint] = useState(draft.chiefComplaint ?? '');
 
@@ -275,6 +309,7 @@ export default function VisitPage() {
     saveTimerRef.current = setTimeout(() => {
       try {
         sessionStorage.setItem(draftKey, JSON.stringify({
+          hiddenSections: Array.from(hiddenSections),
           chiefComplaint, weight, temp, heartRate, respRate, painScore, bcs,
           examNotes, systemsWnl,
           primaryDx, secondaryDx, dxNotes, icdCode,
@@ -290,7 +325,7 @@ export default function VisitPage() {
     }, 500);
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
   }, [
-    draftKey, chiefComplaint, weight, temp, heartRate, respRate, painScore, bcs,
+    draftKey, hiddenSections, chiefComplaint, weight, temp, heartRate, respRate, painScore, bcs,
     examNotes, systemsWnl,
     primaryDx, secondaryDx, dxNotes, icdCode,
     selectedTests, testNotes,
@@ -637,6 +672,7 @@ export default function VisitPage() {
           <div className="w-full max-w-full overflow-x-auto min-w-0" style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
             <TabsList className="w-auto inline-flex">
               <TabsTrigger value="general"><ClipboardList className="w-3.5 h-3.5" />General</TabsTrigger>
+              <TabsTrigger value="medical-overview"><Heart className="w-3.5 h-3.5" />Medical Overview</TabsTrigger>
               <TabsTrigger value="injections"><Syringe className="w-3.5 h-3.5" />Injections</TabsTrigger>
               <TabsTrigger value="xray"><ImageIcon className="w-3.5 h-3.5" />X-Ray</TabsTrigger>
               <TabsTrigger value="surgery"><Scissors className="w-3.5 h-3.5" />Surgery</TabsTrigger>
@@ -652,8 +688,59 @@ export default function VisitPage() {
           {/* ═══════════════ GENERAL TAB ═══════════════ */}
           <TabsContent value="general" className="space-y-6 mt-4">
 
+        {/* ── Hidden sections restore bar ── */}
+        {hiddenSections.size > 0 && (
+          <div
+            className="flex items-center gap-2 flex-wrap px-4 py-3"
+            style={{
+              borderRadius: '10px',
+              border: '1px dashed var(--border-color)',
+              backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 3%, transparent)',
+            }}
+          >
+            <Settings2 className="w-4 h-4 text-[var(--text-secondary)] flex-shrink-0" />
+            <span className="text-[var(--text-secondary)] flex-shrink-0" style={{ fontSize: '13px', fontWeight: 500 }}>
+              {hiddenSections.size} hidden:
+            </span>
+            {Array.from(hiddenSections).map((s) => (
+              <button
+                key={s}
+                onClick={() => showSection(s)}
+                className="inline-flex items-center gap-1 px-2.5 py-1 transition-colors hover:opacity-80"
+                style={{
+                  borderRadius: '6px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 10%, transparent)',
+                  color: 'var(--brand-green-text)',
+                  border: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                <Plus className="w-3 h-3" /> {SECTION_LABELS[s]}
+              </button>
+            ))}
+            <button
+              onClick={showAllSections}
+              className="inline-flex items-center gap-1 px-2.5 py-1 ml-auto transition-colors hover:opacity-80"
+              style={{
+                borderRadius: '6px',
+                fontSize: '12px',
+                fontWeight: 600,
+                color: 'var(--text-secondary)',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              <RotateCcw className="w-3 h-3" /> Show all
+            </button>
+          </div>
+        )}
+
         {/* ── Section 1: Chief Complaint ── */}
-        <SectionCard icon={<ClipboardList className="w-4 h-4" />} title="Chief Complaint">
+        {!hiddenSections.has('chief') && (
+        <SectionCard icon={<ClipboardList className="w-4 h-4" />} title="Chief Complaint" onHide={() => hideSection('chief')}>
           <Textarea
             placeholder="Describe the primary reason for today's visit…"
             value={chiefComplaint}
@@ -661,9 +748,11 @@ export default function VisitPage() {
             style={{ minHeight: '90px', resize: 'vertical' }}
           />
         </SectionCard>
+        )}
 
         {/* ── Section 2: Vitals ── */}
-        <SectionCard icon={<Heart className="w-4 h-4" />} title="Vitals">
+        {!hiddenSections.has('vitals') && (
+        <SectionCard icon={<Heart className="w-4 h-4" />} title="Vitals" onHide={() => hideSection('vitals')}>
           <div className="grid grid-cols-3 gap-4">
             {[
               { label: 'Weight (kg)', value: weight, set: setWeight, placeholder: 'e.g. 12.5', icon: <Scale className="w-3.5 h-3.5" style={{ color: '#F4A261' }} />, hint: 'Normal: varies by breed' },
@@ -691,10 +780,11 @@ export default function VisitPage() {
             ))}
           </div>
         </SectionCard>
+        )}
 
         {/* ── Vaccination-specific form ── */}
-        {hasVaccination && (
-          <SectionCard icon={<Syringe className="w-4 h-4" />} title="Vaccination Details">
+        {hasVaccination && !hiddenSections.has('vaccination') && (
+          <SectionCard icon={<Syringe className="w-4 h-4" />} title="Vaccination Details" onHide={() => hideSection('vaccination')}>
             <div className="space-y-5">
               {/* Vaccine Name */}
               <div>
@@ -836,7 +926,8 @@ export default function VisitPage() {
 
         {!isVaccinationOnly && (<>
         {/* ── Section 3: Physical Examination ── */}
-        <SectionCard icon={<Activity className="w-4 h-4" />} title="Physical Examination">
+        {!hiddenSections.has('exam') && (
+        <SectionCard icon={<Activity className="w-4 h-4" />} title="Physical Examination" onHide={() => hideSection('exam')}>
           <Textarea
             placeholder="General exam findings…"
             value={examNotes}
@@ -895,9 +986,11 @@ export default function VisitPage() {
             })}
           </div>
         </SectionCard>
+        )}
 
         {/* ── Section 4: Diagnosis ── */}
-        <SectionCard icon={<ClipboardList className="w-4 h-4" />} title="Diagnosis">
+        {!hiddenSections.has('diagnosis') && (
+        <SectionCard icon={<ClipboardList className="w-4 h-4" />} title="Diagnosis" onHide={() => hideSection('diagnosis')}>
           <div className="grid grid-cols-2 gap-4 mb-4">
             <div style={{ position: 'relative' }}>
               <label className="text-[var(--text-primary)] mb-1.5 block" style={{ fontSize: '13px', fontWeight: 600 }}>
@@ -973,9 +1066,11 @@ export default function VisitPage() {
             />
           </div>
         </SectionCard>
+        )}
 
         {/* ── Section 5: Lab Samples ── */}
-        <SectionCard icon={<Activity className="w-4 h-4" />} title="Lab Samples Collected">
+        {!hiddenSections.has('lab') && (
+        <SectionCard icon={<Activity className="w-4 h-4" />} title="Lab Samples Collected" onHide={() => hideSection('lab')}>
           <p className="text-[var(--text-secondary)] mb-5" style={{ fontSize: '13px' }}>
             Select all samples collected during this visit. They will appear in the Lab queue.
           </p>
@@ -1036,9 +1131,11 @@ export default function VisitPage() {
             ))}
           </div>
         </SectionCard>
+        )}
 
         {/* ── Section 6: Medications Prescribed ── */}
-        <SectionCard icon={<Plus className="w-4 h-4" />} title="Medications Prescribed">
+        {!hiddenSections.has('meds') && (
+        <SectionCard icon={<Plus className="w-4 h-4" />} title="Medications Prescribed" onHide={() => hideSection('meds')}>
           <div className="flex items-center justify-between mb-3">
             <span />
             <button
@@ -1129,10 +1226,12 @@ export default function VisitPage() {
             </div>
           )}
         </SectionCard>
+        )}
         </>)}
 
         {/* ── Section 7: Treatment Notes ── */}
-        <SectionCard icon={<ClipboardList className="w-4 h-4" />} title="Treatment Notes">
+        {!hiddenSections.has('notes') && (
+        <SectionCard icon={<ClipboardList className="w-4 h-4" />} title="Treatment Notes" onHide={() => hideSection('notes')}>
           <div className="space-y-4">
             <div>
               <label className="text-[var(--text-primary)] mb-1.5 block" style={{ fontSize: '13px', fontWeight: 600 }}>
@@ -1158,10 +1257,20 @@ export default function VisitPage() {
             </div>
           </div>
         </SectionCard>
+        )}
 
 
           </TabsContent>
           {/* ═══════════════ END GENERAL TAB ═══════════════ */}
+
+          {/* ═══════════════ MEDICAL OVERVIEW TAB ═══════════════ */}
+          <TabsContent value="medical-overview" className="mt-4">
+            {apptIds.petId ? (
+              <MedicalOverviewTab petName={appt.petName} petDbId={apptIds.petId} />
+            ) : (
+              <MissingPetNotice />
+            )}
+          </TabsContent>
 
           {/* ═══════════════ INJECTIONS TAB ═══════════════ */}
           <TabsContent value="injections" className="mt-4">

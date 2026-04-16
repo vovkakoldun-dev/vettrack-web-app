@@ -3188,6 +3188,7 @@ export function XRayTab({ petName, petDbId, readOnly = false }: { petName: strin
 
   const uploadFilesForStudy = async (studyId: string, startOrder: number) => {
     if (newFiles.length === 0) return;
+    let failedCount = 0;
     for (let i = 0; i < newFiles.length; i++) {
       const file = newFiles[i];
       const ext = file.name.split('.').pop() || 'jpg';
@@ -3197,10 +3198,11 @@ export function XRayTab({ petName, petDbId, readOnly = false }: { petName: strin
         .upload(path, file, { contentType: file.type });
       if (upErr) {
         console.error('Imaging upload failed:', upErr);
+        failedCount++;
         continue;
       }
       const { data: urlData } = supabase.storage.from('imaging-studies').getPublicUrl(path);
-      await db.from('imaging_study_files').insert({
+      const { error: dbErr } = await db.from('imaging_study_files').insert({
         study_id: studyId,
         file_url: urlData.publicUrl,
         storage_path: path,
@@ -3211,6 +3213,13 @@ export function XRayTab({ petName, petDbId, readOnly = false }: { petName: strin
         sort_order: startOrder + i,
         uploaded_by: user?.id || null,
       });
+      if (dbErr) {
+        console.error('Failed to save image record:', dbErr);
+        failedCount++;
+      }
+    }
+    if (failedCount > 0) {
+      alert(`${failedCount} of ${newFiles.length} image(s) failed to upload. Please try again.`);
     }
   };
 
@@ -3594,7 +3603,12 @@ export function XRayTab({ petName, petDbId, readOnly = false }: { petName: strin
 
       {/* ── New / Edit Study Dialog ── */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm(); }}>
-        <DialogContent style={{ maxWidth: 640 }} className="max-h-[90vh] overflow-y-auto">
+        <DialogContent
+          style={{ maxWidth: 640 }}
+          className="max-h-[90vh] overflow-y-auto"
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onInteractOutside={(e) => e.preventDefault()}
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <ScanLine className="w-4 h-4" style={{ color: '#8B5CF6' }} />
@@ -7030,7 +7044,11 @@ export function PhotosTab({
 
       {/* ─── Upload Photo Dialog ─────────────────────────────── */}
       <Dialog open={uploadOpen} onOpenChange={(o) => { setUploadOpen(o); if (!o) resetUploadForm(); }}>
-        <DialogContent style={{ maxWidth: 560, width: '95vw', maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
+        <DialogContent
+          style={{ maxWidth: 560, width: '95vw', maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onInteractOutside={(e) => e.preventDefault()}
+        >
           <DialogHeader>
             <DialogTitle>Upload Photo</DialogTitle>
           </DialogHeader>
