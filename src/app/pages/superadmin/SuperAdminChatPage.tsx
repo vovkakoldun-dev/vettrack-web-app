@@ -1070,13 +1070,30 @@ export default function SuperAdminChatPage() {
               .then()
           );
         }
-        // Refresh conversation list for unread counts
-        fetchConversations();
+        // Lightweight sidebar update — zero network requests
+        setConversations(prev => {
+          const updated = prev.map(c => {
+            if (c.id !== msg.conversation_id) return c;
+            return {
+              ...c,
+              lastMessage: msg.content || c.lastMessage,
+              lastMessageTime: new Date(msg.created_at),
+              lastMessageIsMe: msg.sender_id === saProfileId,
+              unread: (msg.conversation_id !== selectedId && msg.sender_id !== saProfileId)
+                ? c.unread + 1 : c.unread,
+            };
+          });
+          return [...updated].sort((a, b) => {
+            if (!a.lastMessageTime) return 1;
+            if (!b.lastMessageTime) return -1;
+            return b.lastMessageTime.getTime() - a.lastMessageTime.getTime();
+          });
+        });
       })
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [saProfileId, selectedId, fetchConversations]);
+  }, [saProfileId, selectedId]);
 
   // ── Auto-scroll ─────────────────────────────────────────────────────────────
 
