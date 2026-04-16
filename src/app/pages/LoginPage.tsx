@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 import { useTheme } from '../hooks/useTheme';
 import { useAuth } from '../context/AuthContext';
+import { supabase } from '../../lib/supabase';
+import { portalForRole, type PortalId } from '../../lib/portal';
 
 type Role = 'doctor' | 'admin' | 'superadmin' | 'patient' | 'sysadmin';
 
@@ -85,17 +87,34 @@ const ROLES: RoleCard[] = [
   },
 ];
 
+/** Maps each login-card id to the portal it represents. */
+const CARD_TO_PORTAL: Record<Role, PortalId> = {
+  doctor: 'doctor',
+  admin: 'admin',
+  superadmin: 'superadmin',
+  patient: 'owner',
+  sysadmin: 'sysadmin',
+};
+
 export default function LoginPage() {
   const navigate = useNavigate();
   const { isDark, toggle } = useTheme();
   const { signIn, signUp } = useAuth();
-  const [selected, setSelected] = useState<Role | null>(null);
+  const [selected, setSelected] = useState<Role | null>(() => {
+    const saved = sessionStorage.getItem('vettrack_portal_selected');
+    if (saved) { sessionStorage.removeItem('vettrack_portal_selected'); return saved as Role; }
+    return null;
+  });
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
-  const [authError, setAuthError] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<string | null>(() => {
+    const saved = sessionStorage.getItem('vettrack_portal_error');
+    if (saved) { sessionStorage.removeItem('vettrack_portal_error'); return saved; }
+    return null;
+  });
   const [signUpSuccess, setSignUpSuccess] = useState(false);
 
   const activeRole = ROLES.find(r => r.id === selected);
@@ -124,36 +143,85 @@ export default function LoginPage() {
     setAuthError(null);
 
     if (isSignUp) {
-      // Sign up flow
       const { error } = await signUp(email, password);
       setLoading(false);
-      if (error) {
-        setAuthError(error);
-        return;
-      }
+      if (error) { setAuthError(error); return; }
       setSignUpSuccess(true);
       return;
     }
 
-    // Sign in flow
+    // ── Sign in with portal validation ────────────────────────
+    // Set flag BEFORE signIn so PublicRoute won't redirect to the dashboard
+    // while we verify the user's role matches the selected portal card.
+    sessionStorage.setItem('vettrack_portal_validating', 'true');
+
     const { error } = await signIn(email, password);
-    setLoading(false);
     if (error) {
+      sessionStorage.removeItem('vettrack_portal_validating');
+      setLoading(false);
       setAuthError(error);
       return;
     }
-    // Navigation happens automatically via auth state change → App.tsx redirect
-    if (selected === 'sysadmin') {
-      navigate('/sysadmin');
-    } else if (selected === 'superadmin') {
-      navigate('/superadmin');
-    } else if (selected === 'admin') {
-      navigate('/admin');
-    } else if (selected === 'patient') {
-      navigate('/owner');
-    } else {
-      navigate('/');
+
+    // Fetch the authenticated user's profile role
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      sessionStorage.removeItem('vettrack_portal_validating');
+      setLoading(false);
+      setAuthError('Unable to verify your account. Please try again.');
+      return;
     }
+
+    const { data: profile, error: profileErr } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .single();
+
+    if (profileErr || !profile?.role) {
+      // Persist error + selected card across the signOut-triggered remount
+      const errorMsg = profileErr
+        ? 'Unable to verify your account. Please try again.'
+        : 'No role assigned to this account. Contact your administrator.';
+      sessionStorage.setItem('vettrack_portal_error', errorMsg);
+      sessionStorage.setItem('vettrack_portal_selected', selected!);
+      await supabase.auth.signOut();
+      sessionStorage.removeItem('vettrack_portal_validating');
+      setLoading(false);
+      setAuthError(errorMsg);
+      return;
+    }
+
+    const userPortal = portalForRole(profile.role);
+    const selectedPortal = CARD_TO_PORTAL[selected!];
+
+    // Sysadmin portal is special — only superadmin role can access it
+    const allowed = selectedPortal === 'sysadmin'
+      ? profile.role === 'superadmin'
+      : userPortal === selectedPortal;
+
+    if (!allowed) {
+      // Persist error + selected card so LoginPage can show the message even if
+      // the auth state change causes a component remount.
+      const portalLabel = activeRole?.label ?? selected;
+      const errorMsg = `This account does not have access to the ${portalLabel} portal. Please select the correct portal for your role.`;
+      sessionStorage.setItem('vettrack_portal_error', errorMsg);
+      sessionStorage.setItem('vettrack_portal_selected', selected!);
+      await supabase.auth.signOut();
+      sessionStorage.removeItem('vettrack_portal_validating');
+      setLoading(false);
+      setAuthError(errorMsg);
+      return;
+    }
+
+    // ── Role matches — proceed with navigation ───────────────
+    sessionStorage.removeItem('vettrack_portal_validating');
+    setLoading(false);
+    if (selected === 'sysadmin') navigate('/sysadmin');
+    else if (selected === 'superadmin') navigate('/superadmin');
+    else if (selected === 'admin') navigate('/admin');
+    else if (selected === 'patient') navigate('/owner');
+    else navigate('/');
   }
 
   const pageBg = isDark

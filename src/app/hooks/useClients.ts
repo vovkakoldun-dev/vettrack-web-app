@@ -110,11 +110,19 @@ export async function deletePetsBulk(petIds: string[]) {
 export async function deleteClientsBulk(clientIds: string[]): Promise<number> {
   if (clientIds.length === 0) return 0
 
-  // Collect pet IDs FIRST so we can clean up storage after the RPC succeeds
+  // Collect pet IDs + profile_ids BEFORE cascade delete
   const { data: pets } = await supabase
     .from('pets')
     .select('id')
     .in('client_id', clientIds)
+
+  const { data: clientRows } = await supabase
+    .from('clients')
+    .select('profile_id')
+    .in('id', clientIds)
+  const profileIds = (clientRows ?? [])
+    .map((c: any) => c.profile_id)
+    .filter(Boolean) as string[]
 
   // Run the cascade on the server in one transaction
   const { data, error } = await supabase.rpc('delete_clients_bulk', { p_client_ids: clientIds })
@@ -137,6 +145,15 @@ export async function deleteClientsBulk(clientIds: string[]): Promise<number> {
           if (b2.data?.length) removals.push(supabase.storage.from('pet-images').remove(b2.data.map(f => `${p.id}/${f.name}`)))
           if (removals.length > 0) await Promise.all(removals)
         } catch {}
+      })
+    )
+  }
+
+  // Best-effort: delete linked owner portal accounts
+  if (profileIds.length > 0) {
+    await Promise.all(
+      profileIds.map(async (pid) => {
+        try { await supabase.rpc('delete_owner_account', { p_user_id: pid }) } catch {}
       })
     )
   }
@@ -265,6 +282,29 @@ export function useClients(options: UseClientsOptions = {}) {
       .select('id, first_name, last_name, email, phone, address, city, state, zip, country, notes, portal_status, health_status, created_at, pets(id, name, species, breed, photo_url, assigned_vet_id, assigned_vet:staff!pets_assigned_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name)))')
       .single()
     if (!err && data) {
+      // ── Auto-create owner portal account ───────────────────
+      // Uses the client's email as login, default password "owner123".
+      if (values.email) {
+        try {
+          const { data: profileId } = await supabase.rpc('create_owner_account', {
+            p_email: values.email,
+            p_password: 'owner123',
+            p_first_name: values.first_name,
+            p_last_name: values.last_name,
+            p_organization_id: organizationId,
+          })
+          // Link the client record to the new profile
+          if (profileId) {
+            await db
+              .from('clients')
+              .update({ profile_id: profileId })
+              .eq('id', (data as any).id)
+          }
+        } catch (e) {
+          console.error('[addClient] owner account creation failed:', e)
+        }
+      }
+
       setClients(prev => [data as ClientRow, ...prev])
       // Account for the new row in the pagination offset and total
       offsetRef.current += 1
@@ -291,14 +331,25 @@ export function useClients(options: UseClientsOptions = {}) {
   }, [])
 
   const deleteClient = useCallback(async (id: string) => {
-    // Collect pet IDs first for storage cleanup
+    // Collect pet IDs + profile_id BEFORE cascade delete
     const { data: pets } = await db.from('pets').select('id').eq('client_id', id)
+    const { data: clientRow } = await db.from('clients').select('profile_id').eq('id', id).single()
+    const profileId = (clientRow as any)?.profile_id ?? null
 
     // Run the full cascade in a single transaction on the server
     const { error } = await supabase.rpc('delete_client_cascade', { p_client_id: id })
     if (error) {
       console.error('[deleteClient] RPC failed:', error.message)
       return { error }
+    }
+
+    // ── Delete the linked owner portal account ──────────────
+    if (profileId) {
+      try {
+        await supabase.rpc('delete_owner_account', { p_user_id: profileId })
+      } catch (e) {
+        console.error('[deleteClient] owner account deletion failed:', e)
+      }
     }
 
     // Best-effort storage cleanup

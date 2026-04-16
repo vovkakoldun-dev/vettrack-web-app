@@ -525,8 +525,13 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const [redirectPath, setRedirectPath] = useState<string | null>(null);
 
+  // While LoginPage is validating the user's role against the selected portal
+  // card, we must NOT redirect — otherwise the dashboard flashes briefly before
+  // the mismatch signOut kicks in and the error message is lost.
+  const isValidatingPortal = sessionStorage.getItem('vettrack_portal_validating') === 'true';
+
   useEffect(() => {
-    if (!user) return;
+    if (!user || isValidatingPortal) return;
     // Try sessionStorage cache first for instant redirect (no DB hit)
     const cachedRole = sessionStorage.getItem('vettrack_user_role');
     const resolve = (role: string) => {
@@ -555,9 +560,11 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
       try { sessionStorage.setItem('vettrack_user_role', role); } catch {}
       resolve(role);
     })();
-  }, [user]);
+  }, [user, isValidatingPortal]);
 
   if (loading) return <AuthLoading />;
+  // Keep rendering login form while portal validation is in progress
+  if (isValidatingPortal) return <>{children}</>;
   if (user && redirectPath) return <Navigate to={redirectPath} replace />;
   if (user) return <AuthLoading />;
 

@@ -197,12 +197,11 @@ function TaskCard({
       style={{
         borderRadius: '12px',
         borderLeft: `3px solid ${pCfg.dot}`,
-        opacity: isCompleted ? 0.65 : 1,
       }}
     >
       {/* Main row — clickable to expand */}
       <div
-        style={{ padding: '14px 16px', cursor: 'pointer' }}
+        style={{ padding: '14px 16px', cursor: 'pointer', opacity: isCompleted ? 0.65 : 1, transition: 'opacity 0.2s' }}
         onClick={() => setExpanded(e => !e)}
       >
         <div className="flex items-start gap-3">
@@ -386,11 +385,12 @@ function TaskCard({
 
               {menuOpen && (
                 <div
-                  className="bg-[var(--surface-white)] border border-[var(--border-color)]"
+                  className="border border-[var(--border-color)]"
                   style={{
                     position: 'absolute', right: 0, top: 'calc(100% + 4px)',
-                    borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                    borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.35), 0 0 0 1px rgba(0,0,0,0.08)',
                     zIndex: 30, minWidth: 180, overflow: 'hidden', padding: '4px 0',
+                    background: 'linear-gradient(var(--surface-white), var(--surface-white)), linear-gradient(var(--bg-offwhite), var(--bg-offwhite))',
                   }}
                 >
                   {/* Claim / Unclaim */}
@@ -487,6 +487,7 @@ function TaskCard({
           style={{
             borderTop: '1px solid var(--border-color)',
             padding: '14px 16px 14px 55px',
+            opacity: isCompleted ? 0.65 : 1,
           }}
         >
           <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
