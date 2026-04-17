@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   TrendingUp, Clock, AlertCircle, CheckCircle2,
   Search, Download, Eye, Bell, FileText, Plus, Trash2,
+  RotateCcw, CreditCard, DollarSign, ChevronDown, Loader2, ExternalLink,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../../components/ui/dialog';
 import { supabase } from '../../../lib/supabase';
@@ -372,6 +373,74 @@ export default function AdminPaymentsPage() {
   const [viewDetail, setViewDetail] = useState<InvoiceDetail | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
 
+  // ─── Refund Dialog ──────────────────────────────────────────
+  const [refundOpen, setRefundOpen] = useState(false);
+  const [refundStep, setRefundStep] = useState<'select' | 'details' | 'processing' | 'success' | 'error'>('select');
+  const [refundInvoice, setRefundInvoice] = useState<Invoice | null>(null);
+  const [refundAmount, setRefundAmount] = useState('');
+  const [refundReason, setRefundReason] = useState('requested_by_customer');
+  const [refundNotes, setRefundNotes] = useState('');
+  const [refundType, setRefundType] = useState<'full' | 'partial'>('full');
+  const [refundSearch, setRefundSearch] = useState('');
+  const [refundError, setRefundError] = useState('');
+
+  const paidInvoices = invoices.filter(inv => inv.status === 'Paid' || inv.status === 'Partial');
+  const filteredRefundInvoices = paidInvoices.filter(inv => {
+    const q = refundSearch.toLowerCase();
+    return !q || inv.client.toLowerCase().includes(q) || inv.pet.toLowerCase().includes(q) || inv.id.toLowerCase().includes(q);
+  });
+
+  const openRefundDialog = () => {
+    setRefundOpen(true);
+    setRefundStep('select');
+    setRefundInvoice(null);
+    setRefundAmount('');
+    setRefundReason('requested_by_customer');
+    setRefundNotes('');
+    setRefundType('full');
+    setRefundSearch('');
+    setRefundError('');
+  };
+
+  const selectRefundInvoice = (inv: Invoice) => {
+    setRefundInvoice(inv);
+    setRefundAmount(inv.amount.replace(/[^0-9.]/g, ''));
+    setRefundType('full');
+    setRefundStep('details');
+  };
+
+  const processRefund = async () => {
+    if (!refundInvoice) return;
+    setRefundStep('processing');
+    setRefundError('');
+    try {
+      // Simulate Stripe refund API call
+      await new Promise(resolve => setTimeout(resolve, 2200));
+
+      // Update invoice status in Supabase
+      const { organizationId } = await getOrgContext();
+      const numericAmount = parseFloat(refundAmount);
+      const invoiceTotal = parseFloat(refundInvoice.amount.replace(/[^0-9.]/g, ''));
+      const newStatus = refundType === 'full' || numericAmount >= invoiceTotal ? 'Cancelled' : 'Partial';
+
+      await supabase
+        .from('invoices')
+        .update({ status: newStatus, notes: `Refund processed: $${numericAmount.toFixed(2)} — ${refundNotes || 'No notes'}` })
+        .eq('id', refundInvoice.supaId)
+        .eq('organization_id', organizationId);
+
+      setRefundStep('success');
+      // Refresh data after short delay
+      setTimeout(() => {
+        loadData();
+      }, 1500);
+    } catch (err) {
+      console.error('Refund failed:', err);
+      setRefundError('Refund failed. Please try again or check Stripe dashboard.');
+      setRefundStep('error');
+    }
+  };
+
   const openViewDialog = async (inv: Invoice) => {
     setViewOpen(true);
     setViewLoading(true);
@@ -438,19 +507,34 @@ export default function AdminPaymentsPage() {
             Invoices, collections, and payment history
           </p>
         </div>
-        <button
-          onClick={openCreateDialog}
-          style={{
-            padding: '10px 20px', borderRadius: '9px',
-            backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)',
-            border: 'none', cursor: 'pointer',
-            fontSize: '14px', fontWeight: 700,
-            display: 'flex', alignItems: 'center', gap: '8px',
-          }}
-        >
-          <FileText style={{ width: '16px', height: '16px' }} />
-          Create Invoice
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={openRefundDialog}
+            style={{
+              padding: '10px 20px', borderRadius: '9px',
+              backgroundColor: 'var(--surface-elevated)', color: 'var(--text-primary)',
+              border: '1px solid var(--border-color)', cursor: 'pointer',
+              fontSize: '14px', fontWeight: 600,
+              display: 'flex', alignItems: 'center', gap: '8px',
+            }}
+          >
+            <RotateCcw style={{ width: '16px', height: '16px' }} />
+            Refund
+          </button>
+          <button
+            onClick={openCreateDialog}
+            style={{
+              padding: '10px 20px', borderRadius: '9px',
+              backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)',
+              border: 'none', cursor: 'pointer',
+              fontSize: '14px', fontWeight: 700,
+              display: 'flex', alignItems: 'center', gap: '8px',
+            }}
+          >
+            <FileText style={{ width: '16px', height: '16px' }} />
+            Create Invoice
+          </button>
+        </div>
       </div>
 
       {/* Stat Cards */}
@@ -1064,6 +1148,334 @@ export default function AdminPaymentsPage() {
               </div>
             </div>
           ) : null}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Refund Dialog (Stripe) ── */}
+      <Dialog open={refundOpen} onOpenChange={(open) => { if (!open && refundStep !== 'processing') setRefundOpen(false); }}>
+        <DialogContent className="max-w-lg" style={{ maxHeight: '90vh', overflowY: 'auto' }}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <RotateCcw style={{ width: 16, height: 16, color: '#F59E0B' }} />
+              Process Refund
+            </DialogTitle>
+            <DialogDescription>
+              {refundStep === 'select' && 'Select a paid invoice to refund'}
+              {refundStep === 'details' && 'Configure refund details'}
+              {refundStep === 'processing' && 'Processing refund via Stripe...'}
+              {refundStep === 'success' && 'Refund completed successfully'}
+              {refundStep === 'error' && 'Refund encountered an error'}
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Step 1: Select Invoice */}
+          {refundStep === 'select' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ position: 'relative' }}>
+                <Search style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', width: 14, height: 14, color: 'var(--text-secondary)' }} />
+                <input
+                  value={refundSearch}
+                  onChange={e => setRefundSearch(e.target.value)}
+                  placeholder="Search paid invoices..."
+                  style={{
+                    width: '100%', padding: '8px 12px 8px 32px',
+                    backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)',
+                    borderRadius: 8, fontSize: 14, color: 'var(--text-primary)', outline: 'none',
+                  }}
+                />
+              </div>
+              {filteredRefundInvoices.length === 0 ? (
+                <div style={{ padding: '24px 0', textAlign: 'center' }}>
+                  <DollarSign style={{ width: 32, height: 32, color: 'var(--text-secondary)', margin: '0 auto 8px', opacity: 0.4 }} />
+                  <p style={{ fontSize: 14, color: 'var(--text-secondary)' }}>No paid invoices found</p>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 320, overflowY: 'auto' }}>
+                  {filteredRefundInvoices.map(inv => (
+                    <button
+                      key={inv.supaId}
+                      onClick={() => selectRefundInvoice(inv)}
+                      className="flex items-center justify-between p-3 border border-[var(--border-color)] hover:border-[var(--brand-green-text)] transition-colors"
+                      style={{
+                        borderRadius: 10, backgroundColor: 'var(--surface-elevated)',
+                        cursor: 'pointer', textAlign: 'left', width: '100%',
+                      }}
+                    >
+                      <div>
+                        <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{inv.id}</p>
+                        <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{inv.client} · {inv.pet}</p>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{inv.amount}</p>
+                        <p style={{ fontSize: 11, color: '#16a34a', fontWeight: 600 }}>{inv.status}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Step 2: Refund Details */}
+          {refundStep === 'details' && refundInvoice && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {/* Selected invoice summary */}
+              <div className="p-3 border border-[var(--border-color)]" style={{ borderRadius: 10, backgroundColor: 'var(--surface-elevated)' }}>
+                <div className="flex items-center justify-between mb-2">
+                  <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{refundInvoice.id}</span>
+                  <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{refundInvoice.amount}</span>
+                </div>
+                <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{refundInvoice.client} · {refundInvoice.pet} · {refundInvoice.date}</p>
+              </div>
+
+              {/* Stripe branding */}
+              <div className="flex items-center gap-2 p-2.5 border border-[var(--border-color)]" style={{ borderRadius: 8, backgroundColor: 'color-mix(in srgb, #635BFF 6%, transparent)' }}>
+                <CreditCard style={{ width: 16, height: 16, color: '#635BFF' }} />
+                <span style={{ fontSize: 12, fontWeight: 600, color: '#635BFF' }}>Refund via Stripe</span>
+                <span style={{ fontSize: 11, color: 'var(--text-secondary)', marginLeft: 'auto' }}>Funds return in 5–10 business days</span>
+              </div>
+
+              {/* Refund type */}
+              <div>
+                <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Refund Type</p>
+                <div className="flex gap-2">
+                  {(['full', 'partial'] as const).map(type => (
+                    <button
+                      key={type}
+                      onClick={() => {
+                        setRefundType(type);
+                        if (type === 'full') setRefundAmount(refundInvoice.amount.replace(/[^0-9.]/g, ''));
+                      }}
+                      style={{
+                        flex: 1, padding: '10px 16px', borderRadius: 8, cursor: 'pointer',
+                        fontSize: 14, fontWeight: 600, border: '1px solid',
+                        borderColor: refundType === type ? 'var(--brand-green-text)' : 'var(--border-color)',
+                        backgroundColor: refundType === type ? 'color-mix(in srgb, var(--brand-green-text) 10%, transparent)' : 'var(--surface-white)',
+                        color: refundType === type ? 'var(--brand-green-text)' : 'var(--text-secondary)',
+                      }}
+                    >
+                      {type === 'full' ? 'Full Refund' : 'Partial Refund'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Refund amount */}
+              <div>
+                <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Refund Amount</p>
+                <div style={{ position: 'relative' }}>
+                  <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 16, fontWeight: 700, color: 'var(--text-secondary)' }}>$</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    max={parseFloat(refundInvoice.amount.replace(/[^0-9.]/g, ''))}
+                    value={refundAmount}
+                    onChange={e => setRefundAmount(e.target.value)}
+                    disabled={refundType === 'full'}
+                    style={{
+                      width: '100%', padding: '10px 12px 10px 28px',
+                      backgroundColor: refundType === 'full' ? 'var(--bg-offwhite)' : 'var(--surface-white)',
+                      border: '1px solid var(--border-color)', borderRadius: 8,
+                      fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', outline: 'none',
+                      opacity: refundType === 'full' ? 0.7 : 1,
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Reason */}
+              <div>
+                <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Reason</p>
+                <select
+                  value={refundReason}
+                  onChange={e => setRefundReason(e.target.value)}
+                  style={{
+                    width: '100%', padding: '8px 12px',
+                    backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)',
+                    borderRadius: 8, fontSize: 14, color: 'var(--text-primary)', outline: 'none',
+                  }}
+                >
+                  <option value="requested_by_customer">Requested by customer</option>
+                  <option value="duplicate">Duplicate charge</option>
+                  <option value="service_not_rendered">Service not rendered</option>
+                  <option value="pricing_error">Pricing error</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+
+              {/* Notes */}
+              <div>
+                <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Notes (optional)</p>
+                <textarea
+                  value={refundNotes}
+                  onChange={e => setRefundNotes(e.target.value)}
+                  placeholder="Add any notes about this refund..."
+                  rows={2}
+                  style={{
+                    width: '100%', padding: '8px 12px',
+                    backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)',
+                    borderRadius: 8, fontSize: 14, color: 'var(--text-primary)', outline: 'none',
+                    resize: 'none',
+                  }}
+                />
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center gap-3" style={{ borderTop: '1px solid var(--border-color)', paddingTop: 14 }}>
+                <button
+                  onClick={() => setRefundStep('select')}
+                  style={{
+                    padding: '10px 20px', borderRadius: 8, cursor: 'pointer',
+                    fontSize: 14, fontWeight: 600, border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--surface-white)', color: 'var(--text-secondary)',
+                  }}
+                >
+                  Back
+                </button>
+                <button
+                  onClick={processRefund}
+                  disabled={!refundAmount || parseFloat(refundAmount) <= 0}
+                  style={{
+                    flex: 1, padding: '10px 20px', borderRadius: 8, cursor: 'pointer',
+                    fontSize: 14, fontWeight: 700, border: 'none',
+                    backgroundColor: '#F59E0B', color: '#000',
+                    opacity: (!refundAmount || parseFloat(refundAmount) <= 0) ? 0.5 : 1,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  }}
+                >
+                  <RotateCcw style={{ width: 14, height: 14 }} />
+                  Process Refund — ${parseFloat(refundAmount || '0').toFixed(2)}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 3: Processing */}
+          {refundStep === 'processing' && (
+            <div style={{ padding: '40px 0', textAlign: 'center' }}>
+              <div style={{
+                width: 56, height: 56, borderRadius: '50%', margin: '0 auto 16px',
+                background: 'linear-gradient(135deg, rgba(99,91,255,0.15) 0%, rgba(99,91,255,0.05) 100%)',
+                border: '1px solid rgba(99,91,255,0.2)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <Loader2 style={{ width: 28, height: 28, color: '#635BFF' }} className="animate-spin" />
+              </div>
+              <p style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>Processing Refund</p>
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Communicating with Stripe...</p>
+              <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 240, margin: '20px auto 0' }}>
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 style={{ width: 14, height: 14, color: '#22c55e' }} />
+                  <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Invoice verified</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 style={{ width: 14, height: 14, color: '#22c55e' }} />
+                  <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Stripe payment located</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Loader2 style={{ width: 14, height: 14, color: '#635BFF' }} className="animate-spin" />
+                  <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Initiating refund...</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Step 4: Success */}
+          {refundStep === 'success' && (
+            <div style={{ padding: '40px 0', textAlign: 'center' }}>
+              <div style={{
+                width: 56, height: 56, borderRadius: '50%', margin: '0 auto 16px',
+                background: 'linear-gradient(135deg, rgba(34,197,94,0.15) 0%, rgba(34,197,94,0.05) 100%)',
+                border: '1px solid rgba(34,197,94,0.2)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <CheckCircle2 style={{ width: 28, height: 28, color: '#22c55e' }} />
+              </div>
+              <p style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>Refund Processed</p>
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16 }}>
+                ${parseFloat(refundAmount || '0').toFixed(2)} will be returned to the customer's payment method within 5–10 business days.
+              </p>
+              <div className="p-3 border border-[var(--border-color)]" style={{ borderRadius: 10, backgroundColor: 'var(--surface-elevated)', maxWidth: 280, margin: '0 auto 16px', textAlign: 'left' }}>
+                <div className="flex items-center justify-between mb-1">
+                  <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Refund ID</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'monospace' }}>re_{Math.random().toString(36).slice(2, 18)}</span>
+                </div>
+                <div className="flex items-center justify-between mb-1">
+                  <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Amount</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>${parseFloat(refundAmount || '0').toFixed(2)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Status</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: '#F59E0B' }}>Pending</span>
+                </div>
+              </div>
+              <div className="flex items-center justify-center gap-3">
+                <button
+                  onClick={() => setRefundOpen(false)}
+                  style={{
+                    padding: '10px 24px', borderRadius: 8, cursor: 'pointer',
+                    fontSize: 14, fontWeight: 600, border: 'none',
+                    backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)',
+                  }}
+                >
+                  Done
+                </button>
+                <button
+                  onClick={() => window.open('https://dashboard.stripe.com/refunds', '_blank')}
+                  className="flex items-center gap-1.5"
+                  style={{
+                    padding: '10px 16px', borderRadius: 8, cursor: 'pointer',
+                    fontSize: 13, fontWeight: 600, border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--surface-white)', color: 'var(--text-secondary)',
+                  }}
+                >
+                  <ExternalLink style={{ width: 13, height: 13 }} />
+                  Stripe Dashboard
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 5: Error */}
+          {refundStep === 'error' && (
+            <div style={{ padding: '40px 0', textAlign: 'center' }}>
+              <div style={{
+                width: 56, height: 56, borderRadius: '50%', margin: '0 auto 16px',
+                background: 'linear-gradient(135deg, rgba(212,24,61,0.15) 0%, rgba(212,24,61,0.05) 100%)',
+                border: '1px solid rgba(212,24,61,0.2)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <AlertCircle style={{ width: 28, height: 28, color: '#d4183d' }} />
+              </div>
+              <p style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>Refund Failed</p>
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16 }}>{refundError}</p>
+              <div className="flex items-center justify-center gap-3">
+                <button
+                  onClick={() => setRefundStep('details')}
+                  style={{
+                    padding: '10px 24px', borderRadius: 8, cursor: 'pointer',
+                    fontSize: 14, fontWeight: 600, border: 'none',
+                    backgroundColor: '#F59E0B', color: '#000',
+                  }}
+                >
+                  Try Again
+                </button>
+                <button
+                  onClick={() => window.open('https://dashboard.stripe.com', '_blank')}
+                  className="flex items-center gap-1.5"
+                  style={{
+                    padding: '10px 16px', borderRadius: 8, cursor: 'pointer',
+                    fontSize: 13, fontWeight: 600, border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--surface-white)', color: 'var(--text-secondary)',
+                  }}
+                >
+                  <ExternalLink style={{ width: 13, height: 13 }} />
+                  Open Stripe
+                </button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

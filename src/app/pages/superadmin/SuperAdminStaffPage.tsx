@@ -102,7 +102,7 @@ const UI_ROLE_TO_DB: Record<Role, string> = Object.fromEntries(
   Object.entries(DB_ROLE_TO_UI).map(([k, v]) => [v, k])
 ) as Record<Role, string>;
 
-const AVATAR_COLORS = ['var(--brand-green-text)', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261', '#06B6D4', '#6366F1', '#DC2626', '#0EA5E9', '#14B8A6'];
+const AVATAR_COLORS = ['#2D6A4F', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261', '#06B6D4', '#6366F1', '#DC2626', '#0EA5E9', '#14B8A6'];
 
 function roleToDept(role: Role): Department {
   if (['Veterinarian', 'Senior Veterinarian', 'Specialist'].includes(role)) return 'Clinical';

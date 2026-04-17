@@ -160,8 +160,8 @@ export default function ShiftsPage() {
     return Array.from({ length: 7 }, (_, i) => addDays(monday, i));
   }, [monday]);
 
-  const weekStartStr = fmtDate(monday);
-  const weekEndStr = fmtDate(addDays(monday, 6));
+  const weekStartStr = useMemo(() => fmtDate(monday), [monday]);
+  const weekEndStr = useMemo(() => fmtDate(addDays(monday, 6)), [monday]);
 
   // ─── Load Staff + Shifts ────────────────────────────────────
 
@@ -171,31 +171,17 @@ export default function ShiftsPage() {
     try {
       const { organizationId } = await getOrgContext();
 
-      // Get current user's staff record
-      const { data: staffRow } = await db
-        .from('staff')
-        .select('id, profile_id, role, profiles:profiles!staff_profile_id_fkey(first_name, last_name, avatar_url)')
-        .eq('id', user.id)
-        .single();
-
-      if (staffRow) {
-        setMyStaff(staffRow as unknown as StaffRow);
-      }
-
-      // Get my shifts
-      const { data: myShiftData } = await db
-        .from('shifts')
-        .select('*')
-        .eq('organization_id', organizationId)
-        .eq('staff_id', user.id)
-        .gte('date', weekStartStr)
-        .lte('date', weekEndStr)
-        .order('date');
-
-      setMyShifts((myShiftData as Shift[]) || []);
-
-      // Get all team shifts + all staff members + time blocks in parallel
-      const [{ data: allShiftData }, { data: staffData }, { data: timeBlockData }] = await Promise.all([
+      // Run staff lookup + all team data in a single parallel batch
+      const [{ data: staffRow }, { data: allShiftData }, { data: staffData }, { data: timeBlockData }] = await Promise.all([
+        // Get current user's staff record (use profile_id, not id)
+        db
+          .from('staff')
+          .select('id, profile_id, role, profiles:profiles!staff_profile_id_fkey(first_name, last_name, avatar_url)')
+          .eq('profile_id', user.id)
+          .eq('organization_id', organizationId)
+          .limit(1)
+          .maybeSingle(),
+        // All team shifts for the week
         db
           .from('shifts')
           .select('*, staff:staff!shifts_staff_id_fkey(id, role, profiles:profiles!staff_profile_id_fkey(first_name, last_name, avatar_url))')
@@ -203,10 +189,12 @@ export default function ShiftsPage() {
           .gte('date', weekStartStr)
           .lte('date', weekEndStr)
           .order('date'),
+        // All staff members
         db
           .from('staff')
           .select('id, role, profiles:profiles!staff_profile_id_fkey(first_name, last_name, avatar_url)')
           .eq('organization_id', organizationId),
+        // Time blocks (PTO / sick)
         db
           .from('staff_time_blocks')
           .select('staff_id, date, type, status')
@@ -215,6 +203,20 @@ export default function ShiftsPage() {
           .gte('date', weekStartStr)
           .lte('date', weekEndStr),
       ]);
+
+      // Set staff record
+      if (staffRow) {
+        setMyStaff(staffRow as unknown as StaffRow);
+      }
+
+      // Extract my shifts from allShiftData using the real staff.id
+      const myStaffId = (staffRow as any)?.id;
+      const allShiftsArr = (allShiftData as Shift[]) || [];
+      if (myStaffId) {
+        setMyShifts(allShiftsArr.filter(s => s.staff_id === myStaffId));
+      } else {
+        setMyShifts([]);
+      }
 
       // Build time block lookup: "staffId-date" → { type, status }
       const tbMap: Record<string, { type: string; status: string }> = {};
@@ -225,7 +227,7 @@ export default function ShiftsPage() {
       }
       setTimeBlockMap(tbMap);
 
-      setAllShifts((allShiftData as Shift[]) || []);
+      setAllShifts(allShiftsArr);
       setAllStaffList((staffData || []).map((s: any) => ({
         id: s.id,
         role: s.role,

@@ -16,6 +16,7 @@ import {
   Home, BarChart2, Users, Building2, Calendar, CreditCard, Clock,
   Settings, Sun, Moon, ChevronLeft, ChevronRight,
   LogOut, ChevronUp, Crown, MessageSquare, Tag, MonitorSmartphone, PawPrint,
+  FileText,
 } from 'lucide-react';
 
 type NavItem = {
@@ -50,6 +51,7 @@ const NAV_SECTIONS: NavSection[] = [
       { name: 'Appointments',     icon: Calendar,          path: '/superadmin/appointments' },
       { name: 'Patient Portals',  icon: MonitorSmartphone, path: '/superadmin/portals' },
       { name: 'Clients',          icon: PawPrint,          path: '/superadmin/clients' },
+      { name: 'Records',          icon: FileText,          path: '/superadmin/records' },
     ],
   },
   {

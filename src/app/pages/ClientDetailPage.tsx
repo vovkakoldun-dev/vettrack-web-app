@@ -1355,10 +1355,54 @@ export default function ClientDetailPage() {
         </div>
       </div>
 
+      {/* ── Pet Switcher + Add Pet ── */}
+      <div className="flex items-center gap-1.5 mb-4">
+        {client.pets.length > 1 && client.pets.map((pet, idx) => {
+          const isSelected = idx === selectedPetIdx;
+          return (
+            <button
+              key={pet.id}
+              onClick={() => handleSelectPet(idx)}
+              className="flex items-center gap-2 px-3 py-1.5 transition-all"
+              style={{
+                borderRadius: '9999px',
+                fontSize: '13px',
+                fontWeight: isSelected ? 700 : 500,
+                backgroundColor: isSelected ? 'var(--brand-green-text)' : 'var(--surface-elevated)',
+                color: isSelected ? '#000' : 'var(--text-secondary)',
+                border: isSelected ? 'none' : '1px solid var(--border-color)',
+                cursor: 'pointer',
+              }}
+            >
+              <Avatar className="w-5 h-5 flex-shrink-0">
+                <AvatarImage src={pet.image} alt={pet.name} className="object-cover" />
+                <AvatarFallback style={{ fontSize: '8px', color: '#fff' }}>{pet.name.slice(0, 2)}</AvatarFallback>
+              </Avatar>
+              {pet.name}
+            </button>
+          );
+        })}
+        <button
+          onClick={() => setAddPetOpen(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 transition-all hover:bg-[color-mix(in_srgb,var(--brand-green-text)_6%,transparent)]"
+          style={{
+            borderRadius: '9999px',
+            fontSize: '13px',
+            fontWeight: 600,
+            backgroundColor: 'transparent',
+            color: 'var(--brand-green-text)',
+            border: '1px dashed var(--brand-green-text)',
+            cursor: 'pointer',
+          }}
+        >
+          <Plus className="w-3.5 h-3.5" />
+          Add Pet
+        </button>
+      </div>
+
       {/* ─── Tabs ───────────────────────────────────────── */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <div className="flex flex-col gap-4 mb-6">
-          <div className="flex items-center justify-between">
+        <div className="mb-6">
           <div className="overflow-x-auto" style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
           <TabsList className="w-auto inline-flex">
             <TabsTrigger value="overview">Overview</TabsTrigger>
@@ -1374,51 +1418,6 @@ export default function ClientDetailPage() {
             <TabsTrigger value="photos">Photos{(tabCounts.photos ?? 0) > 0 && <span className="inline-block w-1.5 h-1.5 rounded-full ml-1.5" style={{ backgroundColor: 'var(--brand-green-text)' }} />}</TabsTrigger>
             <TabsTrigger value="reports">Reports{(tabCounts.reports ?? 0) > 0 && <span className="inline-block w-1.5 h-1.5 rounded-full ml-1.5" style={{ backgroundColor: 'var(--brand-green-text)' }} />}</TabsTrigger>
           </TabsList>
-          </div>
-          {/* ── Pet Switcher + Add Pet ── */}
-          <div className="flex items-center gap-1.5">
-            {client.pets.length > 1 && client.pets.map((pet, idx) => {
-              const isSelected = idx === selectedPetIdx;
-              return (
-                <button
-                  key={pet.id}
-                  onClick={() => handleSelectPet(idx)}
-                  className="flex items-center gap-2 px-3 py-1.5 transition-all"
-                  style={{
-                    borderRadius: '9999px',
-                    fontSize: '13px',
-                    fontWeight: isSelected ? 700 : 500,
-                    backgroundColor: isSelected ? 'var(--brand-green-text)' : 'var(--surface-elevated)',
-                    color: isSelected ? '#fff' : 'var(--text-secondary)',
-                    border: isSelected ? 'none' : '1px solid var(--border-color)',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <Avatar className="w-5 h-5 flex-shrink-0">
-                    <AvatarImage src={pet.image} alt={pet.name} className="object-cover" />
-                    <AvatarFallback style={{ fontSize: '8px' }}>{pet.name.slice(0, 2)}</AvatarFallback>
-                  </Avatar>
-                  {pet.name}
-                </button>
-              );
-            })}
-            <button
-              onClick={() => setAddPetOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 transition-all hover:bg-[color-mix(in_srgb,var(--brand-green-text)_6%,transparent)]"
-              style={{
-                borderRadius: '9999px',
-                fontSize: '13px',
-                fontWeight: 600,
-                backgroundColor: 'transparent',
-                color: 'var(--brand-green-text)',
-                border: '1px dashed var(--brand-green-text)',
-                cursor: 'pointer',
-              }}
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Add Pet
-            </button>
-          </div>
           </div>
         </div>
 
@@ -2470,18 +2469,18 @@ export default function ClientDetailPage() {
       {/* ─── Add Pet Dialog ─────────────────────────────── */}
       <Dialog open={addPetOpen} onOpenChange={setAddPetOpen}>
         <DialogContent
-          className="p-0 gap-0 overflow-hidden [&>button]:top-[14px] [&>button]:right-[14px] [&>button]:w-8 [&>button]:h-8 [&>button]:flex [&>button]:items-center [&>button]:justify-center [&>button]:rounded-[8px] [&>button]:!bg-white/15 [&>button]:!text-white [&>button]:!opacity-100 [&>button]:hover:!bg-white/25 [&>button]:transition-colors [&>button>svg]:w-4 [&>button>svg]:h-4"
+          className="p-0 gap-0 overflow-hidden [&>button]:top-[14px] [&>button]:right-[14px] [&>button]:w-8 [&>button]:h-8 [&>button]:flex [&>button]:items-center [&>button]:justify-center [&>button]:rounded-[8px] [&>button]:!bg-[var(--surface-white)] [&>button]:!text-[var(--text-secondary)] [&>button]:!opacity-100 [&>button]:hover:!bg-[var(--surface-elevated)] [&>button]:!border [&>button]:!border-[var(--border-color)] [&>button]:transition-colors [&>button>svg]:w-4 [&>button>svg]:h-4"
           style={{ maxWidth: '520px', width: '95vw', maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}
         >
           {/* Header */}
-          <div style={{ background: 'var(--brand-green-text)', padding: '18px 24px', flexShrink: 0 }}>
+          <div style={{ background: 'var(--surface-elevated)', padding: '18px 24px', flexShrink: 0, borderBottom: '1px solid var(--border-color)', borderLeft: '4px solid var(--brand-green-text)' }}>
             <div className="flex items-center gap-3">
-              <div style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: 'rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <PlusCircle style={{ width: '18px', height: '18px', color: '#fff' }} />
+              <div style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 12%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <PlusCircle style={{ width: '18px', height: '18px', color: 'var(--brand-green-text)' }} />
               </div>
               <div>
-                <DialogTitle style={{ fontSize: '17px', fontWeight: 700, color: '#fff', lineHeight: 1.2 }}>Add New Pet</DialogTitle>
-                <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginTop: '1px' }}>Add another pet for {ownerName}</p>
+                <DialogTitle style={{ fontSize: '17px', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.2 }}>Add New Pet</DialogTitle>
+                <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '1px' }}>Add another pet for {ownerName}</p>
               </div>
             </div>
           </div>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   ChevronLeft, ChevronRight, Plus, Clock, Users, RefreshCw,
   AlertTriangle, Trash2, Check, X, Loader2, CalendarDays, BarChart3,
@@ -113,7 +113,7 @@ const SHIFT_LABEL_TEXT: Record<string, string> = {
   'Custom':    '#22D3EE',
 };
 
-const AVATAR_COLORS = ['var(--brand-green-text)', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261', '#06B6D4', '#6366F1', '#DC2626', '#0EA5E9', '#14B8A6'];
+const AVATAR_COLORS = ['#2D6A4F', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261', '#06B6D4', '#6366F1', '#DC2626', '#0EA5E9', '#14B8A6'];
 
 // ─── Time Helpers ─────────────────────────────────────────────
 function fmtShort(t: string): string {
@@ -201,12 +201,16 @@ export default function SuperAdminShiftsPage() {
   const [formEndTime, setFormEndTime] = useState('17:00');
   const [formLabel, setFormLabel] = useState('Full Day');
   const [formNotes, setFormNotes] = useState('');
+  const [formDateMode, setFormDateMode] = useState<'week' | 'month' | 'range'>('week');
+  const [formRangeStart, setFormRangeStart] = useState('');
+  const [formRangeEnd, setFormRangeEnd] = useState('');
+  const [formSkipWeekends, setFormSkipWeekends] = useState(true);
 
   const weekDates = getWeekDates(weekStart);
   const weekEndDate = weekDates[6];
-  // Stable string for dependency arrays — Date objects are compared by reference
-  const weekStartStr = fmtDateISO(weekStart);
-  const weekEndStr = fmtDateISO(weekEndDate);
+  // Stable memoized strings for dependency arrays
+  const weekStartStr = useMemo(() => fmtDateISO(weekStart), [weekStart]);
+  const weekEndStr = useMemo(() => fmtDateISO(weekEndDate), [weekEndDate]);
 
   // ─── Data Loading ─────────────────────────────────────────
   const loadData = useCallback(async () => {
@@ -276,8 +280,8 @@ export default function SuperAdminShiftsPage() {
   }, [authUser, authLoading]);
 
   // ─── Stats Tab Data Loading ───────────────────────────────
-  const statsMonthStr = fmtDateISO(statsMonth);
-  const statsMonthEnd = fmtDateISO(new Date(statsMonth.getFullYear(), statsMonth.getMonth() + 1, 0));
+  const statsMonthStr = useMemo(() => fmtDateISO(statsMonth), [statsMonth]);
+  const statsMonthEnd = useMemo(() => fmtDateISO(new Date(statsMonth.getFullYear(), statsMonth.getMonth() + 1, 0)), [statsMonth]);
 
   useEffect(() => {
     if (activeTab !== 'stats' || !authUser || authLoading) return;
@@ -335,6 +339,55 @@ export default function SuperAdminShiftsPage() {
     setFormEndTime('17:00');
     setFormLabel('Full Day');
     setFormNotes('');
+    setFormDateMode('week');
+    setFormRangeStart('');
+    setFormRangeEnd('');
+    setFormSkipWeekends(true);
+  }
+
+  /** Generate date strings for a date range, optionally skipping weekends. */
+  function getDatesInRange(start: Date, end: Date, skipWeekends: boolean): string[] {
+    const dates: string[] = [];
+    const cur = new Date(start);
+    while (cur <= end) {
+      const day = cur.getDay();
+      if (!skipWeekends || (day !== 0 && day !== 6)) {
+        dates.push(fmtDateISO(cur));
+      }
+      cur.setDate(cur.getDate() + 1);
+    }
+    return dates;
+  }
+
+  /** Apply a quick-select preset. */
+  function applyDatePreset(mode: 'week' | 'month' | 'range') {
+    setFormDateMode(mode);
+    if (mode === 'week') {
+      // Select current view week's weekdays
+      const dates = weekDates
+        .filter(d => formSkipWeekends ? (d.getDay() !== 0 && d.getDay() !== 6) : true)
+        .map(d => fmtDateISO(d));
+      setFormDates(dates);
+    } else if (mode === 'month') {
+      // Select entire month from today
+      const now = new Date();
+      const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      setFormDates(getDatesInRange(now, monthEnd, formSkipWeekends));
+    } else {
+      // Range mode — dates will be computed when range inputs change
+      if (formRangeStart && formRangeEnd) {
+        setFormDates(getDatesInRange(new Date(formRangeStart + 'T00:00'), new Date(formRangeEnd + 'T00:00'), formSkipWeekends));
+      }
+    }
+  }
+
+  /** Recompute dates when range inputs or skip-weekends toggle change. */
+  function updateRangeDates(start: string, end: string, skip: boolean) {
+    setFormRangeStart(start);
+    setFormRangeEnd(end);
+    if (start && end) {
+      setFormDates(getDatesInRange(new Date(start + 'T00:00'), new Date(end + 'T00:00'), skip));
+    }
   }
 
   function toggleFormDate(dateStr: string) {
@@ -1130,7 +1183,7 @@ export default function SuperAdminShiftsPage() {
                 </span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <div style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: 'var(--brand-green-text)' }} />
+                    <div style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: '#3B82F6' }} />
                     <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Regular</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1200,7 +1253,7 @@ export default function SuperAdminShiftsPage() {
                           <div style={{
                             position: 'absolute', left: 0, top: 0, bottom: 0,
                             width: `${regularPct}%`,
-                            backgroundColor: 'var(--brand-green-text)',
+                            backgroundColor: '#3B82F6',
                             borderRadius: s.overtimeHours > 0 ? '6px 0 0 6px' : 6,
                             transition: 'width 0.5s ease',
                           }} />
@@ -1271,49 +1324,146 @@ export default function SuperAdminShiftsPage() {
               </Select>
             </div>
 
-            {/* Days (multi-select) */}
+            {/* Schedule Range */}
             <div>
               <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6, display: 'block' }}>
-                Days <span style={{ fontWeight: 400, color: 'var(--text-secondary)' }}>(select one or more)</span>
+                Schedule
               </label>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {weekDates.map((d, i) => {
-                  const ds = fmtDateISO(d);
-                  const selected = formDates.includes(ds);
-                  return (
-                    <button
-                      key={ds}
-                      type="button"
-                      onClick={() => toggleFormDate(ds)}
-                      style={{
-                        padding: '6px 12px',
-                        borderRadius: 8,
-                        border: `2px solid ${selected ? 'var(--brand-green-text)' : 'var(--border-color)'}`,
-                        backgroundColor: selected ? 'var(--brand-green-text)' : 'var(--surface-elevated)',
-                        color: selected ? '#fff' : 'var(--text-primary)',
-                        fontSize: 12,
-                        fontWeight: selected ? 700 : 600,
-                        cursor: 'pointer',
-                        transition: 'all 0.15s ease',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        gap: 1,
-                        minWidth: 52,
-                        boxShadow: selected ? '0 2px 8px color-mix(in srgb, var(--brand-green-text) 35%, transparent)' : '0 1px 3px rgba(0,0,0,0.08)',
-                      }}
-                    >
-                      <span>{DAY_LABELS[i]}</span>
-                      <span style={{ fontSize: 11, fontWeight: 400, opacity: 0.85 }}>
-                        {d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                      </span>
-                    </button>
-                  );
-                })}
+              {/* Mode tabs */}
+              <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
+                {([
+                  { key: 'week' as const, label: 'This Week' },
+                  { key: 'month' as const, label: 'This Month' },
+                  { key: 'range' as const, label: 'Custom Range' },
+                ]).map(tab => (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => applyDatePreset(tab.key)}
+                    style={{
+                      padding: '5px 12px',
+                      borderRadius: 6,
+                      border: `1.5px solid ${formDateMode === tab.key ? 'var(--brand-green-text)' : 'var(--border-color)'}`,
+                      backgroundColor: formDateMode === tab.key ? 'var(--brand-green-text)' : 'transparent',
+                      color: formDateMode === tab.key ? 'var(--on-brand-green)' : 'var(--text-secondary)',
+                      fontSize: 12,
+                      fontWeight: formDateMode === tab.key ? 700 : 500,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
               </div>
-              {formDates.length > 1 && (
-                <div style={{ marginTop: 6, fontSize: 12, color: 'var(--brand-green-text)' }}>
-                  {formDates.length} days selected — one shift will be created for each day
+
+              {/* Custom range inputs */}
+              {formDateMode === 'range' && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+                  <div>
+                    <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4, display: 'block' }}>Start Date</label>
+                    <Input
+                      type="date"
+                      value={formRangeStart}
+                      onChange={e => updateRangeDates(e.target.value, formRangeEnd, formSkipWeekends)}
+                      style={{ borderRadius: 8, borderColor: 'var(--border-color)', backgroundColor: 'var(--surface-white)', color: 'var(--text-primary)', fontSize: 13 }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4, display: 'block' }}>End Date</label>
+                    <Input
+                      type="date"
+                      value={formRangeEnd}
+                      onChange={e => updateRangeDates(formRangeStart, e.target.value, formSkipWeekends)}
+                      style={{ borderRadius: 8, borderColor: 'var(--border-color)', backgroundColor: 'var(--surface-white)', color: 'var(--text-primary)', fontSize: 13 }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Skip weekends toggle */}
+              <label
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
+                  fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={formSkipWeekends}
+                  onChange={e => {
+                    const skip = e.target.checked;
+                    setFormSkipWeekends(skip);
+                    // Recompute dates for current mode
+                    if (formDateMode === 'week') {
+                      setFormDates(weekDates
+                        .filter(d => skip ? (d.getDay() !== 0 && d.getDay() !== 6) : true)
+                        .map(d => fmtDateISO(d)));
+                    } else if (formDateMode === 'month') {
+                      const now = new Date();
+                      const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                      setFormDates(getDatesInRange(now, monthEnd, skip));
+                    } else if (formRangeStart && formRangeEnd) {
+                      updateRangeDates(formRangeStart, formRangeEnd, skip);
+                    }
+                  }}
+                  style={{ accentColor: 'var(--brand-green-text)', width: 14, height: 14 }}
+                />
+                Skip weekends (Sat &amp; Sun)
+              </label>
+
+              {/* Day pills — show this week's days for week mode */}
+              {formDateMode === 'week' && (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {weekDates.map((d, i) => {
+                    const ds = fmtDateISO(d);
+                    const selected = formDates.includes(ds);
+                    return (
+                      <button
+                        key={ds}
+                        type="button"
+                        onClick={() => toggleFormDate(ds)}
+                        style={{
+                          padding: '6px 12px',
+                          borderRadius: 8,
+                          border: `2px solid ${selected ? 'var(--brand-green-text)' : 'var(--border-color)'}`,
+                          backgroundColor: selected ? 'var(--brand-green-text)' : 'var(--surface-elevated)',
+                          color: selected ? '#fff' : 'var(--text-primary)',
+                          fontSize: 12,
+                          fontWeight: selected ? 700 : 600,
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          gap: 1,
+                          minWidth: 52,
+                          boxShadow: selected ? '0 2px 8px color-mix(in srgb, var(--brand-green-text) 35%, transparent)' : '0 1px 3px rgba(0,0,0,0.08)',
+                        }}
+                      >
+                        <span>{DAY_LABELS[i]}</span>
+                        <span style={{ fontSize: 11, fontWeight: 400, opacity: 0.85 }}>
+                          {d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Summary */}
+              {formDates.length > 0 && (
+                <div style={{ marginTop: 8, fontSize: 12, color: 'var(--brand-green-text)', fontWeight: 500 }}>
+                  {formDates.length} day{formDates.length !== 1 ? 's' : ''} selected
+                  {formDateMode === 'month' && (() => {
+                    const first = formDates[0];
+                    const last = formDates[formDates.length - 1];
+                    return ` (${new Date(first + 'T00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(last + 'T00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})`;
+                  })()}
+                  {formDateMode === 'range' && formRangeStart && formRangeEnd && (() => {
+                    return ` (${new Date(formRangeStart + 'T00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(formRangeEnd + 'T00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})`;
+                  })()}
+                  {formDates.length > 1 && ' — one shift per day'}
                 </div>
               )}
             </div>

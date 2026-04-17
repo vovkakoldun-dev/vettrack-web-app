@@ -202,7 +202,12 @@ async function fetchNotificationsFromSupabase(db: any, isAdmin: boolean, userId?
     ? (rawNotifEvents as any[]).filter((evt: any) => {
         // Respect per-user notification preferences
         if (disabledTypes.has(evt.type)) return false;
-        if (isAdmin) return true; // Admins see all notifications for the org
+        // vet_assign / vet_unassign are only for the assigned vet, not admins
+        if (evt.type === 'vet_assign' || evt.type === 'vet_unassign') {
+          const d = evt.data as any;
+          return d?.vetId && d.vetId === userId;
+        }
+        if (isAdmin) return true; // Admins see all other notifications for the org
         const d = evt.data as any;
         // Skip admin-only events for non-admin users
         if (d?.adminOnly) return false;

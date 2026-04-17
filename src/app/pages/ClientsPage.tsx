@@ -870,7 +870,30 @@ export default function ClientsPage() {
                             </button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="start">
-                            <DropdownMenuItem onClick={() => navigator.clipboard.writeText(client.ownerEmail)}>
+                            <DropdownMenuItem onClick={() => {
+                              const email = client.ownerEmail;
+                              if (navigator.clipboard && window.isSecureContext) {
+                                navigator.clipboard.writeText(email).catch(() => {
+                                  const ta = document.createElement('textarea');
+                                  ta.value = email;
+                                  ta.style.position = 'fixed';
+                                  ta.style.opacity = '0';
+                                  document.body.appendChild(ta);
+                                  ta.select();
+                                  document.execCommand('copy');
+                                  document.body.removeChild(ta);
+                                });
+                              } else {
+                                const ta = document.createElement('textarea');
+                                ta.value = email;
+                                ta.style.position = 'fixed';
+                                ta.style.opacity = '0';
+                                document.body.appendChild(ta);
+                                ta.select();
+                                document.execCommand('copy');
+                                document.body.removeChild(ta);
+                              }
+                            }}>
                               <Copy className="w-3.5 h-3.5 mr-2" /> Copy email
                             </DropdownMenuItem>
                           </DropdownMenuContent>

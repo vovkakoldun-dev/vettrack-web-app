@@ -140,7 +140,7 @@ const ROLE_LABELS: Record<string, string> = {
   superadmin: 'Super Administrator',
 };
 
-const AVATAR_COLORS: string[] = ['var(--brand-green-text)', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261', '#06B6D4', '#DC2626', '#0891B2', '#7C3AED', '#059669'];
+const AVATAR_COLORS: string[] = ['#2D6A4F', '#3B82F6', '#8B5CF6', '#EC4899', '#F4A261', '#06B6D4', '#DC2626', '#0891B2', '#7C3AED', '#059669'];
 
 function getAvatarColor(id: string): string {
   let hash = 0;

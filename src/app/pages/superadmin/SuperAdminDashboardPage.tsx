@@ -53,6 +53,27 @@ interface Notification {
   meta: string;
   status: NotifStatus;
   requesterId?: string;
+  invoiceIds?: string[];
+}
+
+interface ReviewInvoice {
+  id: string;
+  invoice_number: string;
+  total: number;
+  amount_paid: number;
+  status: string;
+  due_date: string | null;
+  notes: string | null;
+  created_at: string;
+  client_name: string;
+  client_email: string;
+  client_phone: string;
+  pet_name: string;
+  pet_species: string;
+  appointment_date: string | null;
+  appointment_reason: string | null;
+  vet_name: string | null;
+  line_items: { description: string; quantity: number; unit_price: number; total: number }[];
 }
 
 const NOTIF_TYPE_CFG = {
@@ -69,6 +90,12 @@ function NotificationsPanel() {
   const [notifs, setNotifs] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const pending = notifs.filter(n => n.status === 'pending');
+
+  // Review dialog state
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewInvoices, setReviewInvoices] = useState<ReviewInvoice[]>([]);
+  const [reviewNotifId, setReviewNotifId] = useState<string | null>(null);
 
   // Build notifications from REAL data sources + manual pending_requests
   useEffect(() => {
@@ -121,6 +148,7 @@ function NotificationsPanel() {
             detail: names,
             meta: `$${totalAmt.toLocaleString()} total${oldest ? ` · Oldest: ${oldest}` : ''}`,
             status: 'pending',
+            invoiceIds: overdueInv.map((inv: any) => inv.id),
           });
         }
 
@@ -145,6 +173,7 @@ function NotificationsPanel() {
             }).join(', '),
             meta: `$${totalAmt.toLocaleString()} awaiting payment`,
             status: 'pending',
+            invoiceIds: sentInv.map((inv: any) => inv.id),
           });
         }
 
@@ -309,6 +338,68 @@ function NotificationsPanel() {
     }
   }
 
+  async function openReview(notifId: string) {
+    const notif = notifs.find(n => n.id === notifId);
+    if (!notif?.invoiceIds?.length) return;
+    setReviewNotifId(notifId);
+    setReviewOpen(true);
+    setReviewLoading(true);
+    try {
+      const { data: invoices } = await db
+        .from('invoices')
+        .select(`
+          id, invoice_number, total, amount_paid, status, due_date, notes, created_at,
+          clients(first_name, last_name, email, phone),
+          appointments(scheduled_at, reason, pets(name, species), staff:staff!appointments_vet_id_fkey(profiles:profiles!staff_profile_id_fkey(first_name, last_name))),
+          invoice_line_items(description, quantity, unit_price, total)
+        `)
+        .in('id', notif.invoiceIds)
+        .order('due_date');
+      if (invoices) {
+        setReviewInvoices(invoices.map((inv: any) => {
+          const c = inv.clients;
+          const a = inv.appointments;
+          const vetProfile = a?.staff?.profiles;
+          return {
+            id: inv.id,
+            invoice_number: inv.invoice_number || '—',
+            total: Number(inv.total) || 0,
+            amount_paid: Number(inv.amount_paid) || 0,
+            status: inv.status || 'Unknown',
+            due_date: inv.due_date,
+            notes: inv.notes,
+            created_at: inv.created_at,
+            client_name: c ? `${c.first_name || ''} ${c.last_name || ''}`.trim() : 'Unknown',
+            client_email: c?.email || '',
+            client_phone: c?.phone || '',
+            pet_name: a?.pets?.name || '—',
+            pet_species: a?.pets?.species || '',
+            appointment_date: a?.scheduled_at || null,
+            appointment_reason: a?.reason || null,
+            vet_name: vetProfile ? `Dr. ${vetProfile.first_name || ''} ${vetProfile.last_name || ''}`.trim() : null,
+            line_items: (inv.invoice_line_items || []).map((li: any) => ({
+              description: li.description || '',
+              quantity: li.quantity || 1,
+              unit_price: Number(li.unit_price) || 0,
+              total: Number(li.total) || 0,
+            })),
+          };
+        }));
+      }
+    } catch {} finally {
+      setReviewLoading(false);
+    }
+  }
+
+  async function markInvoicePaid(invoiceId: string) {
+    await db.from('invoices').update({
+      status: 'Paid',
+      amount_paid: reviewInvoices.find(i => i.id === invoiceId)?.total || 0,
+      paid_at: new Date().toISOString(),
+    }).eq('id', invoiceId);
+    setReviewInvoices(prev => prev.map(i => i.id === invoiceId ? { ...i, status: 'Paid', amount_paid: i.total } : i));
+  }
+
   if (loading || notifs.length === 0) return null;
 
   return (
@@ -357,6 +448,293 @@ function NotificationsPanel() {
       </div>
 
       {/* Notification rows */}
+      {/* ── Review Invoice Dialog ── */}
+      {reviewOpen && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          {/* Backdrop */}
+          <div
+            onClick={() => setReviewOpen(false)}
+            style={{
+              position: 'absolute', inset: 0,
+              backgroundColor: 'rgba(0,0,0,0.5)',
+              backdropFilter: 'blur(4px)',
+            }}
+          />
+          {/* Dialog */}
+          <div style={{
+            position: 'relative', zIndex: 1,
+            width: '100%', maxWidth: 620,
+            maxHeight: '85vh',
+            backgroundColor: 'var(--surface-white)',
+            border: '1px solid var(--border-color)',
+            borderRadius: 16,
+            boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+            display: 'flex', flexDirection: 'column',
+            overflow: 'hidden',
+          }}>
+            {/* Header */}
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '18px 22px',
+              borderBottom: '1px solid var(--border-color)',
+              flexShrink: 0,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{
+                  width: 36, height: 36, borderRadius: 10,
+                  backgroundColor: '#EF444415',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <AlertCircle style={{ width: 17, height: 17, color: '#EF4444' }} />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
+                    Invoice Review
+                  </h3>
+                  <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: 0 }}>
+                    {reviewInvoices.length} invoice{reviewInvoices.length !== 1 ? 's' : ''} requiring attention
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setReviewOpen(false)}
+                style={{
+                  width: 32, height: 32, borderRadius: 8,
+                  border: '1px solid var(--border-color)',
+                  backgroundColor: 'var(--surface-elevated)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: 'pointer', color: 'var(--text-secondary)',
+                }}
+              >
+                <X style={{ width: 14, height: 14 }} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px 22px' }}>
+              {reviewLoading ? (
+                <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-secondary)', fontSize: 14 }}>
+                  Loading invoice details...
+                </div>
+              ) : reviewInvoices.length === 0 ? (
+                <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-secondary)', fontSize: 14 }}>
+                  No invoice data found.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  {reviewInvoices.map((inv) => {
+                    const isPaid = inv.status === 'Paid';
+                    const isOverdue = inv.status === 'Overdue';
+                    const dueLabel = inv.due_date
+                      ? new Date(inv.due_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                      : '—';
+                    const apptLabel = inv.appointment_date
+                      ? new Date(inv.appointment_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) +
+                        ' at ' + new Date(inv.appointment_date).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+                      : null;
+                    const balance = inv.total - inv.amount_paid;
+
+                    return (
+                      <div
+                        key={inv.id}
+                        style={{
+                          border: `1px solid ${isPaid ? '#22C55E40' : isOverdue ? '#EF444430' : 'var(--border-color)'}`,
+                          borderRadius: 12,
+                          overflow: 'hidden',
+                          opacity: isPaid ? 0.6 : 1,
+                          transition: 'opacity 0.3s',
+                        }}
+                      >
+                        {/* Invoice header */}
+                        <div style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                          padding: '12px 16px',
+                          backgroundColor: isPaid ? '#22C55E08' : isOverdue ? '#EF444408' : 'var(--surface-elevated)',
+                          borderBottom: '1px solid var(--border-color)',
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
+                              {inv.invoice_number}
+                            </span>
+                            <span style={{
+                              fontSize: 11, fontWeight: 700,
+                              padding: '2px 8px', borderRadius: 9999,
+                              backgroundColor: isPaid ? '#22C55E20' : isOverdue ? '#EF444420' : '#F4A26120',
+                              color: isPaid ? '#16A34A' : isOverdue ? '#DC2626' : '#C2671A',
+                            }}>
+                              {inv.status}
+                            </span>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: 18, fontWeight: 800, color: isPaid ? '#16A34A' : isOverdue ? '#DC2626' : 'var(--text-primary)' }}>
+                              ${inv.total.toFixed(2)}
+                            </div>
+                            {balance > 0 && !isPaid && (
+                              <div style={{ fontSize: 11, color: '#DC2626', fontWeight: 600 }}>
+                                ${balance.toFixed(2)} outstanding
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Details grid */}
+                        <div style={{ padding: '14px 16px' }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 20px', marginBottom: inv.line_items.length > 0 ? 14 : 0 }}>
+                            <div>
+                              <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)', marginBottom: 3 }}>Client</div>
+                              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{inv.client_name}</div>
+                              {inv.client_email && <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{inv.client_email}</div>}
+                              {inv.client_phone && <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{inv.client_phone}</div>}
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)', marginBottom: 3 }}>Due Date</div>
+                              <div style={{ fontSize: 13, fontWeight: 600, color: isOverdue ? '#DC2626' : 'var(--text-primary)' }}>{dueLabel}</div>
+                              {isOverdue && inv.due_date && (
+                                <div style={{ fontSize: 11, color: '#DC2626', fontWeight: 600 }}>
+                                  {Math.ceil((Date.now() - new Date(inv.due_date + 'T12:00:00').getTime()) / 86400000)} days overdue
+                                </div>
+                              )}
+                            </div>
+                            {inv.pet_name !== '—' && (
+                              <div>
+                                <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)', marginBottom: 3 }}>Pet</div>
+                                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+                                  {inv.pet_name} {inv.pet_species ? `(${inv.pet_species})` : ''}
+                                </div>
+                              </div>
+                            )}
+                            {apptLabel && (
+                              <div>
+                                <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)', marginBottom: 3 }}>Appointment</div>
+                                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{apptLabel}</div>
+                                {inv.appointment_reason && <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{inv.appointment_reason}</div>}
+                                {inv.vet_name && <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{inv.vet_name}</div>}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Line items */}
+                          {inv.line_items.length > 0 && (
+                            <div style={{
+                              borderTop: '1px solid var(--border-color)',
+                              paddingTop: 12,
+                            }}>
+                              <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)', marginBottom: 8 }}>Services</div>
+                              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                                <thead>
+                                  <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                    <th style={{ textAlign: 'left', padding: '4px 0', fontWeight: 600, color: 'var(--text-secondary)', fontSize: 11 }}>Description</th>
+                                    <th style={{ textAlign: 'center', padding: '4px 8px', fontWeight: 600, color: 'var(--text-secondary)', fontSize: 11, width: 50 }}>Qty</th>
+                                    <th style={{ textAlign: 'right', padding: '4px 8px', fontWeight: 600, color: 'var(--text-secondary)', fontSize: 11, width: 70 }}>Price</th>
+                                    <th style={{ textAlign: 'right', padding: '4px 0', fontWeight: 600, color: 'var(--text-secondary)', fontSize: 11, width: 70 }}>Total</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {inv.line_items.map((li, idx) => (
+                                    <tr key={idx} style={{ borderBottom: idx < inv.line_items.length - 1 ? '1px solid var(--border-color)' : 'none' }}>
+                                      <td style={{ padding: '6px 0', color: 'var(--text-primary)', fontWeight: 500 }}>{li.description}</td>
+                                      <td style={{ padding: '6px 8px', color: 'var(--text-secondary)', textAlign: 'center' }}>{li.quantity}</td>
+                                      <td style={{ padding: '6px 8px', color: 'var(--text-secondary)', textAlign: 'right' }}>${li.unit_price.toFixed(2)}</td>
+                                      <td style={{ padding: '6px 0', color: 'var(--text-primary)', fontWeight: 600, textAlign: 'right' }}>${li.total.toFixed(2)}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+
+                          {inv.notes && (
+                            <div style={{ marginTop: 10, padding: '8px 12px', backgroundColor: 'var(--surface-elevated)', borderRadius: 8 }}>
+                              <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)', marginBottom: 3 }}>Notes</div>
+                              <div style={{ fontSize: 12, color: 'var(--text-primary)' }}>{inv.notes}</div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Actions */}
+                        {!isPaid && (
+                          <div style={{
+                            display: 'flex', gap: 8,
+                            padding: '10px 16px 14px',
+                            borderTop: '1px solid var(--border-color)',
+                          }}>
+                            <button
+                              onClick={() => markInvoicePaid(inv.id)}
+                              style={{
+                                display: 'flex', alignItems: 'center', gap: 5,
+                                padding: '7px 14px', borderRadius: 8,
+                                backgroundColor: '#22C55E15', color: '#16A34A',
+                                border: '1px solid #22C55E30',
+                                fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                              }}
+                            >
+                              <Check style={{ width: 12, height: 12 }} />
+                              Mark as Paid
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (inv.client_email) {
+                                  window.open(`mailto:${inv.client_email}?subject=Payment Reminder: ${inv.invoice_number}&body=Dear ${inv.client_name},%0A%0AThis is a friendly reminder regarding your outstanding invoice ${inv.invoice_number} for $${inv.total.toFixed(2)}.%0A%0APlease let us know if you have any questions.%0A%0AThank you.`);
+                                }
+                              }}
+                              style={{
+                                display: 'flex', alignItems: 'center', gap: 5,
+                                padding: '7px 14px', borderRadius: 8,
+                                backgroundColor: 'var(--surface-elevated)', color: 'var(--text-secondary)',
+                                border: '1px solid var(--border-color)',
+                                fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                                opacity: inv.client_email ? 1 : 0.4,
+                                pointerEvents: inv.client_email ? 'auto' : 'none',
+                              }}
+                            >
+                              Send Reminder
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '14px 22px',
+              borderTop: '1px solid var(--border-color)',
+              backgroundColor: 'var(--surface-elevated)',
+              flexShrink: 0,
+            }}>
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                Total outstanding: <strong style={{ color: 'var(--text-primary)' }}>
+                  ${reviewInvoices.filter(i => i.status !== 'Paid').reduce((s, i) => s + (i.total - i.amount_paid), 0).toFixed(2)}
+                </strong>
+              </div>
+              <button
+                onClick={() => {
+                  setReviewOpen(false);
+                  if (reviewNotifId) dismiss(reviewNotifId);
+                }}
+                style={{
+                  padding: '8px 18px', borderRadius: 8,
+                  backgroundColor: 'var(--surface-white)', color: 'var(--text-primary)',
+                  border: '1px solid var(--border-color)',
+                  fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                }}
+              >
+                Dismiss Alert
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {notifs.map((n, idx) => {
         const cfg = NOTIF_TYPE_CFG[n.type];
         const TypeIcon = cfg.icon;
@@ -436,7 +814,7 @@ function NotificationsPanel() {
                 )}
                 {n.type === 'overdue' && (
                   <button
-                    onClick={() => approve(n.id)}
+                    onClick={() => openReview(n.id)}
                     style={{
                       display: 'flex', alignItems: 'center', gap: '5px',
                       padding: '7px 14px', borderRadius: '8px',

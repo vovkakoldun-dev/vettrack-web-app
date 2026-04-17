@@ -433,6 +433,8 @@ function SuperAdminApp() {
             <Route path="/audit" element={<SuperAdminDashboardPage />} />
             <Route path="/chat" element={<SuperAdminChatPage />} />
             <Route path="/services" element={<SuperAdminServicesPage />} />
+            <Route path="/records" element={<RecordsPage />} />
+            <Route path="/records/:id" element={<RecordDetailPage />} />
           </Routes>
           </Suspense>
         </main>

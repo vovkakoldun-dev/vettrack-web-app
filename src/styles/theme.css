@@ -203,7 +203,7 @@
   --foreground: #E0E7FF;
   --card: rgba(30, 41, 70, 0.45);
   --card-foreground: #E0E7FF;
-  --popover: rgba(30, 41, 70, 0.75);
+  --popover: #1E2946;
   --popover-foreground: #E0E7FF;
   --primary: #6366F1;
   --primary-foreground: #ffffff;
@@ -717,6 +717,27 @@
   background: #1E2946 !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
+}
+
+/* Glass theme: custom positioned popups/dropdowns must also be opaque.
+   Override --surface-white on elements with inline position + z-index
+   so that background-color: var(--surface-white) resolves to a solid colour. */
+.theme-glass [style*="position: absolute"][style*="z-index"],
+.theme-glass [style*="position: fixed"][style*="z-index"] {
+  --surface-white: #1E2946;
+  --surface-elevated: #273549;
+  --border-color: rgba(148, 163, 200, 0.25);
+}
+
+/* Same fix for elements using Tailwind positioning classes */
+.theme-glass .absolute.bg-popover,
+.theme-glass .fixed.bg-popover,
+.theme-glass .absolute.bg-\[var\(--surface-white\)\],
+.theme-glass .fixed.bg-\[var\(--surface-white\)\] {
+  --surface-white: #1E2946;
+  --surface-elevated: #273549;
+  --popover: #1E2946;
+  --border-color: rgba(148, 163, 200, 0.25);
 }
 
 @theme inline {
