@@ -307,8 +307,11 @@ export default function AdminChatPage() {
         .neq('role', 'owner')
         .or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%`)
         .limit(8);
-      const existingIds = new Set(conversations.map(c => c.otherProfileId));
-      setStaffResults((data || []).filter(s => !existingIds.has(s.id)));
+      // Only exclude DIRECT conversation partners so group members remain searchable
+      const existingDirectIds = new Set(
+        conversations.filter(c => !c.isGroup).map(c => c.otherProfileId)
+      );
+      setStaffResults((data || []).filter(s => !existingDirectIds.has(s.id)));
     }, 200);
     return () => clearTimeout(timer);
   }, [searchQuery, user, conversations]);
@@ -497,6 +500,9 @@ export default function AdminChatPage() {
       if (!otherParts || otherParts.length === 0) continue;
 
       const firstProfile = (otherParts[0].profiles as any);
+      // Staff-only chat: hide direct conversations whose counterparty is a pet owner
+      if (!isGroup && firstProfile?.role === 'owner') continue;
+
       const allNames = otherParts.map((p: any) => {
         const prof = p.profiles as any;
         return prof ? `${prof.first_name} ${prof.last_name}`.trim() : 'Unknown';

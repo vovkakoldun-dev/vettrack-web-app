@@ -299,16 +299,21 @@ export default function ChatPage() {
     const timer = setTimeout(async () => {
       const { organizationId } = await getOrgContext();
       const q = searchQuery.trim().toLowerCase();
+      // Staff chat is strictly staff-only — exclude pet owners (role='owner')
       const { data } = await db
         .from('profiles')
         .select('id, first_name, last_name, role, avatar_url')
         .eq('organization_id', organizationId)
         .neq('id', user.id)
+        .neq('role', 'owner')
         .or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%`)
         .limit(8);
-      // Filter out people who already have a conversation
-      const existingIds = new Set(conversations.map(c => c.otherProfileId));
-      setStaffResults((data || []).filter(s => !existingIds.has(s.id)));
+      // Only exclude people who already have a DIRECT conversation with me;
+      // people who share a group chat should still be searchable for a new 1-on-1.
+      const existingDirectIds = new Set(
+        conversations.filter(c => !c.isGroup).map(c => c.otherProfileId)
+      );
+      setStaffResults((data || []).filter(s => !existingDirectIds.has(s.id)));
     }, 200);
     return () => clearTimeout(timer);
   }, [searchQuery, user, conversations]);
@@ -413,11 +418,13 @@ export default function ChatPage() {
   async function openNewGroupDialog() {
     if (!user) return;
     const { organizationId } = await getOrgContext();
+    // Staff-only — exclude pet owners from group chat member list
     const { data } = await db
       .from('profiles')
       .select('id, first_name, last_name, role, avatar_url')
       .eq('organization_id', organizationId)
       .neq('id', user.id)
+      .neq('role', 'owner')
       .order('first_name');
     setAllStaff(data || []);
     setGroupSelectedIds([]);
@@ -504,6 +511,10 @@ export default function ChatPage() {
       if (!otherParts || otherParts.length === 0) continue;
 
       const firstProfile = (otherParts[0].profiles as any);
+      // Staff-only chat: hide direct conversations whose counterparty is a pet owner.
+      // Group chats remain visible because they may contain a mix of staff members.
+      if (!isGroup && firstProfile?.role === 'owner') continue;
+
       const allNames = otherParts.map((p: any) => {
         const prof = p.profiles as any;
         return prof ? `${prof.first_name} ${prof.last_name}`.trim() : 'Unknown';

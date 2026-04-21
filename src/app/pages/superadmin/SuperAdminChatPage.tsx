@@ -306,15 +306,20 @@ export default function SuperAdminChatPage() {
     const timer = setTimeout(async () => {
       const { organizationId } = await getOrgContext();
       const q = searchQuery.trim().toLowerCase();
+      // Staff-only chat: exclude pet owners from search results
       const { data } = await db
         .from('profiles')
         .select('id, first_name, last_name, role, avatar_url')
         .eq('organization_id', organizationId)
         .neq('id', saProfileId)
+        .neq('role', 'owner')
         .or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%`)
         .limit(8);
-      const existingIds = new Set(conversations.map(c => c.otherProfileId));
-      setStaffResults((data || []).filter(s => !existingIds.has(s.id)));
+      // Only exclude DIRECT conversation partners so group members remain searchable
+      const existingDirectIds = new Set(
+        conversations.filter(c => !c.isGroup).map(c => c.otherProfileId)
+      );
+      setStaffResults((data || []).filter(s => !existingDirectIds.has(s.id)));
     }, 200);
     return () => clearTimeout(timer);
   }, [searchQuery, saProfileId, conversations]);
@@ -419,11 +424,13 @@ export default function SuperAdminChatPage() {
   async function openNewGroupDialog() {
     if (!saProfileId) return;
     const { organizationId } = await getOrgContext();
+    // Staff-only — exclude pet owners from group chat member list
     const { data } = await db
       .from('profiles')
       .select('id, first_name, last_name, role, avatar_url')
       .eq('organization_id', organizationId)
       .neq('id', saProfileId)
+      .neq('role', 'owner')
       .order('first_name');
     setAllStaff(data || []);
     setGroupSelectedIds([]);
@@ -501,6 +508,9 @@ export default function SuperAdminChatPage() {
       if (!otherParts || otherParts.length === 0) continue;
 
       const firstProfile = (otherParts[0].profiles as any);
+      // Staff-only chat: hide direct conversations whose counterparty is a pet owner
+      if (!isGroup && firstProfile?.role === 'owner') continue;
+
       const allNames = otherParts.map((p: any) => {
         const prof = p.profiles as any;
         return prof ? `${prof.first_name} ${prof.last_name}`.trim() : 'Unknown';
