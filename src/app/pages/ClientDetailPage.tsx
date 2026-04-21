@@ -50,6 +50,16 @@ import {
 
 // ─── Empty initial state (no hardcoded mock data) ───────────
 
+// Default empty pet structure — used as placeholder during loading, not mock data
+const EMPTY_PET = {
+  id: 0, dbId: '', assignedVet: '—', name: '', species: '', breed: '',
+  dob: '', age: '—', sex: '—', weight: '—', microchip: '—', color: '—',
+  image: '', status: 'Healthy' as const,
+  conditions: [] as any[], treatments: [] as any[], allergies: [] as string[],
+  visits: [] as any[], vetNotes: '', clientNotes: '',
+  upcomingAppointments: [] as any[], vaccinations: [] as any[],
+};
+
 const emptyClient = {
   id: 0,
   owner: {
@@ -66,7 +76,7 @@ const emptyClient = {
     coverageType: '—',
     expiryDate: '—',
   },
-  pets: [] as any[],
+  pets: [EMPTY_PET],
 };
 
 // ─── Status Config ───────────────────────────────────────────

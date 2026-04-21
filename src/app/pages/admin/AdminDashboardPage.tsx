@@ -59,7 +59,7 @@ interface SearchResults {
   appointments: SearchResultAppointment[];
 }
 
-function useGlobalSearch(query: string, debounceMs = 300) {
+function useGlobalSearch(query: string, tenantDb: ReturnType<typeof useTenantDb>, debounceMs = 300) {
   const [results, setResults] = useState<SearchResults>({ clients: [], pets: [], appointments: [] });
   const [loading, setLoading] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -74,14 +74,14 @@ function useGlobalSearch(query: string, debounceMs = 300) {
     setLoading(true);
     const pattern = `%${term}%`;
 
-    // Step 1: Search clients and pets in parallel
+    // Step 1: Search clients and pets in parallel (tenant-scoped)
     const [clientsRes, petsRes] = await Promise.all([
-      supabase
+      tenantDb
         .from('clients')
         .select('id, first_name, last_name, email, phone')
         .or(`first_name.ilike.${pattern},last_name.ilike.${pattern},email.ilike.${pattern},phone.ilike.${pattern}`)
         .limit(6),
-      supabase
+      tenantDb
         .from('pets')
         .select('id, name, species, breed, photo_url, client_id, clients(id, first_name, last_name)')
         .or(`name.ilike.${pattern},species.ilike.${pattern},breed.ilike.${pattern}`)
@@ -100,7 +100,7 @@ function useGlobalSearch(query: string, debounceMs = 300) {
     if (clientIds.length > 0) orParts.push(`client_id.in.(${clientIds.join(',')})`);
     if (petIds.length > 0) orParts.push(`pet_id.in.(${petIds.join(',')})`);
 
-    const appointmentsRes = await supabase
+    const appointmentsRes = await tenantDb
       .from('appointments')
       .select('id, scheduled_at, status, reason, pets(id, name), clients(id, first_name, last_name), services(id, name)')
       .or(orParts.join(','))
@@ -803,7 +803,7 @@ export default function AdminDashboardPage() {
   const [now, setNow] = useState(() => new Date());
   const [searchQuery, setSearchQuery] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
-  const { results: searchResults, loading: searchLoading, totalResults } = useGlobalSearch(searchQuery);
+  const { results: searchResults, loading: searchLoading, totalResults } = useGlobalSearch(searchQuery, db);
   const [arrivedToast, setArrivedToast] = useState<{ pet: string; vet: string; room?: string } | null>(null);
   const [billModal, setBillModal] = useState<{ id: number; dbId: string; pet: string; petId: string; owner: string; clientId: string; service: string; vet: string } | null>(null);
   const [payMethod, setPayMethod] = useState<'card' | 'terminal' | 'cash'>('card');
