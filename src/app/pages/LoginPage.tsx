@@ -410,9 +410,10 @@ export default function LoginPage() {
                 display: 'grid',
                 gridTemplateColumns: 'repeat(2, 1fr)',
                 gap: '16px',
+                position: 'relative',
               }}
             >
-              {ROLES.map(role => {
+              {ROLES.filter(r => r.id !== 'sysadmin').map(role => {
                 const Icon = role.icon;
                 return (
                   <button
@@ -476,6 +477,36 @@ export default function LoginPage() {
                   </button>
                 );
               })}
+              {/* Minimized System Admin icon */}
+              {(() => {
+                const sysRole = ROLES.find(r => r.id === 'sysadmin')!;
+                const SysIcon = sysRole.icon;
+                return (
+                  <button
+                    key="sysadmin"
+                    onClick={() => selectRole('sysadmin')}
+                    title="System Admin"
+                    className="flex items-center justify-center transition-all duration-200"
+                    style={{
+                      width: '48px', height: '48px', borderRadius: '14px',
+                      background: sysRole.bg,
+                      border: `1px solid ${sysRole.border}`,
+                      cursor: 'pointer', outline: 'none',
+                      position: 'absolute', bottom: '-60px', right: '0',
+                    }}
+                    onMouseEnter={e => {
+                      (e.currentTarget as HTMLElement).style.boxShadow = `0 0 0 2px ${sysRole.ring}`;
+                      (e.currentTarget as HTMLElement).style.transform = 'scale(1.08)';
+                    }}
+                    onMouseLeave={e => {
+                      (e.currentTarget as HTMLElement).style.boxShadow = 'none';
+                      (e.currentTarget as HTMLElement).style.transform = 'scale(1)';
+                    }}
+                  >
+                    <SysIcon style={{ width: '22px', height: '22px', color: sysRole.color }} />
+                  </button>
+                );
+              })()}
             </div>
           </>
         )}
