@@ -503,11 +503,12 @@ export default function SuperAdminServicesPage() {
           </div>
           {/* Table skeleton */}
           <div style={{ backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)', borderRadius: '14px', overflow: 'hidden' }}>
-            <div style={{ padding: '11px 20px', backgroundColor: 'var(--surface-elevated)', borderBottom: '1px solid var(--border-color)' }}>
+           <div style={{ overflowX: 'auto' }}>
+            <div style={{ padding: '11px 20px', backgroundColor: 'var(--surface-elevated)', borderBottom: '1px solid var(--border-color)', minWidth: '1000px' }}>
               <div style={{ width: '100%', height: '14px' }} />
             </div>
             {[1, 2, 3, 4, 5, 6, 7, 8].map(i => (
-              <div key={i} style={{ display: 'grid', gridTemplateColumns: '2.2fr 110px 130px 100px 80px 70px 90px 100px', gap: '0', padding: '14px 20px', alignItems: 'center', borderBottom: '1px solid var(--border-color)' }}>
+              <div key={i} style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 2.2fr) 110px 130px 100px 80px 70px 90px 100px', gap: '0', padding: '14px 20px', alignItems: 'center', borderBottom: '1px solid var(--border-color)', minWidth: '1000px' }}>
                 <div>
                   <div style={{ width: `${140 + (i % 3) * 40}px`, height: '14px', borderRadius: '4px', backgroundColor: 'var(--surface-elevated)', marginBottom: '6px' }} />
                   <div style={{ width: `${200 + (i % 2) * 60}px`, height: '12px', borderRadius: '4px', backgroundColor: 'var(--surface-elevated)' }} />
@@ -525,6 +526,7 @@ export default function SuperAdminServicesPage() {
                 </div>
               </div>
             ))}
+           </div>{/* end skeleton scroll wrapper */}
           </div>
         </>
       )}
@@ -627,8 +629,10 @@ export default function SuperAdminServicesPage() {
 
       {/* ── Services Table ── */}
       <div style={{ backgroundColor: 'var(--surface-white)', border: '1px solid var(--border-color)', borderRadius: '14px', overflow: 'hidden' }}>
+        {/* Horizontal scroll wrapper — keeps table usable on narrow viewports */}
+        <div style={{ overflowX: 'auto' }}>
         {/* Table Header */}
-        <div style={{ display: 'grid', gridTemplateColumns: '2.2fr 110px 130px 100px 80px 70px 90px 100px', gap: '0', padding: '11px 20px', backgroundColor: 'var(--surface-elevated)', borderBottom: '1px solid var(--border-color)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 2.2fr) 110px 130px 100px 80px 70px 90px 100px', gap: '0', padding: '11px 20px', backgroundColor: 'var(--surface-elevated)', borderBottom: '1px solid var(--border-color)', minWidth: '1000px' }}>
           {['Service', 'Code', 'Category', 'Price', 'Duration', 'Tax', 'Status', 'Actions'].map(h => (
             <span key={h} style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</span>
           ))}
@@ -644,8 +648,9 @@ export default function SuperAdminServicesPage() {
             key={svc.id}
             style={{
               display: 'grid',
-              gridTemplateColumns: '2.2fr 110px 130px 100px 80px 70px 90px 100px',
+              gridTemplateColumns: 'minmax(220px, 2.2fr) 110px 130px 100px 80px 70px 90px 100px',
               gap: '0', padding: '14px 20px', alignItems: 'center',
+              minWidth: '1000px',
               borderBottom: i < filtered.length - 1 ? '1px solid var(--border-color)' : undefined,
               opacity: svc.active ? 1 : 0.55,
               backgroundColor: !svc.active ? 'var(--surface-elevated)' : undefined,
@@ -654,11 +659,11 @@ export default function SuperAdminServicesPage() {
             className={svc.active ? 'hover:bg-[var(--surface-elevated)] transition-colors' : ''}
           >
             {/* Name + meta */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', minWidth: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{svc.name}</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', minWidth: 0, overflow: 'hidden' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{svc.name}</span>
                 {svc.popular && (
-                  <span style={{ fontSize: '10px', fontWeight: 700, padding: '1px 7px', borderRadius: '9999px', backgroundColor: '#F472B618', color: '#F472B6' }}>Popular</span>
+                  <span style={{ fontSize: '10px', fontWeight: 700, padding: '1px 7px', borderRadius: '9999px', backgroundColor: '#F472B618', color: '#F472B6', flexShrink: 0 }}>Popular</span>
                 )}
               </div>
               <p style={{ fontSize: '12px', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{svc.description}</p>
@@ -768,6 +773,7 @@ export default function SuperAdminServicesPage() {
             </div>
           </div>
         ))}
+        </div>{/* end horizontal scroll wrapper */}
 
         {/* Footer */}
         <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>

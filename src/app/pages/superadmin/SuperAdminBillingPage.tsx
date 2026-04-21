@@ -939,8 +939,9 @@ export default function SuperAdminBillingPage() {
 
         {/* Table */}
         <div style={{ border: '1px solid var(--border-color)', borderRadius: '10px', overflow: 'hidden' }}>
+         <div style={{ overflowX: 'auto' }}>
           {/* Header */}
-          <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr 1fr 1fr 110px 90px 100px', gap: '0', padding: '10px 16px', backgroundColor: 'var(--surface-elevated)', borderBottom: '1px solid var(--border-color)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '140px minmax(140px, 1fr) minmax(140px, 1fr) minmax(100px, 1fr) 110px 90px 140px', gap: '0', padding: '10px 16px', backgroundColor: 'var(--surface-elevated)', borderBottom: '1px solid var(--border-color)', minWidth: '900px' }}>
             {['Invoice', 'Client', 'Service', 'Date', 'Amount', 'Status', ''].map(h => (
               <span key={h} style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</span>
             ))}
@@ -949,8 +950,9 @@ export default function SuperAdminBillingPage() {
             <div
               key={inv.id + '-' + i}
               style={{
-                display: 'grid', gridTemplateColumns: '140px 1fr 1fr 1fr 110px 90px 100px',
+                display: 'grid', gridTemplateColumns: '140px minmax(140px, 1fr) minmax(140px, 1fr) minmax(100px, 1fr) 110px 90px 140px',
                 gap: '0', padding: '13px 16px', alignItems: 'center',
+                minWidth: '900px',
                 borderBottom: i < filtered.length - 1 ? '1px solid var(--border-color)' : undefined,
                 backgroundColor: inv.status === 'Overdue' ? '#EF444406' : undefined,
               }}
@@ -985,6 +987,7 @@ export default function SuperAdminBillingPage() {
               No invoices match your filters.
             </div>
           )}
+         </div>{/* end invoice table scroll wrapper */}
         </div>
 
         {/* Footer */}
