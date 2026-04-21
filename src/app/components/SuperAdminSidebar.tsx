@@ -58,7 +58,7 @@ const NAV_SECTIONS: NavSection[] = [
     id: 'communication',
     label: 'Communication',
     items: [
-      { name: 'Team Chat', icon: MessageSquare, path: '/superadmin/chat' },
+      { name: 'HugoChat', icon: MessageSquare, path: '/superadmin/chat' },
     ],
   },
   {
@@ -277,7 +277,7 @@ export function SuperAdminSidebar({
                 const isActive = item.path === '/superadmin'
                   ? pathname === '/superadmin' || pathname === '/superadmin/'
                   : pathname.startsWith(item.path);
-                const badge = item.name === 'Team Chat' ? chatUnread : (item.badge ?? 0);
+                const badge = item.name === 'HugoChat' ? chatUnread : (item.badge ?? 0);
 
                 return (
                   <li key={item.name} style={{ position: 'relative', marginBottom: '2px' }}>

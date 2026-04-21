@@ -1250,9 +1250,24 @@ export default function ChatPage() {
     setEmojiOpen(false);
   }
 
-  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // Enter sends; Shift+Enter inserts a newline (like MS Teams / Slack)
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      handleSend();
+    }
   }
+
+  // Auto-resize the message textarea based on content (caps at ~6 lines)
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const maxHeight = 160; // ~6 lines of 14px font
+    el.style.height = Math.min(el.scrollHeight, maxHeight) + 'px';
+    el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  }, [inputValue]);
 
   // Filter conversations by search
   const filteredConversations = conversations.filter((c) => {
@@ -1978,13 +1993,29 @@ export default function ChatPage() {
                 )}
               </div>
 
-              <Input
-                type="text"
+              <textarea
+                ref={inputRef}
                 placeholder="Type a message..."
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyDown={handleKeyDown}
-                style={{ flex: 1, fontSize: '14px', height: '36px' }}
+                rows={1}
+                style={{
+                  flex: 1,
+                  fontSize: '14px',
+                  minHeight: '36px',
+                  maxHeight: '160px',
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-color)',
+                  backgroundColor: 'var(--input-background)',
+                  color: 'var(--text-primary)',
+                  resize: 'none',
+                  outline: 'none',
+                  fontFamily: 'inherit',
+                  lineHeight: '1.4',
+                  overflowY: 'hidden',
+                }}
               />
 
               {/* Emoji picker */}

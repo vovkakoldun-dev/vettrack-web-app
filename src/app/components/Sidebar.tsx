@@ -34,7 +34,7 @@ const INITIAL_SECTIONS: NavSection[] = [
       { name: 'Dashboard',     icon: Home,          path: '/' },
       { name: 'My Portal',     icon: UserCircle,    path: '/my-portal' },
       { name: 'Shifts',        icon: Clock,         path: '/shifts' },
-      { name: 'Team Chat',     icon: MessageSquare, path: '/chat' },
+      { name: 'HugoChat',      icon: MessageSquare, path: '/chat' },
       { name: 'Notifications', icon: Bell,          path: '/notifications', badge: UNREAD_NOTIFICATION_COUNT },
     ],
   },
