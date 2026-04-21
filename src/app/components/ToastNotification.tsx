@@ -56,14 +56,44 @@ function playMessageSound() {
   ], 'sine', 0.12);
 }
 
-// Notification — descending two-note triangle "chime" (E5 → C5), ~220ms
-// Triangle wave + descending pattern = warmer, more "attention" feel,
-// clearly distinct from the chat chirp.
+// Notification — soft single "plink" bell-tone with natural decay, ~260ms
+// A fundamental + octave overtone played together creates a bell-like timbre,
+// distinct from the chat's two-note chirp (single strike, lets you know
+// something new happened without being chatty).
 function playNotificationSound() {
-  playTone([
-    { freq: 659.25, start: 0,     duration: 0.14 },  // E5
-    { freq: 523.25, start: 0.12,  duration: 0.16 },  // C5
-  ], 'triangle', 0.11);
+  try {
+    if (!audioCtx) {
+      const AC = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AC) return;
+      audioCtx = new AC();
+    }
+    if (audioCtx.state === 'suspended') { audioCtx.resume().catch(() => {}); }
+    const ctx = audioCtx;
+    const now = ctx.currentTime;
+    const duration = 0.26;
+
+    // Fundamental + octave = bell-like character
+    const voices = [
+      { freq: 523.25, type: 'sine'     as OscillatorType, gain: 0.12 }, // C5
+      { freq: 1046.5, type: 'triangle' as OscillatorType, gain: 0.05 }, // C6 (quiet overtone)
+    ];
+
+    for (const v of voices) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = v.type;
+      osc.frequency.value = v.freq;
+      // Tight attack, long exponential ring-out — natural bell shape
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(v.gain, now + 0.005);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + duration + 0.02);
+    }
+  } catch {
+    // Silently ignore — audio is a nice-to-have, never block the toast
+  }
 }
 
 /** Dispatch from anywhere to show a toast */
