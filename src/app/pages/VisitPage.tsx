@@ -298,6 +298,25 @@ export default function VisitPage() {
   const [vaccineInjectionSite, setVaccineInjectionSite] = useState(draft.vaccineInjectionSite ?? '');
   const [vaccineNotes, setVaccineNotes] = useState(draft.vaccineNotes ?? '');
 
+  // Vaccine templates loaded from Supabase (replaces hardcoded COMMON_VACCINES)
+  const [vaccineTemplates, setVaccineTemplates] = useState<{ name: string; default_injection_site: string | null; validity_months: number | null }[]>([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const { organizationId } = await getOrgContext();
+        const { data } = await db
+          .from('vaccine_templates')
+          .select('name, default_injection_site, validity_months')
+          .eq('organization_id', organizationId)
+          .eq('is_active', true)
+          .order('sort_order', { ascending: true });
+        if (data) setVaccineTemplates(data as any);
+      } catch (e) {
+        console.error('[VisitPage] Failed to load vaccine templates:', e);
+      }
+    })();
+  }, [db]);
+
   // Front Desk Tasks
   const [frontDeskTasks, setFrontDeskTasks] = useState<FrontDeskTask[]>(draft.frontDeskTasks ?? []);
   const [nextTaskId, setNextTaskId] = useState(draft.nextTaskId ?? 1);
@@ -451,13 +470,9 @@ export default function VisitPage() {
   const isVaccinationOnly = appt.service === 'Vaccination';
   const isComboVaccination = hasVaccination && !isVaccinationOnly;
 
-  const COMMON_VACCINES = [
-    'Rabies (1-year)', 'Rabies (3-year)', 'DHPP (Distemper combo)',
-    'Bordetella', 'Leptospirosis', 'Canine Influenza (H3N2/H3N8)',
-    'Lyme Disease', 'FVRCP (Feline Distemper)', 'FeLV (Feline Leukemia)',
-    'FIV (Feline Immunodeficiency)',
-  ];
+  const COMMON_VACCINES = vaccineTemplates.map(v => v.name);
 
+  // Injection sites remain as a UI enum (not organizational-specific)
   const INJECTION_SITES = [
     'Right Front Leg', 'Left Front Leg', 'Right Rear Leg', 'Left Rear Leg',
     'Right Shoulder', 'Left Shoulder', 'Intranasal', 'Subcutaneous (Scruff)',
@@ -792,20 +807,35 @@ export default function VisitPage() {
                   Vaccine Name <span style={{ color: '#d4183d' }}>*</span>
                 </label>
                 <div className="flex flex-wrap gap-2 mb-3">
-                  {COMMON_VACCINES.map(v => (
+                  {vaccineTemplates.length === 0 && (
+                    <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Loading vaccine templates…</span>
+                  )}
+                  {vaccineTemplates.map(tmpl => (
                     <button
-                      key={v}
-                      onClick={() => setVaccineName(v)}
+                      key={tmpl.name}
+                      onClick={() => {
+                        setVaccineName(tmpl.name);
+                        // Auto-fill injection site if not already set
+                        if (tmpl.default_injection_site && !vaccineInjectionSite) {
+                          setVaccineInjectionSite(tmpl.default_injection_site);
+                        }
+                        // Auto-compute next due date from validity_months
+                        if (tmpl.validity_months && !vaccineNextDueDate) {
+                          const due = new Date();
+                          due.setMonth(due.getMonth() + tmpl.validity_months);
+                          setVaccineNextDueDate(due.toISOString().slice(0, 10));
+                        }
+                      }}
                       className="px-3 py-1.5 transition-all"
                       style={{
                         borderRadius: '9999px',
-                        border: `1.5px solid ${vaccineName === v ? '#3B82F6' : 'var(--border-color)'}`,
-                        backgroundColor: vaccineName === v ? '#3B82F618' : 'transparent',
-                        color: vaccineName === v ? '#3B82F6' : 'var(--text-secondary)',
-                        fontSize: '13px', fontWeight: vaccineName === v ? 600 : 400,
+                        border: `1.5px solid ${vaccineName === tmpl.name ? '#3B82F6' : 'var(--border-color)'}`,
+                        backgroundColor: vaccineName === tmpl.name ? '#3B82F618' : 'transparent',
+                        color: vaccineName === tmpl.name ? '#3B82F6' : 'var(--text-secondary)',
+                        fontSize: '13px', fontWeight: vaccineName === tmpl.name ? 600 : 400,
                       }}
                     >
-                      {v}
+                      {tmpl.name}
                     </button>
                   ))}
                 </div>

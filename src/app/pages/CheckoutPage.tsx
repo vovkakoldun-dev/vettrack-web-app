@@ -11,7 +11,7 @@ import { Avatar, AvatarImage, AvatarFallback } from '../components/ui/avatar';
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '../components/ui/select';
-import { MOCK_APPOINTMENTS, MEDICATION_PRICE_LIST } from '../data/mockAppointments';
+import { MOCK_APPOINTMENTS } from '../data/mockAppointments';
 import type { Appointment as MockAppt } from '../data/mockAppointments';
 import { useActiveVisit } from '../context/ActiveVisitContext';
 import { useAppointmentStatus } from '../context/AppointmentStatusContext';
@@ -25,14 +25,24 @@ type MedItem = { id: number; name: string; dosage: string; qty: number; unitPric
 
 // ─── Medication Search Combobox ───────────────────────────────
 
-function MedSearchInput({ value, onSelect }: { value: string; onSelect: (name: string, dosage: string, price: number, category: string) => void }) {
+type MedCatalogEntry = { name: string; category: string; default_dosage: string; unit_price: number };
+
+function MedSearchInput({
+  value,
+  onSelect,
+  catalog,
+}: {
+  value: string;
+  onSelect: (name: string, dosage: string, price: number, category: string) => void;
+  catalog: MedCatalogEntry[];
+}) {
   const [query, setQuery] = useState(value);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   const results = query.length > 0
-    ? MEDICATION_PRICE_LIST.filter((m) => m.name.toLowerCase().includes(query.toLowerCase())).slice(0, 8)
-    : MEDICATION_PRICE_LIST.slice(0, 8);
+    ? catalog.filter((m) => m.name.toLowerCase().includes(query.toLowerCase())).slice(0, 8)
+    : catalog.slice(0, 8);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -50,7 +60,7 @@ function MedSearchInput({ value, onSelect }: { value: string; onSelect: (name: s
           value={query}
           onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
           onFocus={() => setOpen(true)}
-          placeholder="Search medication…"
+          placeholder={catalog.length === 0 ? 'Loading medications…' : 'Search medication…'}
           style={{
             width: '100%', height: 36, paddingLeft: 32, paddingRight: 10,
             borderRadius: 8, border: '1px solid var(--border-color)',
@@ -69,7 +79,7 @@ function MedSearchInput({ value, onSelect }: { value: string; onSelect: (name: s
           {results.map((med) => (
             <button
               key={med.name}
-              onMouseDown={(e) => { e.preventDefault(); setQuery(med.name); onSelect(med.name, med.defaultDosage, med.price, med.category); setOpen(false); }}
+              onMouseDown={(e) => { e.preventDefault(); setQuery(med.name); onSelect(med.name, med.default_dosage, Number(med.unit_price), med.category); setOpen(false); }}
               style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 width: '100%', padding: '8px 12px', textAlign: 'left',
@@ -80,10 +90,10 @@ function MedSearchInput({ value, onSelect }: { value: string; onSelect: (name: s
             >
               <div>
                 <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)' }}>{med.name}</p>
-                <p style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{med.category} · {med.defaultDosage}/{med.unit}</p>
+                <p style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{med.category} · {med.default_dosage}</p>
               </div>
               <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--brand-green-text)', flexShrink: 0, marginLeft: 12 }}>
-                ${med.price.toFixed(2)}/{med.unit}
+                ${Number(med.unit_price).toFixed(2)}
               </span>
             </button>
           ))}
@@ -193,34 +203,59 @@ export default function CheckoutPage() {
 
   // ── State (restored from draft if available) ────────────────
   const [items, setItems] = useState<CheckoutItem[]>(
-    ckDraft.items ?? [{ id: 1, service: 'Office Visit / Consultation', qty: 1, unitPrice: 65 }]
+    ckDraft.items ?? [] // Populated from first service in DB via useEffect below
   );
   const [nextItemId, setNextItemId] = useState(ckDraft.nextItemId ?? 2);
   const [meds, setMeds] = useState<MedItem[]>(ckDraft.meds ?? []);
   const [nextMedId, setNextMedId] = useState(ckDraft.nextMedId ?? 1);
   const [serviceList, setServiceList] = useState<{ name: string; price: number }[]>([]);
+  const [medCatalog, setMedCatalog] = useState<{ name: string; category: string; default_dosage: string; unit_price: number }[]>([]);
+  const [taxRate, setTaxRate] = useState<number>(0.08); // default fallback
 
   useEffect(() => {
-    const fetchServices = async () => {
+    const fetchAll = async () => {
       try {
         const { organizationId } = await getOrgContext();
-        const { data } = await db
-          .from('services')
-          .select('name, price')
-          .eq('organization_id', organizationId)
-          .eq('is_active', true)
-          .order('sort_order', { ascending: true });
-        if (data && data.length > 0) {
-          setServiceList(data);
+        // Load services, medication catalog, and tax rate in parallel
+        const [servicesRes, medsRes, settingRes] = await Promise.all([
+          db.from('services')
+            .select('name, price')
+            .eq('organization_id', organizationId)
+            .eq('is_active', true)
+            .order('sort_order', { ascending: true }),
+          db.from('medication_catalog')
+            .select('name, category, default_dosage, unit_price')
+            .eq('organization_id', organizationId)
+            .eq('is_active', true)
+            .order('sort_order', { ascending: true }),
+          db.from('organization_settings')
+            .select('value')
+            .eq('organization_id', organizationId)
+            .eq('key', 'tax_rate')
+            .maybeSingle(),
+        ]);
+        if (servicesRes.data && servicesRes.data.length > 0) {
+          setServiceList(servicesRes.data);
+          // Seed the first line item with a real service if items is empty and no draft
+          setItems(prev => {
+            if (prev.length > 0) return prev;
+            const first = servicesRes.data![0] as { name: string; price: number };
+            return [{ id: 1, service: first.name, qty: 1, unitPrice: Number(first.price) }];
+          });
+        }
+        if (medsRes.data) setMedCatalog(medsRes.data as any);
+        if (settingRes.data?.value) {
+          const parsed = parseFloat(settingRes.data.value);
+          if (!isNaN(parsed) && parsed >= 0 && parsed < 1) setTaxRate(parsed);
         }
       } catch (e) {
-        console.error('Failed to load services:', e);
+        console.error('Failed to load checkout data:', e);
       }
     };
-    fetchServices();
+    fetchAll();
 
     // Re-fetch when services are changed in the admin
-    const handler = () => { fetchServices(); };
+    const handler = () => { fetchAll(); };
     window.addEventListener('serviceDataChanged', handler);
     return () => window.removeEventListener('serviceDataChanged', handler);
   }, []);
@@ -282,11 +317,11 @@ export default function CheckoutPage() {
   const selectMedPreset = (medId: number, name: string, dosage: string, price: number, category: string) =>
     setMeds((prev) => prev.map((m) => m.id === medId ? { ...m, name, dosage, unitPrice: price, category } : m));
 
-  // Invoice calculations
+  // Invoice calculations (tax rate loaded from organization_settings)
   const servicesSubtotal = items.reduce((sum, it) => sum + it.qty * it.unitPrice, 0);
   const medsSubtotal = meds.reduce((sum, m) => sum + m.qty * m.unitPrice, 0);
   const subtotal = servicesSubtotal + medsSubtotal;
-  const tax = parseFloat((subtotal * 0.08).toFixed(2));
+  const tax = parseFloat((subtotal * taxRate).toFixed(2));
   const total = subtotal + tax;
 
   const addItem = () => {
@@ -607,6 +642,7 @@ export default function CheckoutPage() {
                       {/* Medication search */}
                       <MedSearchInput
                         value={med.name}
+                        catalog={medCatalog}
                         onSelect={(name, dosage, price, category) => selectMedPreset(med.id, name, dosage, price, category)}
                       />
 
@@ -690,7 +726,7 @@ export default function CheckoutPage() {
                 <span className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 600 }}>${subtotal.toFixed(2)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>Tax (8%)</span>
+                <span className="text-[var(--text-secondary)]" style={{ fontSize: '14px' }}>Tax ({(taxRate * 100).toFixed(taxRate * 100 % 1 === 0 ? 0 : 2)}%)</span>
                 <span className="text-[var(--text-primary)]" style={{ fontSize: '14px', fontWeight: 500 }}>
                   {subtotal === 0 ? '—' : `$${tax.toFixed(2)}`}
                 </span>
@@ -852,8 +888,8 @@ export default function CheckoutPage() {
                   }).select('id').single();
                   if (inv) {
                     const lineItems = [
-                      ...items.map(i => ({ invoice_id: inv.id, description: i.service, quantity: i.qty, unit_price: i.unitPrice, tax_rate: 0.08, total: i.qty * i.unitPrice, organization_id: organizationId })),
-                      ...meds.map(m => ({ invoice_id: inv.id, description: `${m.name} (${m.dosage})`, quantity: m.qty, unit_price: m.unitPrice, tax_rate: 0.08, total: m.qty * m.unitPrice, organization_id: organizationId })),
+                      ...items.map(i => ({ invoice_id: inv.id, description: i.service, quantity: i.qty, unit_price: i.unitPrice, tax_rate: taxRate, total: i.qty * i.unitPrice, organization_id: organizationId })),
+                      ...meds.map(m => ({ invoice_id: inv.id, description: `${m.name} (${m.dosage})`, quantity: m.qty, unit_price: m.unitPrice, tax_rate: taxRate, total: m.qty * m.unitPrice, organization_id: organizationId })),
                     ];
                     if (lineItems.length > 0) await db.from('invoice_line_items').insert(lineItems);
                   }
