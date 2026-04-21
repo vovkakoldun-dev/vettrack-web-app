@@ -48,141 +48,25 @@ import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '../components/ui/select';
 
-// ─── Mock Data ───────────────────────────────────────────────
+// ─── Empty initial state (no hardcoded mock data) ───────────
 
-// Conditions loaded from vet_conditions_reference (VeNom codes) at runtime
-
-const mockClient = {
-  id: 1,
+const emptyClient = {
+  id: 0,
   owner: {
-    name: 'John Smith',
-    email: 'john.smith@email.com',
-    phone: '(555) 123-4567',
-    address: '742 Evergreen Terrace, Springfield, IL 62704',
-    emergencyContact: 'Jane Smith',
-    emergencyPhone: '(555) 123-4568',
+    name: '',
+    email: '',
+    phone: '',
+    address: '',
+    emergencyContact: '—',
+    emergencyPhone: '—',
   },
   insurance: {
-    provider: 'PetPlan',
-    policyNumber: 'PP-2024-78432',
-    coverageType: 'Comprehensive',
-    expiryDate: 'Dec 31, 2026',
+    provider: '—',
+    policyNumber: '—',
+    coverageType: '—',
+    expiryDate: '—',
   },
-  pets: [
-    {
-      id: 1,
-      dbId: '',
-      assignedVet: 'Dr. Sarah Chen',
-      name: 'Max',
-      species: 'Dog',
-      breed: 'Golden Retriever',
-      dob: '2020-06-15',
-      age: '5 years',
-      sex: 'Male (Neutered)',
-      weight: '32 kg',
-      microchip: '900118000123456',
-      color: 'Golden',
-      image: 'https://images.unsplash.com/photo-1734966213753-1b361564bab4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxnb2xkZW4lMjByZXRyaWV2ZXIlMjBkb2clMjBwb3J0cmFpdHxlbnwxfHx8fDE3NzMyNDMxMzB8MA&ixlib=rb-4.1.0&q=80&w=400',
-      status: 'Healthy' as const,
-      conditions: [
-        { id: 1, name: 'Hip Dysplasia', dateDiagnosed: 'Jan 15, 2024', status: 'active' as const },
-        { id: 2, name: 'Seasonal Allergies', dateDiagnosed: 'Mar 20, 2023', status: 'active' as const },
-        { id: 3, name: 'Ear Infection', dateDiagnosed: 'Aug 5, 2025', status: 'resolved' as const },
-      ],
-      treatments: [
-        { id: 1, name: 'Carprofen (Rimadyl) 75mg', date: 'Mar 10, 2026', vet: 'Dr. Chen', notes: 'Daily for hip dysplasia pain management' },
-        { id: 2, name: 'Apoquel 16mg', date: 'Mar 1, 2026', vet: 'Dr. Chen', notes: 'For seasonal allergy control' },
-        { id: 3, name: 'Rabies Vaccine', date: 'Jan 20, 2026', vet: 'Dr. Patel', notes: '3-year booster administered' },
-        { id: 4, name: 'DHPP Vaccine', date: 'Jan 20, 2026', vet: 'Dr. Patel', notes: 'Annual booster' },
-        { id: 5, name: 'Ear Drops (Otomax)', date: 'Aug 5, 2025', vet: 'Dr. Chen', notes: 'Apply twice daily for 14 days' },
-      ],
-      allergies: ['Chicken', 'Amoxicillin'],
-      visits: [
-        {
-          id: 1, date: 'Mar 10, 2026', reason: 'Annual Checkup', vet: 'Dr. Chen',
-          summary: 'Routine annual examination. Weight stable. Hip dysplasia managed well with current medication.',
-          notes: 'Physical exam normal. Heart and lungs clear. Teeth in good condition — recommended dental cleaning in 6 months. Bloodwork ordered for thyroid panel. Continue current medications. Discussed weight management diet options with owner.',
-          status: 'Completed' as const,
-        },
-        {
-          id: 2, date: 'Jan 20, 2026', reason: 'Vaccination', vet: 'Dr. Patel',
-          summary: 'Rabies and DHPP boosters administered. No adverse reactions.',
-          notes: 'Vaccines administered in left rear leg (Rabies) and right rear leg (DHPP). Owner advised to monitor for 24-48 hours for any reactions. Slight tenderness at injection site expected. No fever or swelling noted before discharge.',
-          status: 'Completed' as const,
-        },
-        {
-          id: 3, date: 'Aug 5, 2025', reason: 'Ear Infection', vet: 'Dr. Chen',
-          summary: 'Left ear infection diagnosed. Prescribed Otomax ear drops.',
-          notes: 'Owner reported head shaking and scratching at left ear for 3 days. Otoscopic exam revealed inflammation and discharge in left ear canal. Cytology showed yeast and bacteria. Prescribed Otomax drops — apply twice daily for 14 days. Recheck in 2 weeks. Right ear clear.',
-          status: 'Completed' as const,
-        },
-        {
-          id: 4, date: 'Mar 15, 2025', reason: 'Follow-up', vet: 'Dr. Chen',
-          summary: 'Hip dysplasia follow-up. Adjusted pain medication dosage.',
-          notes: 'Owner reports improved mobility since starting Carprofen. Gait analysis shows less limping. Increased dosage from 50mg to 75mg daily for better pain control. Discussed joint supplements — started on glucosamine/chondroitin. Schedule follow-up in 3 months.',
-          status: 'Completed' as const,
-        },
-      ],
-      vetNotes: 'Max is a friendly, well-behaved patient. Owner is very attentive and follows treatment plans closely. Monitor hip dysplasia progression — may need to consider surgical options if pain increases. Bloodwork due at next visit for liver panel (monitoring Carprofen side effects).',
-      clientNotes: 'Hi John! Max is doing great overall. Please continue his daily Carprofen and Apoquel as prescribed. Remember to keep up with his joint supplements. We\'d like to see him again in about 3 months for a follow-up on his hips. If you notice any changes in his mobility or appetite, don\'t hesitate to call us.',
-      upcomingAppointments: [
-        { id: 1, time: '2:30 PM', date: 'Mar 15, 2026', reason: 'Dental Cleaning' },
-      ],
-      vaccinations: [
-        { id: 1, name: 'Rabies', status: 'Up to date' as const, lastGiven: 'Dec 15, 2025', nextDue: 'Dec 15, 2026' },
-        { id: 2, name: 'DHPP', status: 'Up to date' as const, lastGiven: 'Jan 20, 2026', nextDue: 'Jan 20, 2027' },
-        { id: 3, name: 'Bordetella', status: 'Due soon' as const, lastGiven: 'Sep 10, 2025', nextDue: 'Mar 10, 2026' },
-        { id: 4, name: 'Leptospirosis', status: 'Up to date' as const, lastGiven: 'Jan 20, 2026', nextDue: 'Jan 20, 2027' },
-        { id: 5, name: 'Lyme', status: 'Up to date' as const, lastGiven: 'Nov 5, 2025', nextDue: 'Nov 5, 2026' },
-      ],
-    },
-    {
-      id: 2,
-      name: 'Hugo',
-      species: 'Cat',
-      breed: 'Persian',
-      dob: '2022-03-10',
-      age: '3 years',
-      sex: 'Male (Neutered)',
-      weight: '4.2 kg',
-      microchip: '900118000789012',
-      color: 'White',
-      image: 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=400',
-      status: 'Follow-up' as const,
-      conditions: [
-        { id: 1, name: 'Dental Disease', dateDiagnosed: 'Feb 1, 2026', status: 'active' as const },
-      ],
-      treatments: [
-        { id: 1, name: 'Dental Cleaning', date: 'Feb 1, 2026', vet: 'Dr. Patel', notes: 'Full dental cleaning under general anesthesia' },
-        { id: 2, name: 'Metacam 1.5mg', date: 'Feb 1, 2026', vet: 'Dr. Patel', notes: 'Pain relief post-dental procedure' },
-      ],
-      allergies: ['Fish'],
-      visits: [
-        {
-          id: 1, date: 'Feb 1, 2026', reason: 'Dental Procedure', vet: 'Dr. Patel',
-          summary: 'Stage 2 periodontal disease. Full dental cleaning and two extractions performed.',
-          notes: 'Oral exam shows significant tartar buildup on upper molars. Dental cleaning performed under general anesthesia. Two teeth extracted (upper premolars). Recovery uneventful. Owner instructed on post-procedure care and daily dental treats.',
-          status: 'Completed' as const,
-        },
-        {
-          id: 2, date: 'Nov 15, 2025', reason: 'Annual Checkup', vet: 'Dr. Chen',
-          summary: 'Healthy cat. Weight stable. Dental tartar noted.',
-          notes: 'Physical exam normal. Coat in good condition. Slight dental tartar buildup noted — recommended professional cleaning. FeLV booster due in 6 months. No other concerns.',
-          status: 'Completed' as const,
-        },
-      ],
-      vetNotes: 'Hugo is a calm, cooperative patient. Watch dental health closely — prone to periodontal disease. FeLV booster is overdue — needs to be scheduled.',
-      clientNotes: 'Hi John! Hugo is recovering well from his dental procedure. Please continue daily dental treats to help prevent tartar buildup. His FeLV vaccine booster is due soon — please call to schedule an appointment.',
-      upcomingAppointments: [
-        { id: 1, time: '10:00 AM', date: 'Mar 20, 2026', reason: 'Dental Recheck' },
-      ],
-      vaccinations: [
-        { id: 1, name: 'Rabies', status: 'Up to date' as const, lastGiven: 'Feb 1, 2026', nextDue: 'Feb 1, 2027' },
-        { id: 2, name: 'FVRCP', status: 'Up to date' as const, lastGiven: 'Feb 1, 2026', nextDue: 'Feb 1, 2027' },
-        { id: 3, name: 'FeLV', status: 'Due soon' as const, lastGiven: 'Aug 10, 2025', nextDue: 'Mar 20, 2026' },
-      ],
-    },
-  ],
+  pets: [] as any[],
 };
 
 // ─── Status Config ───────────────────────────────────────────
@@ -258,12 +142,14 @@ export default function ClientDetailPage() {
   }, [user]);
   const canEdit = ['veterinarian', 'senior_veterinarian', 'specialist', 'lead_vet_tech', 'superadmin'].includes(userRole);
 
-  // Fetch real client from Supabase, fall back to mock
-  const [client, setClient] = useState(mockClient);
+  // Fetch real client from Supabase
+  const [client, setClient] = useState(emptyClient);
   const [dbLoaded, setDbLoaded] = useState(false);
+  const [clientLoading, setClientLoading] = useState(true);
 
   const fetchClientData = useCallback(async () => {
-    if (!id) return;
+    if (!id) { setClientLoading(false); return; }
+    setClientLoading(true);
     const { organizationId } = await getOrgContext();
     const { data: c } = await db
       .from('clients')
@@ -362,6 +248,7 @@ export default function ClientDetailPage() {
       });
       setDbLoaded(true);
     }
+    setClientLoading(false);
   }, [id]);
 
   useEffect(() => {
@@ -963,10 +850,24 @@ export default function ClientDetailPage() {
     setTreatments(treatments.filter(t => t.id !== treatmentId));
   };
 
-  if (!dbLoaded) {
+  if (clientLoading) {
     return (
       <div className="max-w-[1200px] mx-auto p-8 flex items-center justify-center" style={{ minHeight: '60vh' }}>
         <Loader2 className="w-8 h-8 animate-spin text-[var(--brand-green-text)]" />
+      </div>
+    );
+  }
+
+  if (!dbLoaded) {
+    return (
+      <div className="max-w-[1200px] mx-auto p-8 flex flex-col items-center justify-center gap-4" style={{ minHeight: '60vh' }}>
+        <AlertCircle className="w-10 h-10 text-[var(--text-secondary)]" />
+        <p className="text-[var(--text-secondary)]" style={{ fontSize: '16px' }}>Client not found</p>
+        <Link to={clientsPath}>
+          <Button variant="outline" size="sm">
+            <ArrowLeft className="w-4 h-4 mr-2" /> Back to Clients
+          </Button>
+        </Link>
       </div>
     );
   }

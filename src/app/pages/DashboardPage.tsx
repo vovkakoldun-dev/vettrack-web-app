@@ -8,6 +8,7 @@ import { useAppointments } from '../hooks/useAppointments';
 import { useClients } from '../hooks/useClients';
 import { supabase } from '../../lib/supabase';
 import { useProfile } from '../hooks/useProfile';
+import { useTenantDb } from '../context/TenantContext';
 import { ConnectionStatusBadge } from '../components/ConnectionStatusBadge';
 
 // ─── Search result types ────────────────────────────────────
@@ -46,7 +47,7 @@ interface SearchResults {
   appointments: SearchResultAppointment[];
 }
 
-function useGlobalSearch(query: string, debounceMs = 300) {
+function useGlobalSearch(query: string, db: ReturnType<typeof useTenantDb>, debounceMs = 300) {
   const [results, setResults] = useState<SearchResults>({ clients: [], pets: [], appointments: [] });
   const [loading, setLoading] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -61,14 +62,14 @@ function useGlobalSearch(query: string, debounceMs = 300) {
     setLoading(true);
     const pattern = `%${term}%`;
 
-    // Step 1: Search clients and pets in parallel
+    // Step 1: Search clients and pets in parallel (tenant-scoped)
     const [clientsRes, petsRes] = await Promise.all([
-      supabase
+      db
         .from('clients')
         .select('id, first_name, last_name, email, phone')
         .or(`first_name.ilike.${pattern},last_name.ilike.${pattern},email.ilike.${pattern},phone.ilike.${pattern}`)
         .limit(6),
-      supabase
+      db
         .from('pets')
         .select('id, name, species, breed, photo_url, client_id, clients(id, first_name, last_name)')
         .or(`name.ilike.${pattern},species.ilike.${pattern},breed.ilike.${pattern}`)
@@ -86,7 +87,7 @@ function useGlobalSearch(query: string, debounceMs = 300) {
     if (clientIds.length > 0) orParts.push(`client_id.in.(${clientIds.join(',')})`);
     if (petIds.length > 0) orParts.push(`pet_id.in.(${petIds.join(',')})`);
 
-    const appointmentsRes = await supabase
+    const appointmentsRes = await db
       .from('appointments')
       .select('id, scheduled_at, status, reason, pets(id, name), clients(id, first_name, last_name), services(id, name)')
       .or(orParts.join(','))
@@ -516,7 +517,8 @@ export default function DashboardPage() {
   const [searchOpen, setSearchOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
-  const { results: searchResults, loading: searchLoading, totalResults } = useGlobalSearch(searchQuery);
+  const db = useTenantDb();
+  const { results: searchResults, loading: searchLoading, totalResults } = useGlobalSearch(searchQuery, db);
 
   // Close dropdown when clicking outside
   useEffect(() => {

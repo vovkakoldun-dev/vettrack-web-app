@@ -546,7 +546,9 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
             initials: `${(fn[0] ?? '').toUpperCase()}${(ln[0] ?? '').toUpperCase()}`,
           };
         }));
-      } catch {}
+      } catch (err) {
+        console.error('[AdminBookings] Failed to load staff list:', err);
+      }
     })();
   }, []);
 
@@ -672,6 +674,12 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
         if (selectedVetFilter !== 'all' && (a as any).vetId !== selectedVetFilter) return false;
         return true;
       });
+
+  // Unfiltered day appointments for "Vets on Duty" sidebar — ignores vet/status filters
+  const dayAppointmentsUnfiltered = useMemo(() =>
+    appointments.filter((a) => isSameDay(a.date, selectedDate)),
+    [appointments, selectedDate],
+  );
 
   const filteredByStatus = dayAppointments.filter((a) => {
     if (activeFilter === 'All') return true;
@@ -2102,7 +2110,7 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
                 </p>
               ) : (
                 staffList.map((vet) => {
-                  const count = dayAppointments.filter(
+                  const count = dayAppointmentsUnfiltered.filter(
                     (a) => (a as any).vetId === vet.id && a.status !== 'Cancelled',
                   ).length;
                   return (
@@ -2420,7 +2428,7 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
                   </div>
                   <div className="flex items-center gap-2">
                     <User style={{ width: '12px', height: '12px', color: 'var(--text-secondary)', flexShrink: 0 }} />
-                    <span style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{newApptVetName}</span>
+                    <span style={{ fontSize: '13px', color: newApptVetName ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{newApptVetName || 'No vet selected'}</span>
                   </div>
                   {newApptService && (
                     <div className="flex items-center gap-2">
@@ -3470,7 +3478,22 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
                   {newApptClientId && (
                     <div>
                       <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>Pet</p>
-                      <Select value={newApptPetId} onValueChange={(v) => { setNewApptPetId(v); const pet = allPets.find(p => p.id === v); if (pet) setNewApptPet(pet.name); }}>
+                      <Select value={newApptPetId} onValueChange={(v) => {
+                        setNewApptPetId(v);
+                        const pet = allPets.find(p => p.id === v);
+                        if (pet) {
+                          setNewApptPet(pet.name);
+                          // Auto-select the pet's assigned vet if one exists and no vet is chosen yet
+                          if (pet.assigned_vet_id && !newApptVetId) {
+                            const assignedStaff = staffList.find(s => s.id === pet.assigned_vet_id);
+                            if (assignedStaff) {
+                              setNewApptVetId(assignedStaff.id);
+                              setNewApptVetName(assignedStaff.name);
+                              fetchVetTimeBlocks(assignedStaff.id);
+                            }
+                          }
+                        }
+                      }}>
                         <SelectTrigger><SelectValue placeholder="Select pet…" /></SelectTrigger>
                         <SelectContent>
                           {allPets.filter(p => p.client_id === newApptClientId).map(p => (
@@ -4154,6 +4177,7 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
                     const { data: newPet, error: pErr } = await db
                       .from('pets')
                       .insert([{
+                        organization_id: orgCtx2.organizationId,
                         client_id: finalClientId,
                         name: npPetName,
                         species: npSpecies,

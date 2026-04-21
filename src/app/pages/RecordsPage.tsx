@@ -143,7 +143,11 @@ export default function RecordsPage() {
   });
 
   const pendingCount = records.filter((r) => r.status === 'Pending Review').length;
-  const thisMonthCount = records.filter((r) => r.dateISO >= '2026-03-01').length;
+  const currentMonthStart = (() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-01`;
+  })();
+  const thisMonthCount = records.filter((r) => r.dateISO >= currentMonthStart).length;
 
   return (
     <div className="max-w-[1440px] mx-auto p-8">

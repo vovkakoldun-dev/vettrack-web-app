@@ -328,7 +328,9 @@ export default function AppointmentsPage() {
             initials: `${(fn[0] ?? '').toUpperCase()}${(ln[0] ?? '').toUpperCase()}`,
           };
         }));
-      } catch {}
+      } catch (err) {
+        console.error('[Appointments] Failed to load staff list:', err);
+      }
     })();
   }, []);
 
@@ -2224,6 +2226,7 @@ export default function AppointmentsPage() {
                     const { data: newPet, error: pErr } = await db
                       .from('pets')
                       .insert([{
+                        organization_id: orgCtx.organizationId,
                         client_id: finalClientId,
                         name: npPetName,
                         species: npSpecies,
