@@ -273,7 +273,14 @@ export default function ChatPage() {
   const [forwardMsg, setForwardMsg] = useState<ForwardableMessage | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const lastReadAtRef = useRef<string | null>(null);
+  const initialLoadRef = useRef(true);
+  const prependingRef = useRef(false);
+  const prevScrollInfoRef = useRef<{ height: number; top: number }>({ height: 0, top: 0 });
+  const MESSAGES_PAGE_SIZE = 30;
+  const [hasMoreMessages, setHasMoreMessages] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const selectedConv = conversations.find((c) => c.id === selectedId) ?? null;
 
@@ -551,37 +558,46 @@ export default function ChatPage() {
 
   // ── Load messages for selected conversation ─────────────────────────────────
 
+  // Helper to map a DB row → UI Message. Shared by initial fetch and lazy loader.
+  const mapDbMessage = useCallback((m: any) => {
+    const sp = Array.isArray(m.sender) ? m.sender[0] : m.sender;
+    const rawName = sp ? `${sp.first_name ?? ''} ${sp.last_name ?? ''}`.trim() : '';
+    const isVet = sp?.role === 'doctor' || sp?.role === 'veterinarian' || sp?.role === 'senior_veterinarian' || sp?.role === 'specialist';
+    const senderName = rawName ? (isVet ? `Dr. ${rawName}` : rawName) : undefined;
+    return {
+      id: m.id,
+      from: m.sender_id === user?.id ? 'me' as const : 'them' as const,
+      text: m.content,
+      timestamp: new Date(m.created_at),
+      imageUrl: m.image_url || undefined,
+      fileUrl: m.file_url || undefined,
+      fileName: m.file_name || undefined,
+      fileSize: m.file_size || undefined,
+      senderName,
+      forwardedFromName: m.forwarded_from_name || undefined,
+      attachmentMeta: m.attachment_meta || undefined,
+    };
+  }, [user]);
+
   const fetchMessages = useCallback(async (convId: string) => {
     if (!user) return;
     setLoadingMsgs(true);
+    initialLoadRef.current = true; // Mark first render so scroll jumps to bottom
     const { organizationId } = await getOrgContext();
+    // Load the most recent page, then reverse for display (oldest→newest)
     const { data } = await db
       .from('messages')
       .select('id, content, sender_id, image_url, file_url, file_name, file_size, forwarded_from_name, attachment_meta, created_at, sender:profiles!messages_sender_id_fkey(first_name, last_name, role)')
       .eq('organization_id', organizationId)
       .eq('conversation_id', convId)
-      .order('created_at', { ascending: true });
+      .order('created_at', { ascending: false })
+      .limit(MESSAGES_PAGE_SIZE);
 
     if (data) {
-      setMessages(data.map((m: any) => {
-        const sp = Array.isArray(m.sender) ? m.sender[0] : m.sender;
-        const rawName = sp ? `${sp.first_name ?? ''} ${sp.last_name ?? ''}`.trim() : '';
-        const isVet = sp?.role === 'doctor' || sp?.role === 'veterinarian' || sp?.role === 'senior_veterinarian' || sp?.role === 'specialist';
-        const senderName = rawName ? (isVet ? `Dr. ${rawName}` : rawName) : undefined;
-        return {
-          id: m.id,
-          from: m.sender_id === user.id ? 'me' as const : 'them' as const,
-          text: m.content,
-          timestamp: new Date(m.created_at),
-          imageUrl: m.image_url || undefined,
-          fileUrl: m.file_url || undefined,
-          fileName: m.file_name || undefined,
-          fileSize: m.file_size || undefined,
-          senderName,
-          forwardedFromName: m.forwarded_from_name || undefined,
-          attachmentMeta: m.attachment_meta || undefined,
-        };
-      }));
+      setHasMoreMessages(data.length >= MESSAGES_PAGE_SIZE);
+      // Reverse: DB gave newest-first, UI wants oldest-first (newest at bottom)
+      const reversed = [...data].reverse();
+      setMessages(reversed.map(mapDbMessage));
     }
     // Fetch reactions for these messages
     if (data && data.length > 0) {
@@ -603,7 +619,75 @@ export default function ChatPage() {
     }
 
     setLoadingMsgs(false);
-  }, [user]);
+  }, [user, mapDbMessage]);
+
+  // Lazy-load older messages when user scrolls near the top
+  const loadMoreMessages = useCallback(async () => {
+    if (!user || !selectedId || loadingMore || !hasMoreMessages) return;
+    if (messages.length === 0) return;
+    const oldest = messages[0];
+    if (!oldest?.timestamp) return;
+
+    const container = messagesContainerRef.current;
+    if (container) {
+      prevScrollInfoRef.current = { height: container.scrollHeight, top: container.scrollTop };
+    }
+    prependingRef.current = true;
+    setLoadingMore(true);
+
+    try {
+      const { organizationId } = await getOrgContext();
+      const { data } = await db
+        .from('messages')
+        .select('id, content, sender_id, image_url, file_url, file_name, file_size, forwarded_from_name, attachment_meta, created_at, sender:profiles!messages_sender_id_fkey(first_name, last_name, role)')
+        .eq('organization_id', organizationId)
+        .eq('conversation_id', selectedId)
+        .lt('created_at', oldest.timestamp.toISOString())
+        .order('created_at', { ascending: false })
+        .limit(MESSAGES_PAGE_SIZE);
+
+      if (data) {
+        setHasMoreMessages(data.length >= MESSAGES_PAGE_SIZE);
+        const reversed = [...data].reverse();
+        const older = reversed.map(mapDbMessage);
+        setMessages(prev => [...older, ...prev]);
+
+        // Load reactions for the newly loaded batch
+        if (data.length > 0) {
+          const msgIds = data.map((m: { id: string }) => m.id);
+          const { data: rxns } = await db
+            .from('message_reactions')
+            .select('message_id, emoji, user_id')
+            .in('message_id', msgIds);
+          if (rxns) {
+            setReactions(prev => {
+              const next = { ...prev };
+              for (const r of rxns) {
+                if (!next[r.message_id]) next[r.message_id] = [];
+                const existing = next[r.message_id].find(rx => rx.emoji === r.emoji);
+                if (existing) {
+                  if (!existing.users.includes(r.user_id)) existing.users.push(r.user_id);
+                } else {
+                  next[r.message_id] = [...next[r.message_id], { emoji: r.emoji, users: [r.user_id] }];
+                }
+              }
+              return next;
+            });
+          }
+        }
+      }
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [user, selectedId, db, messages, loadingMore, hasMoreMessages, mapDbMessage]);
+
+  // Scroll handler — triggers lazy load when user scrolls near top
+  const handleMessagesScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const t = e.currentTarget;
+    if (t.scrollTop < 100 && !loadingMore && hasMoreMessages) {
+      loadMoreMessages();
+    }
+  }, [loadingMore, hasMoreMessages, loadMoreMessages]);
 
   // ── Toggle reaction ──────────────────────────────────────────────────────────
 
@@ -1094,13 +1178,43 @@ export default function ChatPage() {
     return () => { supabase.removeChannel(channel); };
   }, [user, selectedId]);
 
-  // ── Auto-scroll ─────────────────────────────────────────────────────────────
+  // ── Auto-scroll (smart: initial load jumps to bottom, new msg smooths, prepend preserves) ──
 
   useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    // Wait for messages to actually be in the DOM (loadingMsgs must be false)
+    if (loadingMsgs) return;
+    if (messages.length === 0) return;
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    if (prependingRef.current) {
+      const prev = prevScrollInfoRef.current;
+      requestAnimationFrame(() => {
+        const diff = container.scrollHeight - prev.height;
+        container.scrollTop = prev.top + diff;
+        prependingRef.current = false;
+      });
+      return;
     }
-  }, [messages.length]);
+
+    if (initialLoadRef.current) {
+      initialLoadRef.current = false;
+      const jumpToBottom = () => { container.scrollTop = container.scrollHeight; };
+      // Multiple passes: layout now, after next paint, and after a short delay for images
+      jumpToBottom();
+      requestAnimationFrame(() => {
+        jumpToBottom();
+        setTimeout(jumpToBottom, 100);
+      });
+      return;
+    }
+
+    // New message arrived — only follow if user was already near the bottom
+    const distanceFromBottom = container.scrollHeight - container.clientHeight - container.scrollTop;
+    if (distanceFromBottom < 200) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages.length, loadingMsgs]);
 
   // Scroll to search match
   useEffect(() => {
@@ -1431,7 +1545,16 @@ export default function ChatPage() {
             )}
 
             {/* Messages area */}
-            <div style={{ flex: 1, overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column' }}>
+            <div
+              ref={messagesContainerRef}
+              onScroll={handleMessagesScroll}
+              style={{ flex: 1, overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column' }}
+            >
+              {loadingMore && (
+                <div style={{ display: 'flex', justifyContent: 'center', padding: '8px 0' }}>
+                  <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Loading older messages…</span>
+                </div>
+              )}
               {loadingMsgs ? (
                 <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Loading messages...</p>
