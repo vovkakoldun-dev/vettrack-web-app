@@ -12,6 +12,45 @@ interface Toast {
 
 let toastId = 0;
 
+// ─── Sound: soft, short two-note "ding" for new message toasts ──────────────
+// Generated with the Web Audio API — no external audio file needed.
+// Respects browser autoplay policy: only plays after a user interaction.
+let audioCtx: AudioContext | null = null;
+function playMessageSound() {
+  try {
+    if (!audioCtx) {
+      const AC = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AC) return;
+      audioCtx = new AC();
+    }
+    if (audioCtx.state === 'suspended') { audioCtx.resume().catch(() => {}); }
+    const ctx = audioCtx;
+    const now = ctx.currentTime;
+
+    // Two quick soft sine notes (A5 → E6), ~160ms total
+    const notes: Array<{ freq: number; start: number; duration: number }> = [
+      { freq: 880,  start: 0,     duration: 0.09 },  // A5
+      { freq: 1320, start: 0.07,  duration: 0.10 },  // E6 (slight overlap for smoothness)
+    ];
+
+    for (const n of notes) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = n.freq;
+      // Quick attack, exponential decay — feels natural and unobtrusive
+      gain.gain.setValueAtTime(0.0001, now + n.start);
+      gain.gain.exponentialRampToValueAtTime(0.12, now + n.start + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + n.start + n.duration);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now + n.start);
+      osc.stop(now + n.start + n.duration + 0.02);
+    }
+  } catch {
+    // Silently ignore — audio is a nice-to-have, never block the toast
+  }
+}
+
 /** Dispatch from anywhere to show a toast */
 export function showToast(detail: { type: 'chat' | 'notification'; title: string; message: string; link?: string }) {
   window.dispatchEvent(new CustomEvent('showToast', { detail }));
@@ -35,6 +74,8 @@ export default function ToastNotification() {
       const id = ++toastId;
       const toast: Toast = { id, ...detail };
       setToasts((prev) => [...prev.slice(-2), toast]); // max 3
+      // Play a soft short ding for new message toasts
+      if (detail.type === 'chat') playMessageSound();
       const timer = setTimeout(() => removeToast(id), 5000);
       timersRef.current.set(id, timer);
     };
