@@ -1115,6 +1115,7 @@ export default function AdminDashboardPage() {
             room: room.name,
             service: roomSelectAppt.service,
             timeStart: roomSelectAppt.time,
+            date: new Date().toISOString().slice(0, 10),
             appointmentId: roomSelectAppt.dbId,
           },
         });

@@ -879,6 +879,7 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
             room: room.name,
             service: roomSelectAppt.service,
             timeStart: roomSelectAppt.timeStart,
+            date: roomSelectAppt.date,
             appointmentId: roomSelectAppt.id,
           },
         });

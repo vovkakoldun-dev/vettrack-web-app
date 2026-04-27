@@ -13,6 +13,7 @@ import {
   UtensilsCrossed, Palmtree, ThermometerSun, Briefcase, UsersRound,
   AlertCircle, CheckCircle2, Send, ArrowUpRight, Camera, Pencil, Trash2, X,
   DoorOpen, Loader2, Microscope, Bed, Bath, Coffee, Sparkles, Building2,
+  Phone, FileText, Tag,
 } from 'lucide-react';
 import { Avatar, AvatarImage, AvatarFallback } from '../components/ui/avatar';
 import { AddClientDialog } from '../components/AddClientDialog';
@@ -52,8 +53,14 @@ interface Appointment {
   timeEnd: string;
   petName: string;
   petImage: string;
+  petSpecies?: string;
+  petBreed?: string;
   ownerName: string;
+  ownerPhone?: string;
   service: string;
+  serviceType?: string;
+  status?: string;
+  notes?: string;
   clientArrived?: boolean;
   durationMinutes?: number;
   room?: string;
@@ -670,7 +677,7 @@ export default function MyPortalPage() {
         // Fetch appointments for this vet
         const { data: apptData } = await db
           .from('appointments')
-          .select('id, scheduled_at, duration_minutes, status, reason, notes, room, room_id, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name, phone)')
+          .select('id, scheduled_at, duration_minutes, status, type, reason, notes, room, room_id, pets(id, name, species, breed, photo_url), clients(id, first_name, last_name, phone)')
           .eq('vet_id', staffData.id)
           .order('scheduled_at', { ascending: true });
         if (apptData) {
@@ -696,8 +703,14 @@ export default function MyPortalPage() {
               timeEnd: fmtLocal(end),
               petName: a.pets?.name ?? '—',
               petImage: a.pets?.photo_url ?? '',
+              petSpecies: a.pets?.species ?? '',
+              petBreed: a.pets?.breed ?? '',
               ownerName: a.clients ? `${a.clients.first_name} ${a.clients.last_name}` : '—',
+              ownerPhone: a.clients?.phone ?? '',
               service: a.reason ?? '—',
+              serviceType: a.type ?? '',
+              status: a.status ?? '',
+              notes: a.notes ?? '',
               clientArrived: a.status === 'Checked In' || a.status === 'In Progress',
               durationMinutes: a.duration_minutes ?? 30,
               room: a.room ?? '',
@@ -1115,6 +1128,9 @@ export default function MyPortalPage() {
     setBlockDialogOpen(true);
   };
 
+  // ── Appointment detail popup state ──
+  const [detailAppt, setDetailAppt] = useState<Appointment | null>(null);
+
   // ── Edit / Delete block state ──
   const [editingBlock, setEditingBlock] = useState<TimeBlock | null>(null);
   const [editBlockDialogOpen, setEditBlockDialogOpen] = useState(false);
@@ -1531,8 +1547,9 @@ export default function MyPortalPage() {
                     ) : (
                       /* ── Regular appointment block ── */
                       <div
-                        className="flex-1 m-1 px-3 py-2.5 flex items-center gap-3"
+                        className="flex-1 m-1 px-3 py-2.5 flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity"
                         style={{ backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 6%, transparent)', borderLeft: '4px solid var(--brand-green-text)', borderRadius: '8px' }}
+                        onClick={() => setDetailAppt(appt)}
                       >
                         {appt.petImage ? (
                           <img src={appt.petImage} alt={appt.petName} className="w-8 h-8 object-cover flex-shrink-0" style={{ borderRadius: '9999px' }} />
@@ -2015,6 +2032,125 @@ export default function MyPortalPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {/* ─── Appointment Detail Dialog ─────────────── */}
+      <Dialog open={!!detailAppt} onOpenChange={(v) => { if (!v) setDetailAppt(null); }}>
+        <DialogContent className="sm:max-w-[480px] p-0 overflow-hidden gap-0">
+          {detailAppt && (() => {
+            const a = detailAppt;
+            const statusColors: Record<string, { bg: string; text: string; dot: string }> = {
+              'Scheduled':   { bg: '#3B82F615', text: '#1D4ED8', dot: '#3B82F6' },
+              'Pending':     { bg: '#F4A26120', text: '#B45309', dot: '#F4A261' },
+              'Confirmed':   { bg: '#22C55E15', text: '#15803D', dot: '#22C55E' },
+              'Checked In':  { bg: '#22C55E20', text: '#15803D', dot: '#22C55E' },
+              'In Progress': { bg: '#8B5CF615', text: '#6D28D9', dot: '#8B5CF6' },
+              'Completed':   { bg: '#6B728015', text: '#374151', dot: '#6B7280' },
+              'Cancelled':   { bg: '#EF444415', text: '#B91C1C', dot: '#EF4444' },
+              'No Show':     { bg: '#EF444415', text: '#B91C1C', dot: '#EF4444' },
+            };
+            const sc = statusColors[a.status || ''] || statusColors['Scheduled'];
+            const formattedDate = (() => {
+              try {
+                const d = new Date(a.date + 'T00:00:00');
+                return d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+              } catch { return a.date; }
+            })();
+            const Row = ({ icon: Icon, label, value }: { icon: typeof Clock; label: string; value: React.ReactNode }) => (
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '10px 0' }}>
+                <div style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 10%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Icon style={{ width: 15, height: 15, color: 'var(--brand-green-text)' }} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>{label}</p>
+                  <div style={{ fontSize: 14, color: 'var(--text-primary)', marginTop: 2, wordBreak: 'break-word' }}>{value}</div>
+                </div>
+              </div>
+            );
+            return (
+              <>
+                {/* Header with pet */}
+                <div style={{ padding: '20px 22px', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: 14, background: 'linear-gradient(135deg, color-mix(in srgb, var(--brand-green-text) 12%, transparent), transparent 60%)' }}>
+                  {a.petImage ? (
+                    <img src={a.petImage} alt={a.petName} style={{ width: 52, height: 52, borderRadius: 9999, objectFit: 'cover', flexShrink: 0 }} />
+                  ) : (
+                    <div style={{ width: 52, height: 52, borderRadius: 9999, backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 18, flexShrink: 0 }}>
+                      {a.petName.slice(0, 2).toUpperCase()}
+                    </div>
+                  )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <DialogTitle asChild>
+                      <p style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>{a.petName}</p>
+                    </DialogTitle>
+                    <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '2px 0 0' }}>
+                      {[a.petSpecies, a.petBreed].filter(Boolean).join(' · ') || '—'}
+                    </p>
+                  </div>
+                  {a.status && (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderRadius: 9999, backgroundColor: sc.bg, color: sc.text, fontSize: 12, fontWeight: 600, flexShrink: 0 }}>
+                      <span style={{ width: 6, height: 6, borderRadius: 9999, backgroundColor: sc.dot }} />
+                      {a.status}
+                    </span>
+                  )}
+                </div>
+
+                {/* Body */}
+                <div style={{ padding: '6px 22px 14px', maxHeight: '60vh', overflowY: 'auto' }}>
+                  <Row icon={CalendarIcon} label="Date" value={formattedDate} />
+                  <Row icon={Clock} label="Time" value={`${a.timeStart} – ${a.timeEnd}${a.durationMinutes ? `  · ${a.durationMinutes} min` : ''}`} />
+                  <Row
+                    icon={Stethoscope}
+                    label="Service"
+                    value={
+                      <div>
+                        <div>{a.service || '—'}</div>
+                        {a.serviceType && (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 4, padding: '2px 8px', borderRadius: 9999, backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)', color: 'var(--brand-green-text)', fontSize: 11, fontWeight: 600 }}>
+                            <Tag style={{ width: 10, height: 10 }} /> {a.serviceType}
+                          </span>
+                        )}
+                      </div>
+                    }
+                  />
+                  <Row
+                    icon={Users}
+                    label="Owner"
+                    value={
+                      <div>
+                        <div>{a.ownerName}</div>
+                        {a.ownerPhone && (
+                          <a href={`tel:${a.ownerPhone}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 2, color: 'var(--brand-green-text)', fontSize: 13, textDecoration: 'none' }}>
+                            <Phone style={{ width: 12, height: 12 }} /> {a.ownerPhone}
+                          </a>
+                        )}
+                      </div>
+                    }
+                  />
+                  {a.room && (
+                    <Row icon={DoorOpen} label="Room" value={a.room} />
+                  )}
+                  {a.notes && (
+                    <Row icon={FileText} label="Notes" value={<span style={{ whiteSpace: 'pre-wrap' }}>{a.notes}</span>} />
+                  )}
+                </div>
+
+                {/* Footer actions */}
+                <DialogFooter style={{ padding: '14px 22px', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--surface-elevated)' }}>
+                  <Button variant="outline" onClick={() => setDetailAppt(null)}>Close</Button>
+                  {!a.clientArrived && (
+                    <Button
+                      onClick={() => { setDetailAppt(null); handleStartVisit(a); }}
+                      style={{ backgroundColor: 'var(--brand-green-text)', color: 'var(--on-brand-green)' }}
+                    >
+                      <Play className="w-3.5 h-3.5 mr-1" style={{ fill: 'var(--on-brand-green)' }} />
+                      Start Visit
+                    </Button>
+                  )}
+                </DialogFooter>
+              </>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+
       <AddClientDialog open={addClientOpen} onOpenChange={setAddClientOpen} onSave={handleAddClient} />
 
       {/* ─── Room Info Dialog with Floor Plan ─── */}

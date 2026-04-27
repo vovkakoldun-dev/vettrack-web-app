@@ -418,7 +418,7 @@ export default function ClientsPage() {
             Manage your clients and their pets.
           </p>
         </div>
-        <Button onClick={() => setAddClientOpen(true)}>
+        <Button data-tour="clients-add" onClick={() => setAddClientOpen(true)}>
           <Plus className="w-4 h-4" />
           Add Client
         </Button>
@@ -439,6 +439,7 @@ export default function ClientsPage() {
             className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-secondary)] pointer-events-none"
           />
           <input
+            data-tour="clients-search"
             type="text"
             placeholder="Search by pet, owner, or breed..."
             value={search}
@@ -792,13 +793,16 @@ export default function ClientsPage() {
                 </TableCell>
               </TableRow>
             )}
-            {!loading && filtered.map((client) => {
+            {!loading && filtered.map((client, idx) => {
               const opt = STATUS_OPTIONS.find((o) => o.value === client.status) ?? STATUS_OPTIONS[0];
               const StatusIcon = opt.icon;
               const isSelected = selectedIds.has(client.rowKey);
               return (
                 <TableRow
                   key={client.rowKey}
+                  data-tour={idx === 0 ? 'clients-first-row' : undefined}
+                  data-client-id={client.id}
+                  data-pet-id={client.petId || ''}
                   className="hover:bg-[var(--surface-elevated)] cursor-pointer transition-colors"
                   style={isSelected ? { backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)' } : undefined}
                   onClick={() => navigate(`/clients/${client.id}${client.petId ? `?petId=${client.petId}` : ''}`)}

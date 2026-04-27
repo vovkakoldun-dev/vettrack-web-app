@@ -1362,6 +1362,7 @@ export default function ChatPage() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 20px 16px', flexShrink: 0 }}>
           <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>Messages</h2>
           <button
+            data-tour="chat-new-group"
             title="New group chat"
             onClick={openNewGroupDialog}
             style={{ width: '32px', height: '32px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-secondary)', transition: 'background-color 0.15s' }}
@@ -1377,6 +1378,7 @@ export default function ChatPage() {
           <div style={{ position: 'relative' }}>
             <Search style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', width: '15px', height: '15px', color: 'var(--text-secondary)', pointerEvents: 'none' }} />
             <Input
+              data-tour="chat-search"
               type="text"
               placeholder="Search people & conversations..."
               value={searchQuery}
@@ -1435,6 +1437,7 @@ export default function ChatPage() {
               >
                 <button
                   onClick={() => handleSelectConversation(conv.id)}
+                  data-tour={conv.groupTitle === 'HugoChat' ? 'chat-hugo-channel' : undefined}
                   style={{
                     width: '100%', display: 'flex', alignItems: 'center', gap: '12px',
                     padding: '12px 16px',
@@ -1995,6 +1998,7 @@ export default function ChatPage() {
 
               <textarea
                 ref={inputRef}
+                data-tour="chat-input"
                 placeholder="Type a message..."
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
@@ -2054,6 +2058,7 @@ export default function ChatPage() {
               </div>
 
               <button
+                data-tour="chat-send"
                 title="Send"
                 onClick={handleSend}
                 disabled={!inputValue.trim() && !imageFile && !attachedFile && !attachedRecord}

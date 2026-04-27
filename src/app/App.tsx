@@ -12,6 +12,8 @@ import ToastNotification from './components/ToastNotification';
 import { OwnerSidebar } from './components/OwnerSidebar';
 import { SuperAdminSidebar } from './components/SuperAdminSidebar';
 import { ActiveVisitProvider, useActiveVisit } from './context/ActiveVisitContext';
+import { TourOverlay } from './components/TourOverlay';
+import { DOCTOR_TOUR_STEPS } from './components/tourSteps.tsx';
 
 // ─── Lazy-loaded pages (code-split per portal) ────────────────
 // Doctor portal
@@ -33,6 +35,7 @@ const SupabaseTestPage = lazy(() => import('./pages/SupabaseTestPage'));
 const VisitPage = lazy(() => import('./pages/VisitPage'));
 const CheckoutPage = lazy(() => import('./pages/CheckoutPage'));
 const ShiftsPage = lazy(() => import('./pages/ShiftsPage'));
+const WelcomePage = lazy(() => import('./pages/WelcomePage'));
 // Owner portal
 const OwnerDashboardPage = lazy(() => import('./pages/owner/OwnerDashboardPage'));
 const OwnerContactPage = lazy(() => import('./pages/owner/OwnerContactPage'));
@@ -269,6 +272,82 @@ function ActiveVisitWidget() {
 
 function MainApp() {
   const { isDark, toggle } = useTheme();
+  const navigate = useNavigate();
+
+  // ── Product tour kickoff after first-run wizard ─────────────────────────
+  const [tourOpen, setTourOpen] = useState(false);
+  // Steps default to the doctor portal tour but can be swapped to a
+  // sub-tour (e.g. chat drill-down) and then restored.
+  const [tourSteps, setTourSteps] = useState<typeof DOCTOR_TOUR_STEPS>(DOCTOR_TOUR_STEPS);
+  const [tourStartIndex, setTourStartIndex] = useState(0);
+  // When a sub-tour is active, this stores the parent tour we should
+  // resume on completion. `null` means we're in the top-level tour.
+  const [parentTour, setParentTour] = useState<{
+    steps: typeof DOCTOR_TOUR_STEPS;
+    resumeIndex: number;
+    path: string;
+  } | null>(null);
+  useEffect(() => {
+    let timer: number | undefined;
+    const start = () => {
+      try { sessionStorage.removeItem('vettrack-tour-pending'); } catch {}
+      setTourSteps(DOCTOR_TOUR_STEPS);
+      setTourStartIndex(0);
+      setParentTour(null);
+      // Defer so the dashboard + sidebar finish painting before measuring.
+      timer = window.setTimeout(() => setTourOpen(true), 250);
+    };
+
+    // Case 1: page reload — flag was persisted in sessionStorage.
+    try {
+      if (sessionStorage.getItem('vettrack-tour-pending') === 'doctor') start();
+    } catch {}
+
+    // Case 2: same-session navigation from the welcome wizard.
+    const onStartTour = () => start();
+    window.addEventListener('vettrack:start-tour', onStartTour);
+    return () => {
+      window.removeEventListener('vettrack:start-tour', onStartTour);
+      if (timer) window.clearTimeout(timer);
+    };
+  }, []);
+
+  /** Drill into a sub-tour: navigate, swap step list, and remember how to
+   *  return to the parent tour when the sub-tour completes. */
+  const handleTourAction = (
+    action: { label: string; path: string; steps: typeof DOCTOR_TOUR_STEPS },
+    currentIdx: number,
+  ) => {
+    setParentTour({ steps: tourSteps, resumeIndex: currentIdx + 1, path: window.location.pathname });
+    setTourOpen(false);
+    navigate(action.path);
+    window.setTimeout(() => {
+      setTourSteps(action.steps);
+      setTourStartIndex(0);
+      setTourOpen(true);
+    }, 350);
+  };
+
+  /** Last CTA on a sub-tour — return to the parent tour at its next step. */
+  const handleSubTourComplete = () => {
+    if (!parentTour) { setTourOpen(false); return; }
+    const { steps, resumeIndex, path } = parentTour;
+    setTourOpen(false);
+    if (window.location.pathname !== path) navigate(path);
+    window.setTimeout(() => {
+      setTourSteps(steps);
+      setTourStartIndex(resumeIndex);
+      setParentTour(null);
+      setTourOpen(true);
+    }, 350);
+  };
+
+  /** Hard close (X / Skip) — abandon both sub and parent tour. */
+  const handleTourClose = () => {
+    setTourOpen(false);
+    setParentTour(null);
+  };
+
   return (
     <div className="flex h-screen bg-[var(--bg-offwhite)]">
       <Sidebar isDark={isDark} onToggleTheme={toggle} />
@@ -293,11 +372,23 @@ function MainApp() {
           <Route path="/pets" element={<PetsPage />} />
           <Route path="/chat" element={<ChatPage />} />
           <Route path="/supabase-test" element={<SupabaseTestPage />} />
+          <Route path="/welcome" element={<WelcomePage />} />
         </Routes>
         </Suspense>
       </main>
       {/* Floating active-visit widget — renders above everything */}
       <ActiveVisitWidget />
+      {/* First-run product tour overlay */}
+      <TourOverlay
+        open={tourOpen}
+        steps={tourSteps}
+        startIndex={tourStartIndex}
+        onAction={handleTourAction}
+        onComplete={parentTour ? handleSubTourComplete : undefined}
+        completeLabel={parentTour ? 'Back to tour' : undefined}
+        onNavigate={(p) => navigate(p)}
+        onClose={handleTourClose}
+      />
     </div>
   );
 }

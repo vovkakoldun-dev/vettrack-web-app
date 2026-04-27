@@ -524,11 +524,19 @@ async function fetchNotificationsFromSupabase(db: any, isAdmin: boolean, userId?
         urgent: false,
       });
     } else if (evt.type === 'patient_arrived') {
+      const apptDateLabel = (() => {
+        const raw = d.date || (evt.timestamp ? new Date(evt.timestamp).toISOString().slice(0, 10) : '');
+        if (!raw) return '';
+        try {
+          const dt = new Date(`${raw}T00:00:00`);
+          return ` on ${dt.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}`;
+        } catch { return ''; }
+      })();
       notifications.push({
         id: evt.id,
         category: 'Appointment',
         title: `Patient arrived — ${d.petName}`,
-        description: `${d.petName} (owner: ${d.ownerName}) has checked in and is waiting in ${d.room || 'the clinic'}. Service: ${d.service || 'General visit'}. Scheduled at ${d.timeStart || 'N/A'}.`,
+        description: `${d.petName} (owner: ${d.ownerName}) has checked in and is waiting in ${d.room || 'the clinic'}. Service: ${d.service || 'General visit'}. Scheduled at ${d.timeStart || 'N/A'}${apptDateLabel}.`,
         time: formatRelativeTime(evt.timestamp),
         timeISO: evt.timestamp,
         read: false,

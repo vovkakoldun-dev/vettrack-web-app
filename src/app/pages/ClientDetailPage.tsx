@@ -1315,7 +1315,7 @@ export default function ClientDetailPage() {
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <div className="mb-6">
           <div className="overflow-x-auto" style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
-          <TabsList className="w-auto inline-flex">
+          <TabsList data-tour="client-tabs" className="w-auto inline-flex">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="medical-overview">Medical Overview{(tabCounts['medical-overview'] ?? 0) > 0 && <span className="inline-block w-1.5 h-1.5 rounded-full ml-1.5" style={{ backgroundColor: 'var(--brand-green-text)' }} />}</TabsTrigger>
             <TabsTrigger value="visits">Visits{(tabCounts.visits ?? 0) > 0 && <span className="inline-block w-1.5 h-1.5 rounded-full ml-1.5" style={{ backgroundColor: 'var(--brand-green-text)' }} />}</TabsTrigger>
@@ -1334,7 +1334,7 @@ export default function ClientDetailPage() {
 
         {/* ═══ OVERVIEW TAB ═══ */}
         <TabsContent value="overview">
-          <div className="grid grid-cols-2 gap-6 mb-6">
+          <div data-tour="client-overview" className="grid grid-cols-2 gap-6 mb-6">
             {/* Pet Info */}
             <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6" style={{ borderRadius: '12px' }}>
               <h3 className="text-[var(--text-primary)] mb-4">Pet Information</h3>

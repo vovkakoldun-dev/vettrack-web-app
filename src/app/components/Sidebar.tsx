@@ -486,6 +486,7 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
                         to={item.path}
                         draggable={false}
                         title={collapsed ? item.name : undefined}
+                        data-tour={`nav-${item.path.replace(/^\//, '') || 'dashboard'}`}
                         className={`flex items-center transition-colors ${
                           isActive
                             ? 'bg-[var(--surface-elevated)] text-[var(--brand-green-text)]'
