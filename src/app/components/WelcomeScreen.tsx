@@ -1,5 +1,45 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight } from 'lucide-react';
+
+/** Pre-computed star field — once per mount, deterministic per session.
+ *  Each star carries a position, size, base opacity, and a twinkle phase
+ *  so the whole sky looks alive and never identical. */
+function useStarField(count = 90) {
+  return useMemo(() => {
+    const stars: {
+      top: number; left: number;
+      size: number; opacity: number;
+      delay: number; duration: number;
+    }[] = [];
+    for (let i = 0; i < count; i++) {
+      stars.push({
+        top:     Math.random() * 100,
+        left:    Math.random() * 100,
+        size:    Math.random() * 2 + 1,                 // 1–3 px
+        opacity: Math.random() * 0.55 + 0.35,            // 0.35–0.90
+        delay:   Math.random() * -6,                     // negative → mid-loop on mount
+        duration: Math.random() * 3 + 2.6,               // 2.6–5.6 s twinkle period
+      });
+    }
+    return stars;
+  }, [count]);
+}
+
+/** Brief shooting-star flashes. Each one is a glowing head with a
+ *  trailing tail. Spawn position, angle, and travel distance are
+ *  randomised per shooter so they don't all look like clones. */
+const SHOOTERS: {
+  top: number; left: number;
+  delay: number; duration: number;
+  /** End-point delta in pixels — defines the streak's length & angle. */
+  dx: number; dy: number;
+}[] = [
+  { top: 14, left: 14, delay: 1.5,  duration: 8,  dx: 380, dy: 120 },
+  { top: 28, left: 60, delay: 5.0,  duration: 10, dx: 460, dy: 90  },
+  { top: 52, left: 24, delay: 9.5,  duration: 9,  dx: 320, dy: 150 },
+  { top: 18, left: 80, delay: 14.0, duration: 11, dx: 300, dy: 70  },
+  { top: 64, left: 66, delay: 19.0, duration: 10, dx: 420, dy: 110 },
+];
 
 interface WelcomeScreenProps {
   /** First name shown after the brand. Falls back to "there" when blank. */
@@ -32,6 +72,8 @@ export function WelcomeScreen({ name, onContinue, onSkip }: WelcomeScreenProps) 
     return () => cancelAnimationFrame(id);
   }, []);
 
+  const stars = useStarField(90);
+
   return (
     <div
       role="dialog"
@@ -52,11 +94,48 @@ export function WelcomeScreen({ name, onContinue, onSkip }: WelcomeScreenProps) 
         boxShadow: 'inset 0 0 200px rgba(0,0,0,0.25)',
       }}
     >
+      {/* ── Animated star field — sits behind the aurora blobs ── */}
+      <div aria-hidden style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
+        {stars.map((s, i) => (
+          <span
+            key={i}
+            className="hugo-star"
+            style={{
+              top: `${s.top}%`,
+              left: `${s.left}%`,
+              width: s.size,
+              height: s.size,
+              ['--o' as any]: s.opacity,
+              animationDelay: `${s.delay}s`,
+              animationDuration: `${s.duration}s`,
+            }}
+          />
+        ))}
+        {SHOOTERS.map((sh, i) => {
+          // Angle of the streak in degrees (slope of dy/dx).
+          const angle = Math.atan2(sh.dy, sh.dx) * (180 / Math.PI);
+          return (
+            <span
+              key={`shoot-${i}`}
+              className="hugo-shooter"
+              style={{
+                top: `${sh.top}%`,
+                left: `${sh.left}%`,
+                ['--dx' as any]: `${sh.dx}px`,
+                ['--dy' as any]: `${sh.dy}px`,
+                ['--angle' as any]: `${angle}deg`,
+                animationDelay: `${sh.delay}s`,
+                animationDuration: `${sh.duration}s`,
+              }}
+            />
+          );
+        })}
+      </div>
+
       {/* ── Animated aurora blobs ── */}
       <div aria-hidden style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
         <span className="hugo-blob hugo-blob-1" />
         <span className="hugo-blob hugo-blob-2" />
-        <span className="hugo-blob hugo-blob-3" />
       </div>
 
       {/* ── Hero ── */}
@@ -298,16 +377,119 @@ export function WelcomeScreen({ name, onContinue, onSkip }: WelcomeScreenProps) 
           background: radial-gradient(circle at 70% 70%, #F472B6, transparent 60%);
           animation-delay: -6s;
         }
-        .hugo-blob-3 {
-          top: 35%; left: 40%;
-          background: radial-gradient(circle at 50% 50%, #34D399, transparent 60%);
-          animation-delay: -12s;
-          opacity: 0.4;
+
+        /* ── Star field ─────────────────────────────────────── */
+        @keyframes hugoStarTwinkle {
+          0%, 100% { opacity: calc(var(--o, 0.6) * 0.25); transform: scale(0.85); }
+          50%      { opacity: var(--o, 0.6);              transform: scale(1.15); }
         }
+        .hugo-star {
+          position: absolute;
+          border-radius: 9999px;
+          background: #ffffff;
+          box-shadow:
+            0 0 4px rgba(255,255,255,0.65),
+            0 0 8px rgba(180, 200, 255, 0.35);
+          animation: hugoStarTwinkle linear infinite;
+          will-change: opacity, transform;
+        }
+
+        /* ── Shooting stars (meteors) ─────────────────────────
+           A meteor is built from two parts:
+            • the .hugo-shooter element itself = the bright head (a small
+              glowing dot with a multi-layer drop-shadow halo)
+            • its ::before = the tail (a long gradient that extends back
+              from the head along the motion angle)
+           A single keyframe handles position + opacity. The wrapper
+           rotates by --angle so the tail aligns to the motion path; the
+           translate moves the whole thing from origin to (dx, dy). The
+           tail is positioned with right:100% so it sits behind the head,
+           scaling from 0 to full length as the meteor accelerates. */
+        @keyframes hugoShoot {
+          /* Long invisible idle — most of the cycle. */
+          0%, 78% {
+            opacity: 0;
+            transform: translate3d(0, 0, 0) rotate(var(--angle, 14deg));
+          }
+          /* Ignite at the spawn point — head bright, tail still 0. */
+          81% {
+            opacity: 1;
+            transform: translate3d(0, 0, 0) rotate(var(--angle, 14deg));
+          }
+          /* Streak across — keep full opacity through the burn. */
+          92% {
+            opacity: 1;
+            transform: translate3d(var(--dx, 380px), var(--dy, 120px), 0) rotate(var(--angle, 14deg));
+          }
+          /* Burn out — fade to zero in the last sliver of the path. */
+          96% {
+            opacity: 0;
+            transform: translate3d(var(--dx, 380px), var(--dy, 120px), 0) rotate(var(--angle, 14deg));
+          }
+          100% {
+            opacity: 0;
+            transform: translate3d(var(--dx, 380px), var(--dy, 120px), 0) rotate(var(--angle, 14deg));
+          }
+        }
+        @keyframes hugoShootTail {
+          0%, 80% { width: 0; opacity: 0; }
+          82%     { width: 0; opacity: 1; }
+          90%     { width: 180px; opacity: 1; }
+          96%     { width: 220px; opacity: 0; }
+          100%    { width: 220px; opacity: 0; }
+        }
+
+        .hugo-shooter {
+          /* The HEAD — a small bright glowing dot. */
+          position: absolute;
+          width: 4px;
+          height: 4px;
+          border-radius: 9999px;
+          background: #ffffff;
+          /* Layered halo: tight white core, soft cyan-white mid, blue
+             outer glow — reads as plasma/heat. */
+          box-shadow:
+            0 0 4px  rgba(255, 255, 255, 1),
+            0 0 12px rgba(200, 220, 255, 0.85),
+            0 0 24px rgba(140, 165, 255, 0.55),
+            0 0 40px rgba(99,  102, 241, 0.30);
+          opacity: 0;
+          animation: hugoShoot cubic-bezier(0.2, 0.6, 0.3, 1) infinite;
+          will-change: opacity, transform;
+          transform: rotate(var(--angle, 14deg));
+        }
+        .hugo-shooter::before {
+          /* The TAIL — gradient line trailing behind the head. */
+          content: '';
+          position: absolute;
+          right: 100%;
+          top: 50%;
+          height: 1.5px;
+          width: 0;
+          transform: translateY(-50%);
+          border-radius: 9999px;
+          background: linear-gradient(
+            to left,
+            rgba(255, 255, 255, 0.95) 0%,
+            rgba(200, 220, 255, 0.55) 30%,
+            rgba(140, 165, 255, 0.18) 70%,
+            transparent 100%
+          );
+          filter: blur(0.4px);
+          /* Tiny shadow gives the tail a faint atmospheric haze. */
+          box-shadow: 0 0 6px rgba(180, 200, 255, 0.5);
+          animation: hugoShootTail cubic-bezier(0.2, 0.6, 0.3, 1) infinite;
+          animation-duration: inherit;
+          animation-delay: inherit;
+        }
+
         @media (prefers-reduced-motion: reduce) {
-          .hugo-word, .hugo-fade, .hugo-brand, .hugo-blob, .hugo-dot {
+          .hugo-word, .hugo-fade, .hugo-brand, .hugo-blob, .hugo-dot,
+          .hugo-star, .hugo-shooter {
             animation: none !important;
           }
+          .hugo-shooter { display: none; }
+          .hugo-star { opacity: var(--o, 0.6) !important; transform: none !important; }
           .hugo-word, .hugo-fade { opacity: 1 !important; transform: none !important; filter: none !important; }
         }
       `}</style>

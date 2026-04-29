@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation } from 'react-router';
 import { HelpCircle, Play, MousePointerClick, X, Sparkles, Bug, Send, CheckCircle2, Loader2 } from 'lucide-react';
 import {
   DOCTOR_TOUR_STEPS,
@@ -54,12 +55,17 @@ type ReportState =
   | { phase: 'sent' };
 
 export function HelpFab() {
+  const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [explainMode, setExplainMode] = useState(false);
   const [popup, setPopup] = useState<PopupState | null>(null);
   const [report, setReport] = useState<ReportState>({ phase: 'closed' });
   const explainModeRef = useRef(explainMode);
   explainModeRef.current = explainMode;
+
+  // Hide the FAB during the first-run onboarding wizard. Help is only
+  // useful once the user is in the actual app shell.
+  const hidden = location.pathname.startsWith('/welcome');
 
   const registry = useMemo(buildExplainRegistry, []);
 
@@ -247,6 +253,8 @@ export function HelpFab() {
     window.setTimeout(() => setReport({ phase: 'sent' }), 450);
     window.setTimeout(() => setReport({ phase: 'closed' }), 2400);
   };
+
+  if (hidden) return null;
 
   return (
     <>
