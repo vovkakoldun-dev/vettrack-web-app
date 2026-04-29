@@ -211,7 +211,10 @@ export function TourOverlay({
       role="dialog"
       aria-modal="true"
       aria-label="Product tour"
-      style={{ position: 'fixed', inset: 0, zIndex: 1000 }}
+      // Wrapper itself doesn't capture clicks — children do, with explicit
+      // pointer-events on the tooltip. zIndex sits above Radix Dialog
+      // portals (which default to z-50) and any other app overlays.
+      style={{ position: 'fixed', inset: 0, zIndex: 2147483646, pointerEvents: 'none' }}
     >
       {/* Spotlight: a transparent rect with a giant box-shadow that dims
           everything else. Pointer events disabled so the user can't
@@ -234,11 +237,13 @@ export function TourOverlay({
       ) : (
         <div
           aria-hidden
+          // Centered-card backdrop — must accept clicks for click-outside-to-close.
           style={{
             position: 'fixed',
             inset: 0,
             backgroundColor: 'rgba(2, 6, 23, 0.72)',
             backdropFilter: 'blur(2px)',
+            pointerEvents: 'auto',
           }}
           onClick={onClose}
         />
@@ -257,6 +262,9 @@ export function TourOverlay({
           color: 'var(--text-primary)',
           border: '1px solid var(--border-color)',
           boxShadow: '0 24px 60px -12px rgba(0,0,0,0.45), 0 0 0 1px color-mix(in srgb, var(--brand-green-text) 20%, transparent)',
+          // Re-enable pointer events here so buttons inside the tooltip
+          // receive clicks even when a Radix Dialog is open underneath.
+          pointerEvents: 'auto',
           ...tooltipPos,
           transition: 'top 0.3s ease, left 0.3s ease',
         }}
@@ -425,8 +433,11 @@ export function TourOverlay({
       </div>
 
       {/* Spotlight visuals — bright outline + soft pulsing glow ring + the
-          dimming overlay applied via box-shadow. */}
+          dimming overlay applied via box-shadow.
+          Also hides any open Radix Dialog overlay so the page doesn't end
+          up double-dimmed when the tour is on top of a dialog. */}
       <style>{`
+        [data-slot="dialog-overlay"] { opacity: 0 !important; }
         @keyframes vtSpotlightPulse {
           0%, 100% {
             box-shadow:

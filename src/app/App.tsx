@@ -14,6 +14,7 @@ import { SuperAdminSidebar } from './components/SuperAdminSidebar';
 import { ActiveVisitProvider, useActiveVisit } from './context/ActiveVisitContext';
 import { TourOverlay } from './components/TourOverlay';
 import { DOCTOR_TOUR_STEPS } from './components/tourSteps.tsx';
+import { HelpFab } from './components/HelpFab';
 
 // ─── Lazy-loaded pages (code-split per portal) ────────────────
 // Doctor portal
@@ -389,6 +390,8 @@ function MainApp() {
         onNavigate={(p) => navigate(p)}
         onClose={handleTourClose}
       />
+      {/* Persistent help FAB — start tour, explain mode, report a problem */}
+      <HelpFab />
     </div>
   );
 }

@@ -61,6 +61,188 @@ function firstClientPath(): string | null {
   return `/clients/${cid}${pid ? `?petId=${pid}` : ''}`;
 }
 
+/** Drill-down sub-tour for the Appointments page (and the New Appointment
+ *  dialog, which is auto-opened via the `?new=1` query string). */
+export const APPOINTMENTS_TOUR_STEPS: TourStep[] = [
+  {
+    navigateTo: '/appointments',
+    selector: '[data-tour="appt-new"]',
+    title: 'Create a booking',
+    description: 'Open the New Appointment form to schedule a returning patient or register a brand-new one.',
+    placement: 'bottom',
+  },
+  {
+    navigateTo: '/appointments',
+    selector: '[data-tour="appt-view-toggle"]',
+    title: 'List, schedule, or month',
+    description: 'Switch between a quick list, a 30-min schedule grid, or a full month calendar.',
+    placement: 'bottom',
+  },
+  {
+    navigateTo: '/appointments',
+    selector: '[data-tour="appt-filters"]',
+    title: 'Filter by status',
+    description: 'Show All, Scheduled, In Progress, Completed, or Cancelled — your queue filtered in one tap.',
+    placement: 'bottom',
+  },
+  {
+    navigateTo: '/appointments',
+    selector: '[data-tour="appt-search"]',
+    title: 'Find by pet',
+    description: 'Quick search through the visible day\'s appointments — no need to scroll.',
+    placement: 'bottom',
+  },
+  {
+    // Auto-open the New Appointment dialog so the next steps can land
+    // inside it without forcing the user to click.
+    navigateTo: '/appointments?new=1',
+    selector: '[data-tour="appt-dialog-visit-type"]',
+    title: 'Returning vs. new patient',
+    description: 'Pick a returning patient to autofill their details, or "New Patient" to capture pet + owner info on the spot.',
+    placement: 'bottom',
+    pad: 6,
+  },
+  {
+    navigateTo: '/appointments?new=1',
+    selector: '[data-tour="appt-dialog-patient"]',
+    title: 'Pick the patient',
+    description: 'Search by owner name, phone, or email. Pick the owner first, then choose which of their pets is coming in.',
+    placement: 'right',
+    pad: 6,
+  },
+  {
+    navigateTo: '/appointments?new=1',
+    selector: '[data-tour="appt-dialog-service-type"]',
+    title: 'Service type',
+    description: 'Tag the visit — checkup, vaccination, dental, surgery, follow-up, emergency, or other. Filters and reports use this.',
+    placement: 'right',
+    pad: 6,
+  },
+  {
+    navigateTo: '/appointments?new=1',
+    selector: '[data-tour="appt-dialog-vet"]',
+    title: 'Assign a vet',
+    description: 'Each chip shows a vet and their day load. Pick first so the calendar shows their actual availability.',
+    placement: 'right',
+    pad: 6,
+  },
+  {
+    navigateTo: '/appointments?new=1',
+    selector: '[data-tour="appt-dialog-date"]',
+    title: 'Pick a date',
+    description: 'Use the calendar shortcut, type a date, or step day-by-day with the arrows.',
+    placement: 'right',
+    pad: 6,
+  },
+  {
+    navigateTo: '/appointments?new=1',
+    selector: '[data-tour="appt-dialog-time"]',
+    title: 'Pick a time slot',
+    description: 'Greyed-out slots are already booked or blocked. Need an unusual hour? Toggle "Show all hours" for a 6 AM – 9:30 PM grid.',
+    placement: 'right',
+    pad: 6,
+  },
+  {
+    navigateTo: '/appointments?new=1',
+    selector: '[data-tour="appt-dialog-submit"]',
+    title: 'Schedule it',
+    description: 'When everything looks right, hit Schedule Appointment. The assigned vet gets a notification automatically.',
+    placement: 'top',
+    pad: 6,
+  },
+  {
+    title: 'Bookings made simple 📅',
+    description: 'Create, filter, and search bookings, plus a clean form for new visits.',
+  },
+];
+
+/** Drill-down sub-tour for the My Portal page. */
+export const MY_PORTAL_TOUR_STEPS: TourStep[] = [
+  {
+    navigateTo: '/my-portal',
+    selector: '[data-tour="myportal-profile"]',
+    title: 'Your profile card',
+    description: 'Photo, name, role, and quick performance numbers — this is how teammates see you across the app.',
+    placement: 'bottom',
+    pad: 6,
+  },
+  {
+    navigateTo: '/my-portal',
+    selector: '[data-tour="myportal-schedule"]',
+    title: 'Day schedule',
+    description: 'Every 30-minute slot for the selected day — appointments, lunch breaks, PTO. Click an empty slot to add a block, or a booking to open it.',
+    placement: 'right',
+    pad: 6,
+  },
+  {
+    navigateTo: '/my-portal',
+    selector: '[data-tour="myportal-patients"]',
+    title: 'My Patients',
+    description: 'Patients assigned to you with their last visit and status. Tap "View all" for the full list.',
+    placement: 'top',
+    pad: 6,
+  },
+  {
+    navigateTo: '/my-portal',
+    selector: '[data-tour="myportal-activity"]',
+    title: 'Recent activity',
+    description: 'A live feed of what\'s happening on your roster — completed visits, new vaccinations, scheduled bookings.',
+    placement: 'left',
+    pad: 6,
+  },
+  {
+    navigateTo: '/my-portal',
+    selector: '[data-tour="myportal-timeoff"]',
+    title: 'Time off & shifts',
+    description: 'PTO and sick days at a glance, plus a "Request Time Off" shortcut. Approved blocks show up automatically on your schedule.',
+    placement: 'left',
+    pad: 6,
+  },
+  {
+    title: 'My Portal in a nutshell ✨',
+    description: 'Profile, schedule, patients, activity, and time off — your shift, organized.',
+  },
+];
+
+/** Drill-down sub-tour for the Dashboard. */
+export const DASHBOARD_TOUR_STEPS: TourStep[] = [
+  {
+    navigateTo: '/',
+    selector: '[data-tour="dash-search"]',
+    title: 'Universal search',
+    description: 'Find anything in the clinic — clients, pets, appointments, services — without leaving the dashboard.',
+    placement: 'bottom',
+  },
+  {
+    navigateTo: '/',
+    selector: '[data-tour="dash-stats"]',
+    title: 'Live KPIs',
+    description: 'Total clients, today\'s bookings, vaccines due this week, and registered pets — each card shows the live number with a sparkline trend.',
+    placement: 'bottom',
+    pad: 6,
+  },
+  {
+    navigateTo: '/',
+    selector: '[data-tour="dash-recent-clients"]',
+    title: 'Recent clients',
+    description: 'Your latest registered patients with breed, owner, and health status. Click any row to jump straight into the profile.',
+    placement: 'top',
+    pad: 6,
+  },
+  {
+    navigateTo: '/',
+    selector: '[data-tour="dash-today-appts"]',
+    title: 'Today\'s appointments',
+    description: 'A quick read of what\'s on your schedule for today. Tap "View all" to open the full calendar.',
+    placement: 'left',
+    pad: 6,
+  },
+  {
+    title: 'That\'s your home base 🏠',
+    description: 'Search, KPIs, recent clients, and today\'s schedule — all one glance away.',
+  },
+];
+
 /** Drill-down sub-tour for the Clients page (and one client's profile).
  *  Every step that targets DOM on /clients carries `navigateTo: '/clients'`
  *  so the tour returns to the list when the user steps Back from the
@@ -159,12 +341,22 @@ export const DOCTOR_TOUR_STEPS: TourStep[] = [
     title: 'Your Dashboard',
     description: 'Start every day here — today\'s appointments, urgent tasks, and patients that need attention, all in one snapshot.',
     placement: 'right',
+    action: {
+      label: 'Show me more',
+      path: '/',
+      steps: DASHBOARD_TOUR_STEPS,
+    },
   },
   {
     selector: '[data-tour="nav-my-portal"]',
     title: 'My Portal',
     description: 'Your personal schedule, time off, and patients assigned to you.',
     placement: 'right',
+    action: {
+      label: 'Show me more',
+      path: '/my-portal',
+      steps: MY_PORTAL_TOUR_STEPS,
+    },
   },
   {
     selector: '[data-tour="nav-clients"]',
@@ -182,6 +374,11 @@ export const DOCTOR_TOUR_STEPS: TourStep[] = [
     title: 'Appointments',
     description: 'Calendar view of bookings — start visits, check rooms, and manage your day.',
     placement: 'right',
+    action: {
+      label: 'Show me more',
+      path: '/appointments',
+      steps: APPOINTMENTS_TOUR_STEPS,
+    },
   },
   {
     selector: '[data-tour="nav-records"]',

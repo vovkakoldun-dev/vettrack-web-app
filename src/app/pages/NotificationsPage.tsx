@@ -123,7 +123,9 @@ async function fetchNotificationsFromSupabase(db: any, isAdmin: boolean, userId?
   ] = await Promise.all([
     (() => {
       let q = db.from('appointments')
-        .select('id, scheduled_at, duration_minutes, status, reason, pets(id, name, species, breed), clients(id, first_name, last_name), staff(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
+        // `appointments` has two FKs to `staff` (vet_id + created_by), so we
+        // must hint which one to embed — otherwise PostgREST returns 300.
+        .select('id, scheduled_at, duration_minutes, status, reason, pets(id, name, species, breed), clients(id, first_name, last_name), staff!appointments_vet_id_fkey(id, profiles:profiles!staff_profile_id_fkey(first_name, last_name))')
         .eq('organization_id', organizationId)
         .gte('scheduled_at', new Date(`${today}T00:00:00`).toISOString()).lte('scheduled_at', new Date(`${today}T23:59:59`).toISOString())
         .in('status', ['Scheduled', 'Confirmed']).order('scheduled_at', { ascending: true });

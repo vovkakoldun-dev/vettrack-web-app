@@ -1304,6 +1304,7 @@ export default function MyPortalPage() {
     <div className="max-w-[1440px] mx-auto p-8">
       {/* ─── Section 1: Profile Header ─────────────────── */}
       <div
+        data-tour="myportal-profile"
         className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6 mb-8 overflow-hidden"
         style={{ borderRadius: '12px', borderTop: '4px solid var(--brand-green-text)' }}
       >
@@ -1376,7 +1377,11 @@ export default function MyPortalPage() {
       </div>
 
       {/* ─── Section 2: Performance Stats ─────────────── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
+      <div
+        className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-8"
+        data-explain-title="Your performance at a glance"
+        data-explain-desc="Four live KPIs scoped to you: total assigned patients, all bookings, completed visits (with completion rate), and vaccines due in the next 7 days. Each card has a sparkline trend so you can spot momentum at a glance."
+      >
         {glowCards.map((card) => (
           <GlowStatCard key={card.title} {...card} />
         ))}
@@ -1385,7 +1390,7 @@ export default function MyPortalPage() {
       {/* ─── Section 3: My Schedule ───────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-6 mb-8" style={{ alignItems: 'start' }}>
         {/* Left: Day Schedule */}
-        <div>
+        <div data-tour="myportal-schedule">
           {/* Date Nav */}
           <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-4 mb-4 flex flex-wrap items-center justify-between gap-3" style={{ borderRadius: '12px' }}>
             <div className="flex flex-wrap items-center gap-2">
@@ -1661,7 +1666,7 @@ export default function MyPortalPage() {
           })()}
 
           {/* My Patients Table */}
-          <div className="bg-[var(--surface-white)] border border-[var(--border-color)] mt-4" style={{ borderRadius: '12px' }}>
+          <div data-tour="myportal-patients" className="bg-[var(--surface-white)] border border-[var(--border-color)] mt-4" style={{ borderRadius: '12px' }}>
             <div className="p-5 border-b border-[var(--border-color)] flex items-center justify-between">
               <h3 className="text-[var(--text-primary)]" style={{ fontSize: '18px', fontWeight: 600 }}>My Patients</h3>
               <Link to="/my-portal/patients" className="text-[var(--text-secondary)] flex items-center gap-1 hover:opacity-75 transition-opacity" style={{ fontSize: '12px', fontWeight: 600 }}>
@@ -1779,7 +1784,7 @@ export default function MyPortalPage() {
           </div>
 
           {/* Recent Activity */}
-          <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-5" style={{ borderRadius: '12px' }}>
+          <div data-tour="myportal-activity" className="bg-[var(--surface-white)] border border-[var(--border-color)] p-5" style={{ borderRadius: '12px' }}>
             <h3 className="text-[var(--text-primary)] mb-4" style={{ fontSize: '16px', fontWeight: 600 }}>Recent Activity</h3>
             <div className="space-y-4">
               {recentActivity.length === 0 && (
@@ -1803,7 +1808,7 @@ export default function MyPortalPage() {
           </div>
 
           {/* Time Off Summary */}
-          <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-5" style={{ borderRadius: '12px' }}>
+          <div data-tour="myportal-timeoff" className="bg-[var(--surface-white)] border border-[var(--border-color)] p-5" style={{ borderRadius: '12px' }}>
             <h3 className="text-[var(--text-primary)] mb-4" style={{ fontSize: '16px', fontWeight: 600 }}>Time Off</h3>
 
             {/* Days Left Counters */}

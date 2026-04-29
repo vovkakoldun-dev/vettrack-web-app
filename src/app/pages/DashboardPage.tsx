@@ -632,6 +632,7 @@ export default function DashboardPage() {
         />
         <input
           ref={searchRef}
+          data-tour="dash-search"
           type="text"
           value={searchQuery}
           onChange={(e) => { setSearchQuery(e.target.value); setSearchOpen(true); }}
@@ -796,7 +797,7 @@ export default function DashboardPage() {
       {/* Dashboard content — hidden while searching */}
       {!isSearching && (<>
       {/* Glow Stat Cards */}
-      <div className="grid grid-cols-4 gap-5 mb-8">
+      <div data-tour="dash-stats" className="grid grid-cols-4 gap-5 mb-8">
         {GLOW_CARDS.map(card => (
           <GlowStatCard key={card.title} {...card} />
         ))}
@@ -804,7 +805,7 @@ export default function DashboardPage() {
 
       <div className="grid grid-cols-3 gap-6">
         {/* Recent Clients */}
-        <div className="col-span-2 bg-[var(--surface-white)] border border-[var(--border-color)]" style={{ borderRadius: '12px' }}>
+        <div data-tour="dash-recent-clients" className="col-span-2 bg-[var(--surface-white)] border border-[var(--border-color)]" style={{ borderRadius: '12px' }}>
           <div className="p-6 border-b border-[var(--border-color)] flex items-center justify-between">
             <h3 className="text-[var(--text-primary)]">Recent Clients</h3>
             <Link
@@ -847,7 +848,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Today's Appointments */}
-        <div className="bg-[var(--surface-white)] border border-[var(--border-color)]" style={{ borderRadius: '12px' }}>
+        <div data-tour="dash-today-appts" className="bg-[var(--surface-white)] border border-[var(--border-color)]" style={{ borderRadius: '12px' }}>
           <div className="p-6 border-b border-[var(--border-color)] flex items-center justify-between">
             <div>
               <h3 className="text-[var(--text-primary)]">Today's Appointments</h3>

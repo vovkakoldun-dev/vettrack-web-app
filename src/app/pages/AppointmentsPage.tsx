@@ -392,6 +392,21 @@ export default function AppointmentsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Tour entry point: `?new=1` opens the New Appointment dialog so the
+  // tour can spotlight things inside it. Tracks `location.key` (changes
+  // on every navigation) plus the current `dialogOpen` flag, so the
+  // dialog gets reopened across consecutive tour steps that share the
+  // same URL — but is left alone if it's already open.
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(location.search);
+      if (params.get('new') === '1' && !dialogOpen) {
+        setTimeout(() => openNewApptDialog(), 0);
+      }
+    } catch { /* ignore */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key, location.search]);
+
   const datesWithAppointments = getDatesWithAppointments(appointments);
 
   // Filter appointments for selected date (or show all)
@@ -707,7 +722,7 @@ export default function AppointmentsPage() {
             Manage your clinic schedule and bookings.
           </p>
         </div>
-        <Button onClick={openNewApptDialog}>
+        <Button data-tour="appt-new" onClick={openNewApptDialog}>
           <Plus className="w-4 h-4" /> New Appointment
         </Button>
       </div>
@@ -800,7 +815,7 @@ export default function AppointmentsPage() {
                     {totalToday} appointment{totalToday !== 1 ? 's' : ''}{showAllDates ? ' total' : ''}
                   </span>
                 )}
-                <div className="flex gap-1 p-1 bg-[var(--surface-elevated)]" style={{ borderRadius: '8px' }}>
+                <div data-tour="appt-view-toggle" className="flex gap-1 p-1 bg-[var(--surface-elevated)]" style={{ borderRadius: '8px' }}>
                   <button
                     onClick={() => setViewMode('list')}
                     className="p-1.5 transition-colors"
@@ -847,7 +862,7 @@ export default function AppointmentsPage() {
             {viewMode !== 'month' && (
               <div className="flex flex-wrap items-center gap-3">
                 {/* Filter Tabs */}
-                <div className="flex gap-1 p-1 bg-[var(--surface-elevated)]" style={{ borderRadius: '8px' }}>
+                <div data-tour="appt-filters" className="flex gap-1 p-1 bg-[var(--surface-elevated)]" style={{ borderRadius: '8px' }}>
                   {FILTER_TABS.map((tab) => (
                     <button
                       key={tab}
@@ -871,6 +886,7 @@ export default function AppointmentsPage() {
                 <div className="relative flex-1" style={{ minWidth: '180px' }}>
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-secondary)]" />
                   <Input
+                    data-tour="appt-search"
                     placeholder="Search pet"
                     value={searchQuery}
                     onChange={(e) => { setSearchQuery(e.target.value); setVisibleCount(5); }}
@@ -1427,7 +1443,7 @@ export default function AppointmentsPage() {
             <div style={{ padding: '22px 24px', overflowY: 'auto', borderRight: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '20px' }}>
 
               {/* Visit type tabs */}
-              <div style={{ display: 'flex', gap: '0', borderRadius: '9px', padding: '3px', backgroundColor: 'var(--surface-elevated)' }}>
+              <div data-tour="appt-dialog-visit-type" style={{ display: 'flex', gap: '0', borderRadius: '9px', padding: '3px', backgroundColor: 'var(--surface-elevated)' }}>
                 {([
                   { id: 'returning' as const, label: 'Returning Patient', emoji: '🔄' },
                   { id: 'new'       as const, label: 'New Patient',        emoji: '✨' },
@@ -1456,7 +1472,7 @@ export default function AppointmentsPage() {
 
               {/* Patient — Returning */}
               {visitType === 'returning' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div data-tour="appt-dialog-patient" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Patient</p>
                   {/* Client search */}
                   <div style={{ position: 'relative' }}>
@@ -1713,7 +1729,7 @@ export default function AppointmentsPage() {
               )}
 
               {/* Service type */}
-              <div>
+              <div data-tour="appt-dialog-service-type">
                 <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Service Type</p>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
                   {[
@@ -1756,7 +1772,7 @@ export default function AppointmentsPage() {
               </div>
 
               {/* Veterinarian — moved above Date/Time so user picks vet first to see availability */}
-              <div>
+              <div data-tour="appt-dialog-vet">
                 <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Veterinarian</p>
                 <div className="flex gap-2 flex-wrap">
                   {staffList.length === 0 && <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>No vets found</span>}
@@ -1818,7 +1834,7 @@ export default function AppointmentsPage() {
               </div>
 
               {/* Date */}
-              <div>
+              <div data-tour="appt-dialog-date">
                 <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Date</p>
                 <div className="flex items-center gap-2">
                   <button
@@ -1886,7 +1902,7 @@ export default function AppointmentsPage() {
               </div>
 
               {/* Time — visual slot grid */}
-              <div>
+              <div data-tour="appt-dialog-time">
                 <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Time</p>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
                   {getSlotAvailability(newApptDate, undefined, newApptVetId, newApptShowAllHours ? EXTENDED_SCHEDULE_SLOTS : SCHEDULE_SLOTS).map(slot => {
@@ -2168,6 +2184,7 @@ export default function AppointmentsPage() {
           <div style={{ borderTop: '1px solid var(--border-color)', padding: '14px 24px', display: 'flex', justifyContent: 'flex-end', gap: '10px', flexShrink: 0, backgroundColor: 'var(--surface-white)' }}>
             <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={savingAppt}>Cancel</Button>
             <Button
+              data-tour="appt-dialog-submit"
               disabled={savingAppt}
               onClick={async () => {
                 if (savingAppt) return;
