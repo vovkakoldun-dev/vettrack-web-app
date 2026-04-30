@@ -292,6 +292,71 @@ export const CLIENTS_TOUR_STEPS: TourStep[] = [
   },
 ];
 
+/** Resolve the first record row's detail path from its data attributes. */
+function firstRecordPath(): string | null {
+  const row = document.querySelector('[data-tour="records-first-row"]') as HTMLElement | null;
+  if (!row) return null;
+  const id = row.getAttribute('data-record-id');
+  return id ? `/records/${id}` : null;
+}
+
+/** Drill-down sub-tour for the Records page (and one record's detail). */
+export const RECORDS_TOUR_STEPS: TourStep[] = [
+  {
+    navigateTo: '/records',
+    selector: '[data-tour="records-stats"]',
+    title: 'Records at a glance',
+    description: 'Total records, this month\'s additions, items pending review, and lab results — a quick read on the chart inbox.',
+    placement: 'bottom',
+    pad: 6,
+  },
+  {
+    navigateTo: '/records',
+    selector: '[data-tour="records-search"]',
+    title: 'Search records',
+    description: 'Find any chart by pet name, owner, attending vet, or words from the visit summary.',
+    placement: 'bottom',
+  },
+  {
+    navigateTo: '/records',
+    selector: '[data-tour="records-filters"]',
+    title: 'Filter and date-range',
+    description: 'Narrow by record type (visit, vaccination, lab, surgery, prescription, dental, imaging), status, or a specific date window.',
+    placement: 'bottom',
+    pad: 6,
+  },
+  {
+    navigateTo: '/records',
+    selector: '[data-tour="records-first-row"]',
+    title: 'Open a record',
+    description: 'Click any row to open the full chart — patient, vitals, diagnosis, treatment plan, medications, labs, and more.',
+    placement: 'top',
+    pad: 6,
+  },
+  {
+    // Auto-navigate into the first record so the next step lands on the
+    // detail page without forcing the user to click.
+    navigateTo: firstRecordPath,
+    selector: '[data-tour="record-patient-visit"]',
+    title: 'Patient & visit details',
+    description: 'The header pair: who the patient is on the left, and the visit context (date, vet, type, status) on the right.',
+    placement: 'bottom',
+    pad: 6,
+  },
+  {
+    navigateTo: firstRecordPath,
+    selector: '[data-tour="record-diagnosis"]',
+    title: 'Diagnosis & treatment',
+    description: 'Primary diagnosis with any secondary findings. Below it: the full treatment plan, medications, lab results, vaccinations, imaging, and surgeries — every section a vet needs in one scroll.',
+    placement: 'top',
+    pad: 6,
+  },
+  {
+    title: 'Charts in one place 📋',
+    description: 'Search, filter, and open any record — every detail of every visit is here.',
+  },
+];
+
 /** Drill-down sub-tour for the HugoChat page. */
 export const CHAT_TOUR_STEPS: TourStep[] = [
   {
@@ -327,6 +392,158 @@ export const CHAT_TOUR_STEPS: TourStep[] = [
   {
     title: 'You\'re a chat pro now 💬',
     description: 'Back to the main tour — there\'s still more to explore.',
+  },
+];
+
+/** Admin Clients drill-down. */
+export const ADMIN_CLIENTS_TOUR_STEPS: TourStep[] = [
+  {
+    navigateTo: '/admin/clients',
+    selector: '[data-tour="admin-clients-search"]',
+    title: 'Find a client',
+    description: 'Search the full clinic roster by pet name, owner, or breed. Fuzzy matches work too.',
+    placement: 'bottom',
+  },
+  {
+    navigateTo: '/admin/clients',
+    selector: '[data-tour="admin-clients-add"]',
+    title: 'Register a new client',
+    description: 'Open a quick form to capture the pet and the owner in one go — perfect when someone walks in.',
+    placement: 'bottom',
+  },
+  {
+    title: 'Front-desk client desk 🐾',
+    description: 'Roster, search, and registration — keep client records tidy from day one.',
+  },
+];
+
+/** Admin Bookings drill-down. */
+export const ADMIN_BOOKINGS_TOUR_STEPS: TourStep[] = [
+  {
+    navigateTo: '/admin/bookings',
+    selector: '[data-tour="admin-bookings-new"]',
+    title: 'Create a booking',
+    description: 'Open the New Booking form to schedule any vet for a returning patient or register a brand-new client.',
+    placement: 'bottom',
+  },
+  {
+    navigateTo: '/admin/bookings',
+    selector: '[data-tour="admin-bookings-search"]',
+    title: 'Find a booking',
+    description: 'Quick search through the visible day — by pet, owner, or service. Use the status tabs above to narrow further.',
+    placement: 'bottom',
+  },
+  {
+    title: 'Bookings, sorted 📅',
+    description: 'Search, status tabs, and a one-click "New Booking" form — keep the calendar clean and the queue moving.',
+  },
+];
+
+/** Admin Dashboard drill-down — KPIs, today's schedule, global search. */
+export const ADMIN_DASHBOARD_TOUR_STEPS: TourStep[] = [
+  {
+    navigateTo: '/admin',
+    selector: '[data-tour="admin-dash-search"]',
+    title: 'Universal search',
+    description: 'Find any client, pet, booking, or vet from here — fuzzy matches and quick keyboard navigation.',
+    placement: 'bottom',
+  },
+  {
+    navigateTo: '/admin',
+    selector: '[data-tour="admin-dash-stats"]',
+    title: 'Live KPIs',
+    description: 'Today\'s headline numbers — total clients, today\'s bookings, vaccines due this week, and registered pets — each card with a sparkline trend.',
+    placement: 'bottom',
+    pad: 6,
+  },
+  {
+    navigateTo: '/admin',
+    selector: '[data-tour="admin-dash-schedule"]',
+    title: 'Today\'s schedule',
+    description: 'Every booking on the calendar today — pet, owner, vet, time, and status. Click a row to manage check-in, room assignment, or rescheduling.',
+    placement: 'top',
+    pad: 6,
+  },
+  {
+    title: 'You run the day from here 👋',
+    description: 'Search, KPIs, today\'s schedule — your front-desk command center.',
+  },
+];
+
+/**
+ * Default product tour for the admin / front-desk portal. Mirrors the
+ * doctor tour shape but targets admin sidebar nav links and uses copy
+ * tuned to the front-desk job. Sub-tours can be attached later — the
+ * shape matches DOCTOR_TOUR_STEPS so adding `action: { ... }` works
+ * the same way.
+ */
+export const ADMIN_TOUR_STEPS: TourStep[] = [
+  {
+    selector: '[data-tour="admin-nav-dashboard"]',
+    title: 'Front-desk dashboard',
+    description: 'Today\'s clinic snapshot — bookings, check-ins, payments due, and the patients queued up for the day.',
+    placement: 'right',
+    action: {
+      label: 'Show me more',
+      path: '/admin',
+      steps: ADMIN_DASHBOARD_TOUR_STEPS,
+    },
+  },
+  {
+    selector: '[data-tour="admin-nav-bookings"]',
+    title: 'Bookings',
+    description: 'Schedule and manage appointments across every vet. Confirm arrivals, room patients, and reschedule with a click.',
+    placement: 'right',
+    action: {
+      label: 'Show me more',
+      path: '/admin/bookings',
+      steps: ADMIN_BOOKINGS_TOUR_STEPS,
+    },
+  },
+  {
+    selector: '[data-tour="admin-nav-clients"]',
+    title: 'Clients',
+    description: 'Search the full client list, register new pet owners, and pull up any patient\'s profile in seconds.',
+    placement: 'right',
+    action: {
+      label: 'Show me more',
+      path: '/admin/clients',
+      steps: ADMIN_CLIENTS_TOUR_STEPS,
+    },
+  },
+  {
+    selector: '[data-tour="admin-nav-payments"]',
+    title: 'Payments',
+    description: 'Take payments, send invoices, and reconcile outstanding balances — all in one place.',
+    placement: 'right',
+  },
+  {
+    selector: '[data-tour="admin-nav-tasks"]',
+    title: 'Tasks',
+    description: 'Your daily checklist: callbacks, follow-ups, vaccine reminders, and anything assigned to the front desk.',
+    placement: 'right',
+  },
+  {
+    selector: '[data-tour="admin-nav-communications"]',
+    title: 'Communications',
+    description: 'SMS, email, and reminder logs for every client. Send confirmations and follow-ups without leaving the app.',
+    placement: 'right',
+  },
+  {
+    selector: '[data-tour="admin-nav-chat"]',
+    title: 'HugoChat',
+    description: 'Message vets, techs, and the rest of the team in real time — keep the clinic in sync.',
+    placement: 'right',
+  },
+  {
+    selector: '[data-tour="admin-nav-notifications"]',
+    title: 'Notifications',
+    description: 'Patient arrivals, lab results, payment alerts, and team requests — every signal you need to stay ahead.',
+    placement: 'right',
+  },
+  {
+    title: 'You\'re ready 👋',
+    description: 'Tap the help bubble in the corner anytime to restart this tour, ask "What is this?" with one click, or report a problem.',
   },
 ];
 
@@ -385,6 +602,11 @@ export const DOCTOR_TOUR_STEPS: TourStep[] = [
     title: 'Medical records',
     description: 'Diagnoses, treatments, and chart history for every patient.',
     placement: 'right',
+    action: {
+      label: 'Show me more',
+      path: '/records',
+      steps: RECORDS_TOUR_STEPS,
+    },
   },
   {
     selector: '[data-tour="nav-chat"]',

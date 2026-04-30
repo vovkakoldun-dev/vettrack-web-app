@@ -1001,14 +1001,14 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
               Manage your clinic schedule and bookings.
             </p>
           </div>
-          <Button onClick={() => openNewApptDialog()}>
+          <Button data-tour="admin-bookings-new" onClick={() => openNewApptDialog()}>
             <Plus className="w-4 h-4" /> New Booking
           </Button>
         </div>
       )}
       {hideHeader && (
         <div className="flex justify-end mb-4">
-          <Button onClick={() => openNewApptDialog()}>
+          <Button data-tour="admin-bookings-new" onClick={() => openNewApptDialog()}>
             <Plus className="w-4 h-4" /> New Booking
           </Button>
         </div>
@@ -1506,6 +1506,7 @@ export default function AdminBookingsPage({ hideHeader = false, wrapperClassName
                 <div className="relative flex-1" style={{ minWidth: '180px' }}>
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-secondary)]" />
                   <Input
+                    data-tour="admin-bookings-search"
                     placeholder="Search pet, owner, or service..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}

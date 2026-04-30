@@ -265,7 +265,10 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
     }
 
     checkChatUnread();
-    interval = setInterval(checkChatUnread, 15000);
+    // Poll less aggressively — 60s instead of 15s. The chat page itself
+    // updates instantly via its own real-time subscription; this badge
+    // just needs to stay reasonably fresh in the background.
+    interval = setInterval(checkChatUnread, 60_000);
 
     return () => { mounted = false; if (interval) clearInterval(interval); };
   }, [pathname, user]);
@@ -539,6 +542,7 @@ export function AdminSidebar({ isDark, onToggleTheme }: { isDark: boolean; onTog
                       to={item.path}
                       draggable={false}
                       title={collapsed ? item.name : undefined}
+                      data-tour={`admin-nav-${item.path.replace(/^\/admin\/?/, '') || 'dashboard'}`}
                       className={`flex items-center transition-colors ${
                         isActive
                           ? 'bg-[var(--surface-elevated)] text-[var(--brand-green-text)]'

@@ -1159,6 +1159,7 @@ export default function AdminDashboardPage() {
         />
         <input
           ref={searchRef}
+          data-tour="admin-dash-search"
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
@@ -1392,7 +1393,7 @@ export default function AdminDashboardPage() {
         <>
 
       {/* Glow Stat Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4" style={{ gap: '20px', marginBottom: '28px' }}>
+      <div data-tour="admin-dash-stats" className="grid grid-cols-2 lg:grid-cols-4" style={{ gap: '20px', marginBottom: '28px' }}>
         {glowCards.map(card => (
           <GlowStatCard key={card.title} {...card} />
         ))}
@@ -1400,6 +1401,7 @@ export default function AdminDashboardPage() {
 
       {/* Today's Schedule */}
       <div
+        data-tour="admin-dash-schedule"
         className="bg-[var(--surface-white)] border border-[var(--border-color)]"
         style={{ borderRadius: '12px', marginBottom: '24px', overflow: 'hidden' }}
       >

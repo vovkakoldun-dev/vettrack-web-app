@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 import { useAuth } from '../context/AuthContext';
-import { useProfile, uploadAvatar, removeAvatar } from '../hooks/useProfile';
+import { useProfile, uploadAvatar, removeAvatar, type PortalType } from '../hooks/useProfile';
 import { useTheme } from '../hooks/useTheme';
 import { WelcomeScreen } from '../components/WelcomeScreen';
 import { OnboardingPhotoStep } from '../components/OnboardingPhotoStep';
@@ -10,7 +10,10 @@ import { OnboardingAppearanceStep } from '../components/OnboardingAppearanceStep
 type Step = 'welcome' | 'photo' | 'appearance';
 
 /**
- * First-run onboarding flow host.
+ * First-run onboarding flow host. Works for both the doctor and admin
+ * portals — the portal is derived from the URL so a single component
+ * services both `/welcome` and `/admin/welcome`.
+ *
  * Step 0: WelcomeScreen
  * Step 1: OnboardingPhotoStep (optional photo)
  * Step 2: OnboardingAppearanceStep (theme picker w/ live preview)
@@ -19,8 +22,13 @@ type Step = 'welcome' | 'photo' | 'appearance';
  */
 export default function WelcomePage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
-  const { profile, loading } = useProfile('doctor');
+  const isAdmin = location.pathname.startsWith('/admin');
+  const portal: PortalType = isAdmin ? 'admin' : 'doctor';
+  const homePath = isAdmin ? '/admin' : '/';
+
+  const { profile, loading } = useProfile(portal);
   const { setThemeStyle, selectedLightTheme, selectedDarkTheme } = useTheme();
   const [step, setStep] = useState<Step>('welcome');
 
@@ -46,11 +54,11 @@ export default function WelcomePage() {
 
   /** End the wizard, request the tour to start, and land on the dashboard. */
   const finish = () => {
-    try { sessionStorage.setItem('vettrack-tour-pending', 'doctor'); } catch {}
-    navigate('/');
+    try { sessionStorage.setItem('vettrack-tour-pending', portal); } catch {}
+    navigate(homePath);
     // The shell's tour listener mounts before this fires; broadcasting a
     // custom event lets it activate without an unmount/remount cycle.
-    window.dispatchEvent(new CustomEvent('vettrack:start-tour', { detail: 'doctor' }));
+    window.dispatchEvent(new CustomEvent('vettrack:start-tour', { detail: portal }));
   };
 
   if (step === 'welcome') {
@@ -70,12 +78,12 @@ export default function WelcomePage() {
         initials={initials}
         onUpload={async (file) => {
           if (!profile.id) throw new Error('Profile not loaded');
-          return uploadAvatar(profile.id, file, 'doctor');
+          return uploadAvatar(profile.id, file, portal);
         }}
         onRemove={profile.avatarUrl
           ? async () => {
               if (!profile.id) throw new Error('Profile not loaded');
-              await removeAvatar(profile.id, 'doctor');
+              await removeAvatar(profile.id, portal);
             }
           : undefined}
         onBack={() => setStep('welcome')}

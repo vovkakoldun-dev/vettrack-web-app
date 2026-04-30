@@ -450,6 +450,8 @@ export default function ShiftsPage() {
         <div style={{ display: 'flex', gap: 10 }}>
           <Button
             variant="outline"
+            data-explain-title="Add overtime"
+            data-explain-desc="Log extra hours outside your regular shift. Submit a date, start/end time, and a reason — your manager reviews and approves it."
             onClick={() => setOvertimeOpen(true)}
             style={{
               fontWeight: 600,
@@ -468,6 +470,8 @@ export default function ShiftsPage() {
             Add Overtime
           </Button>
           <Button
+            data-explain-title="Request a shift swap"
+            data-explain-desc="Trade a shift with a teammate. Pick the shift you want to give up, select who you'd like to swap with, and they'll get a request to accept or decline."
             onClick={() => setSwapOpen(true)}
             style={{
               background: 'var(--brand-green-text)',
@@ -489,6 +493,8 @@ export default function ShiftsPage() {
 
       {/* ─── My Shifts Section ─────────────────────────────────── */}
       <div
+        data-explain-title="Your week at a glance"
+        data-explain-desc="Your shifts for the selected week — Mon through Sun. Each card shows the start/end time and Full Day / Day Off status. The card with a green outline is today. Use the arrows to step weeks; the totals at the bottom show your weekly hours and shift count."
         style={{
           background: 'var(--surface-white)',
           border: '1px solid var(--border-color)',
@@ -743,6 +749,8 @@ export default function ShiftsPage() {
 
       {/* ─── Team Shifts Section ───────────────────────────────── */}
       <div
+        data-explain-title="Team shift roster"
+        data-explain-desc="Everyone on the clinic schedule for the selected week. Find a colleague's hours, see who's covering what, and spot PTO / Sick / Pending requests at a glance — the badges under each cell show approval status."
         style={{
           background: 'var(--surface-white)',
           border: '1px solid var(--border-color)',

@@ -3,11 +3,16 @@ import { useLocation } from 'react-router';
 import { HelpCircle, Play, MousePointerClick, X, Sparkles, Bug, Send, CheckCircle2, Loader2 } from 'lucide-react';
 import {
   DOCTOR_TOUR_STEPS,
+  ADMIN_TOUR_STEPS,
+  ADMIN_DASHBOARD_TOUR_STEPS,
+  ADMIN_BOOKINGS_TOUR_STEPS,
+  ADMIN_CLIENTS_TOUR_STEPS,
   DASHBOARD_TOUR_STEPS,
   MY_PORTAL_TOUR_STEPS,
   CLIENTS_TOUR_STEPS,
   CHAT_TOUR_STEPS,
   APPOINTMENTS_TOUR_STEPS,
+  RECORDS_TOUR_STEPS,
 } from './tourSteps';
 import type { TourStep } from './TourOverlay';
 
@@ -28,11 +33,16 @@ function buildExplainRegistry(): Map<string, ExplainEntry> {
     }
   };
   collect(DOCTOR_TOUR_STEPS);
+  collect(ADMIN_TOUR_STEPS);
+  collect(ADMIN_DASHBOARD_TOUR_STEPS);
+  collect(ADMIN_BOOKINGS_TOUR_STEPS);
+  collect(ADMIN_CLIENTS_TOUR_STEPS);
   collect(DASHBOARD_TOUR_STEPS);
   collect(MY_PORTAL_TOUR_STEPS);
   collect(CLIENTS_TOUR_STEPS);
   collect(CHAT_TOUR_STEPS);
   collect(APPOINTMENTS_TOUR_STEPS);
+  collect(RECORDS_TOUR_STEPS);
   return registry;
 }
 
@@ -65,7 +75,11 @@ export function HelpFab() {
 
   // Hide the FAB during the first-run onboarding wizard. Help is only
   // useful once the user is in the actual app shell.
-  const hidden = location.pathname.startsWith('/welcome');
+  const hidden =
+    location.pathname.startsWith('/welcome') ||
+    location.pathname === '/admin/welcome' ||
+    location.pathname.startsWith('/admin/welcome');
+  const portal: 'doctor' | 'admin' = location.pathname.startsWith('/admin') ? 'admin' : 'doctor';
 
   const registry = useMemo(buildExplainRegistry, []);
 
@@ -222,7 +236,8 @@ export function HelpFab() {
   // ── Tour kickoff ──────────────────────────────────────────────────────
   const startTour = () => {
     setMenuOpen(false);
-    window.dispatchEvent(new CustomEvent('vettrack:start-tour'));
+    // Send the portal flavor so only the matching shell's listener fires.
+    window.dispatchEvent(new CustomEvent('vettrack:start-tour', { detail: portal }));
   };
 
   const enterExplain = () => {
@@ -355,7 +370,7 @@ export function HelpFab() {
               >
                 <MousePointerClick style={{ width: 14, height: 14 }} />
               </span>
-              Explain me…
+              Tap to explain
             </button>
 
             <button
@@ -398,9 +413,9 @@ export function HelpFab() {
         <button
           type="button"
           aria-label={
-            explainMode ? 'Exit Explain mode' : (menuOpen ? 'Close help' : 'Open help')
+            explainMode ? 'Exit Tap to explain' : (menuOpen ? 'Close help' : 'Open help')
           }
-          title={explainMode ? 'Exit Explain mode' : undefined}
+          title={explainMode ? 'Exit Tap to explain' : undefined}
           onClick={() => {
             if (explainMode) {
               setExplainMode(false);

@@ -88,15 +88,7 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
       const weekAgoStr = `${weekAgo.getFullYear()}-${(weekAgo.getMonth() + 1).toString().padStart(2, '0')}-${weekAgo.getDate().toString().padStart(2, '0')}`;
 
       const uid = user?.id;
-      const [apptTodayRes, clientRes, vacRes, completedRes, cancelledRes] = await Promise.all([
-        (() => {
-          let q = db.from('appointments').select('id, scheduled_at')
-            .eq('organization_id', organizationId)
-            .gte('scheduled_at', new Date(`${today}T00:00:00`).toISOString()).lte('scheduled_at', new Date(`${today}T23:59:59`).toISOString())
-            .in('status', ['Scheduled', 'Confirmed']);
-          if (uid) q = q.eq('vet_id', uid);
-          return q;
-        })(),
+      const [clientRes, vacRes, completedRes, cancelledRes] = await Promise.all([
         db.from('clients').select('id, created_at')
           .eq('organization_id', organizationId)
           .gte('created_at', `${weekAgoStr}T00:00:00`),
@@ -119,10 +111,14 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
         })(),
       ]);
 
-      // Collect all notification IDs (must match NotificationsPage)
+      // Collect all notification IDs (must match NotificationsPage).
+      // NOTE: today's scheduled appointments are intentionally excluded
+      // — they're already shown on the Dashboard / My Portal. The
+      // notifications surface should only carry items that actually
+      // need attention (completions, cancellations, vaccines due, new
+      // clients, real notification_events).
       const allIds: string[] = [];
 
-      (apptTodayRes.data || []).forEach((a) => allIds.push(`appt-today-${a.id}`));
       (completedRes.data || []).forEach((a) => allIds.push(`appt-done-${a.id}`));
       (cancelledRes.data || []).forEach((a) => allIds.push(`appt-cancel-${a.id}`));
       (vacRes.data || []).forEach((v) => allIds.push(`vax-${v.id}`));
@@ -254,7 +250,10 @@ export function Sidebar({ isDark, onToggleTheme }: { isDark: boolean; onToggleTh
     }
 
     checkChatUnread();
-    interval = setInterval(checkChatUnread, 3000);
+    // 60s instead of 3s — the chat page itself uses real-time, this is
+    // just a background freshness ping for the sidebar badge. 3s was
+    // putting roughly 1,200 queries / hour on every signed-in user.
+    interval = setInterval(checkChatUnread, 60_000);
 
     return () => { mounted = false; if (interval) clearInterval(interval); };
   }, [pathname, user]);

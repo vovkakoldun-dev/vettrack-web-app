@@ -854,7 +854,7 @@ export default function RecordDetailPage() {
       </div>
 
       {/* ───────── Section 1: Patient Info + Visit Details ───────── */}
-      <div className="grid grid-cols-2 gap-6 mb-6">
+      <div data-tour="record-patient-visit" className="grid grid-cols-2 gap-6 mb-6">
         {/* Patient Info */}
         <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6" style={{ borderRadius: '12px' }}>
           <SectionHeader icon={User} title="Patient Information" />
@@ -944,8 +944,9 @@ export default function RecordDetailPage() {
       )}
 
       {/* ───────── Section 3: Diagnosis ───────── */}
+      {/* data-tour anchor placed on the diagnosis card below */}
       {record.diagnosis.primary && record.diagnosis.primary !== '—' && (
-      <div className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6 mb-6" style={{ borderRadius: '12px' }}>
+      <div data-tour="record-diagnosis" className="bg-[var(--surface-white)] border border-[var(--border-color)] p-6 mb-6" style={{ borderRadius: '12px' }}>
         <SectionHeader icon={Stethoscope} title="Diagnosis" />
         <div className="mb-4">
           <span className="text-[var(--text-secondary)]" style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Primary Diagnosis</span>

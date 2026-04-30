@@ -491,7 +491,7 @@ export default function AdminClientsPage() {
               Manage your clients and their pets.
             </p>
           </div>
-          <Button onClick={() => setAddClientOpen(true)}>
+          <Button data-tour="admin-clients-add" onClick={() => setAddClientOpen(true)}>
             <Plus className="w-4 h-4" />
             Add Client
           </Button>
@@ -510,6 +510,7 @@ export default function AdminClientsPage() {
           <div className="relative flex-1 min-w-0" style={{ minWidth: '240px' }}>
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-secondary)] pointer-events-none" />
             <input
+              data-tour="admin-clients-search"
               type="text"
               placeholder="Search by pet, owner, or breed..."
               value={search}

@@ -160,7 +160,7 @@ export default function RecordsPage() {
       </div>
 
       {/* Stat Cards */}
-      <div className="grid grid-cols-4 gap-6 mb-8">
+      <div data-tour="records-stats" className="grid grid-cols-4 gap-6 mb-8">
         <StatCard title="Total Records" value={records.length.toString()} icon={FileText} trend={{ value: `${thisMonthCount} this month`, isPositive: true }} iconColor="var(--brand-green-text)" />
         <StatCard title="This Month" value={thisMonthCount.toString()} icon={CalendarDays} trend={{ value: '+5 from last month', isPositive: true }} iconColor="#3B82F6" />
         <StatCard title="Pending Review" value={pendingCount.toString()} icon={ClipboardList} trend={{ value: 'Needs attention', isPositive: false }} iconColor="#F4A261" />
@@ -172,34 +172,37 @@ export default function RecordsPage() {
         <div className="relative flex-1 min-w-[240px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-secondary)]" />
           <Input
+            data-tour="records-search"
             placeholder="Search by pet, owner, vet, or summary..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-9"
           />
         </div>
-        <Select value={typeFilter} onValueChange={setTypeFilter}>
-          <SelectTrigger className="w-[170px]"><SelectValue placeholder="All Types" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Types</SelectItem>
-            {(['Visit', 'Vaccination', 'Lab Result', 'Surgery', 'Prescription', 'Dental', 'Imaging'] as RecordType[]).map((t) => (
-              <SelectItem key={t} value={t}>{t}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[170px]"><SelectValue placeholder="All Statuses" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            {(['Final', 'Pending Review', 'Amended', 'Draft'] as RecordStatus[]).map((s) => (
-              <SelectItem key={s} value={s}>{s}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <div className="flex items-center gap-2">
-          <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-[150px]" />
-          <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>to</span>
-          <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-[150px]" min={dateFrom} />
+        <div data-tour="records-filters" className="flex items-center gap-4 flex-wrap">
+          <Select value={typeFilter} onValueChange={setTypeFilter}>
+            <SelectTrigger className="w-[170px]"><SelectValue placeholder="All Types" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Types</SelectItem>
+              {(['Visit', 'Vaccination', 'Lab Result', 'Surgery', 'Prescription', 'Dental', 'Imaging'] as RecordType[]).map((t) => (
+                <SelectItem key={t} value={t}>{t}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-[170px]"><SelectValue placeholder="All Statuses" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              {(['Final', 'Pending Review', 'Amended', 'Draft'] as RecordStatus[]).map((s) => (
+                <SelectItem key={s} value={s}>{s}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <div className="flex items-center gap-2">
+            <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-[150px]" />
+            <span className="text-[var(--text-secondary)]" style={{ fontSize: '13px' }}>to</span>
+            <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-[150px]" min={dateFrom} />
+          </div>
         </div>
       </div>
 
@@ -303,13 +306,15 @@ export default function RecordsPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filtered.map((rec) => {
+            {filtered.map((rec, idx) => {
               const typeStyle = recordTypeColors[rec.recordType];
               const statusStyle = statusColors[rec.status];
               const isSelected = rec.dbId ? selectedIds.has(rec.dbId) : false;
               return (
                 <TableRow
                   key={rec.id}
+                  data-tour={idx === 0 ? 'records-first-row' : undefined}
+                  data-record-id={rec.dbId || rec.id}
                   className="hover:bg-[var(--surface-elevated)] cursor-pointer transition-colors"
                   style={isSelected ? { backgroundColor: 'color-mix(in srgb, var(--brand-green-text) 8%, transparent)' } : undefined}
                   onClick={() => navigate(`${basePath}/${rec.dbId || rec.id}`)}

@@ -36,6 +36,8 @@ export function ConnectionStatusBadge() {
 
   return (
     <button
+      data-explain-title="Live connection status"
+      data-explain-desc="Shows whether the app is in sync with the server. Green wifi icon = connected and up-to-date; orange spinner = reconnecting; red icon = offline (you'll see cached data only). Click it to force a refresh."
       onClick={refresh}
       title={state === 'connected' ? `Last sync: ${label}` : label}
       style={{

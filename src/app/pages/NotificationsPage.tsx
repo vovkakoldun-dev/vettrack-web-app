@@ -219,50 +219,11 @@ async function fetchNotificationsFromSupabase(db: any, isAdmin: boolean, userId?
       })
     : null;
 
-  // ── 1. Today's upcoming appointments ──────────────────────
-  if (todayAppointments) {
-    for (const appt of todayAppointments) {
-      const pet = appt.pets as { id: string; name: string; species: string; breed: string | null } | null;
-      const client = appt.clients as { id: string; first_name: string; last_name: string } | null;
-      const vet = appt.staff as { id: string; profiles: { first_name: string; last_name: string } | null } | null;
-      const apptTime = new Date(appt.scheduled_at);
-      const diffMin = Math.round((apptTime.getTime() - now.getTime()) / 60000);
-      const isFuture = diffMin > 0;
-      const isUrgent = isFuture && diffMin <= 30;
-
-      const petLabel = pet ? `${pet.name}${pet.species ? ` (${pet.species})` : ''}` : 'Unknown pet';
-      const ownerLabel = client ? `${client.first_name} ${client.last_name}` : '';
-      const vetLabel = vet?.profiles ? `Dr. ${vet.profiles.first_name} ${vet.profiles.last_name}` : '';
-      const reasonLabel = appt.reason || 'General visit';
-
-      let title: string;
-      if (isFuture) {
-        if (diffMin <= 60) {
-          title = `Upcoming appointment in ${diffMin} minute${diffMin !== 1 ? 's' : ''}`;
-        } else {
-          const hours = Math.floor(diffMin / 60);
-          title = `Upcoming appointment in ${hours} hour${hours !== 1 ? 's' : ''}`;
-        }
-      } else {
-        title = `Appointment scheduled at ${formatTime12(appt.scheduled_at)}`;
-      }
-
-      notifications.push({
-        id: `appt-today-${appt.id}`,
-        category: 'Appointment',
-        title,
-        description: `${petLabel} with ${ownerLabel}${vetLabel ? ` — ${vetLabel}` : ''} — ${reasonLabel} at ${formatTime12(appt.scheduled_at)}.`,
-        time: formatRelativeTime(appt.scheduled_at),
-        timeISO: appt.scheduled_at,
-        read: false,
-        petName: pet?.name,
-        ownerName: ownerLabel,
-        actionLabel: 'View Appointment',
-        actionPath: '/appointments',
-        urgent: isUrgent,
-      });
-    }
-  }
+  // ── 1. (Removed) Today's upcoming appointments ───────────
+  // The schedule already lives on the Dashboard / My Portal — surfacing
+  // every booking on the Notifications page would mean a fresh "7 unread"
+  // every morning. The query itself is left in place (other code may
+  // still want it); we just don't generate notifications from it.
 
   // ── 2. Recently completed appointments (last 7 days) ──────
   if (completedAppointments) {
@@ -649,7 +610,7 @@ export default function NotificationsPage() {
               .gte('timestamp', weekAgoDate.toISOString()),
           ]).then(async ([apptToday, completed, cancelledAppts, vacs, clients, notifEvts]) => {
             const extraIds: string[] = [];
-            (apptToday.data || []).forEach(a => extraIds.push(`appt-today-${a.id}`));
+            // appt-today-* IDs are no longer surfaced as notifications.
             (completed.data || []).forEach(a => extraIds.push(`appt-done-${a.id}`));
             (cancelledAppts.data || []).forEach(a => extraIds.push(`appt-cancel-${a.id}`));
             (vacs.data || []).forEach(v => extraIds.push(`vax-${v.id}`));
@@ -762,7 +723,7 @@ export default function NotificationsPage() {
           .gte('timestamp', weekAgo.toISOString()),
       ]);
       const sidebarIds: string[] = [];
-      (apptToday.data || []).forEach(a => sidebarIds.push(`appt-today-${a.id}`));
+      // appt-today-* IDs are no longer surfaced as notifications.
       (completed.data || []).forEach(a => sidebarIds.push(`appt-done-${a.id}`));
       (cancelled.data || []).forEach(a => sidebarIds.push(`appt-cancel-${a.id}`));
       (vacs.data || []).forEach(v => sidebarIds.push(`vax-${v.id}`));
@@ -813,7 +774,7 @@ export default function NotificationsPage() {
           .gte('created_at', `${weekAgoStr}T00:00:00`),
       ]);
       const sidebarIds: string[] = [];
-      (apptToday.data || []).forEach(a => sidebarIds.push(`appt-today-${a.id}`));
+      // appt-today-* IDs are no longer surfaced as notifications.
       (completed.data || []).forEach(a => sidebarIds.push(`appt-done-${a.id}`));
       (cancelled.data || []).forEach(a => sidebarIds.push(`appt-cancel-${a.id}`));
       (vacs.data || []).forEach(v => sidebarIds.push(`vax-${v.id}`));

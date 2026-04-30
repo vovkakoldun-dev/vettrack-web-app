@@ -13,7 +13,7 @@ import { OwnerSidebar } from './components/OwnerSidebar';
 import { SuperAdminSidebar } from './components/SuperAdminSidebar';
 import { ActiveVisitProvider, useActiveVisit } from './context/ActiveVisitContext';
 import { TourOverlay } from './components/TourOverlay';
-import { DOCTOR_TOUR_STEPS } from './components/tourSteps.tsx';
+import { DOCTOR_TOUR_STEPS, ADMIN_TOUR_STEPS } from './components/tourSteps.tsx';
 import { HelpFab } from './components/HelpFab';
 
 // ─── Lazy-loaded pages (code-split per portal) ────────────────
@@ -305,7 +305,11 @@ function MainApp() {
     } catch {}
 
     // Case 2: same-session navigation from the welcome wizard.
-    const onStartTour = () => start();
+    // Only react to the doctor flavor — the admin shell has its own.
+    const onStartTour = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail || detail === 'doctor') start();
+    };
     window.addEventListener('vettrack:start-tour', onStartTour);
     return () => {
       window.removeEventListener('vettrack:start-tour', onStartTour);
@@ -400,6 +404,67 @@ function MainApp() {
 
 function AdminApp() {
   const { isDark, toggle } = useTheme();
+  const navigate = useNavigate();
+
+  // ── Product tour kickoff (mirror of MainApp's setup) ─────────────────
+  const [tourOpen, setTourOpen] = useState(false);
+  const [tourSteps, setTourSteps] = useState<typeof ADMIN_TOUR_STEPS>(ADMIN_TOUR_STEPS);
+  const [tourStartIndex, setTourStartIndex] = useState(0);
+  const [parentTour, setParentTour] = useState<{
+    steps: typeof ADMIN_TOUR_STEPS;
+    resumeIndex: number;
+    path: string;
+  } | null>(null);
+  useEffect(() => {
+    let timer: number | undefined;
+    const start = () => {
+      try { sessionStorage.removeItem('vettrack-tour-pending'); } catch {}
+      setTourSteps(ADMIN_TOUR_STEPS);
+      setTourStartIndex(0);
+      setParentTour(null);
+      timer = window.setTimeout(() => setTourOpen(true), 250);
+    };
+    try {
+      if (sessionStorage.getItem('vettrack-tour-pending') === 'admin') start();
+    } catch {}
+    const onStartTour = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail || detail === 'admin') start();
+    };
+    window.addEventListener('vettrack:start-tour', onStartTour);
+    return () => {
+      window.removeEventListener('vettrack:start-tour', onStartTour);
+      if (timer) window.clearTimeout(timer);
+    };
+  }, []);
+
+  const handleTourAction = (
+    action: { label: string; path: string; steps: typeof ADMIN_TOUR_STEPS },
+    currentIdx: number,
+  ) => {
+    setParentTour({ steps: tourSteps, resumeIndex: currentIdx + 1, path: window.location.pathname });
+    setTourOpen(false);
+    navigate(action.path);
+    window.setTimeout(() => {
+      setTourSteps(action.steps);
+      setTourStartIndex(0);
+      setTourOpen(true);
+    }, 350);
+  };
+  const handleSubTourComplete = () => {
+    if (!parentTour) { setTourOpen(false); return; }
+    const { steps, resumeIndex, path } = parentTour;
+    setTourOpen(false);
+    if (window.location.pathname !== path) navigate(path);
+    window.setTimeout(() => {
+      setTourSteps(steps);
+      setTourStartIndex(resumeIndex);
+      setParentTour(null);
+      setTourOpen(true);
+    }, 350);
+  };
+  const handleTourClose = () => { setTourOpen(false); setParentTour(null); };
+
   return (
     <div className="flex h-screen bg-[var(--bg-offwhite)]">
       <AdminSidebar isDark={isDark} onToggleTheme={toggle} />
@@ -421,9 +486,21 @@ function AdminApp() {
           <Route path="/chat" element={<AdminChatPage />} />
           <Route path="/tasks" element={<AdminTasksPage />} />
           <Route path="/settings" element={<AdminSettingsPage />} />
+          <Route path="/welcome" element={<WelcomePage />} />
         </Routes>
         </Suspense>
       </main>
+      <TourOverlay
+        open={tourOpen}
+        steps={tourSteps}
+        startIndex={tourStartIndex}
+        onAction={handleTourAction}
+        onComplete={parentTour ? handleSubTourComplete : undefined}
+        completeLabel={parentTour ? 'Back to tour' : undefined}
+        onNavigate={(p) => navigate(p)}
+        onClose={handleTourClose}
+      />
+      <HelpFab />
     </div>
   );
 }

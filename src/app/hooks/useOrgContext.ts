@@ -9,6 +9,10 @@ export interface OrgContext {
 // Cleared on auth state change (sign-out / sign-in).
 let _cache: OrgContext | null = null;
 let _cacheUserId: string | null = null;
+// In-flight promise — when many components call getOrgContext() at the
+// same time on mount, they all share this single network round-trip
+// instead of each hammering the staff table.
+let _inflight: Promise<OrgContext> | null = null;
 
 // Presence heartbeat: update user_sessions.last_active_at at most once per 5 min
 let _lastHeartbeat = 0;
@@ -78,45 +82,59 @@ export async function getOrgContext(): Promise<OrgContext> {
     return _cache;
   }
 
-  // Try staff table first (doctors, admins, superadmins)
-  const { data: staffData } = await supabase
-    .from('staff')
-    .select('organization_id, clinic_id')
-    .eq('id', user.id)
-    .single();
+  // If a fetch is already in flight for this user, ride along on it
+  // instead of issuing a fresh staff lookup. This was the source of
+  // 20+ duplicate `staff?id=eq.<user>` requests on every page load.
+  if (_inflight) return _inflight;
 
-  if (staffData) {
-    _cache = {
-      organizationId: staffData.organization_id,
-      clinicId: staffData.clinic_id,
-    };
-    _cacheUserId = user.id;
-    firePresenceHeartbeat(user.id);
-    return _cache;
-  }
+  _inflight = (async () => {
+    try {
+      // Try staff table first (doctors, admins, superadmins)
+      const { data: staffData } = await supabase
+        .from('staff')
+        .select('organization_id, clinic_id')
+        .eq('id', user.id)
+        .single();
 
-  // Fallback: profiles table (pet owners and other non-staff users)
-  const { data: profileData, error: profileErr } = await supabase
-    .from('profiles')
-    .select('organization_id')
-    .eq('id', user.id)
-    .single();
+      if (staffData) {
+        _cache = {
+          organizationId: staffData.organization_id,
+          clinicId: staffData.clinic_id,
+        };
+        _cacheUserId = user.id;
+        firePresenceHeartbeat(user.id);
+        return _cache;
+      }
 
-  if (profileErr || !profileData?.organization_id) {
-    throw new Error('Failed to load org context: no staff row or profile found');
-  }
+      // Fallback: profiles table (pet owners and other non-staff users)
+      const { data: profileData, error: profileErr } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single();
 
-  _cache = {
-    organizationId: profileData.organization_id,
-    clinicId: '',
-  };
-  _cacheUserId = user.id;
-  firePresenceHeartbeat(user.id);
-  return _cache;
+      if (profileErr || !profileData?.organization_id) {
+        throw new Error('Failed to load org context: no staff row or profile found');
+      }
+
+      _cache = {
+        organizationId: profileData.organization_id,
+        clinicId: '',
+      };
+      _cacheUserId = user.id;
+      firePresenceHeartbeat(user.id);
+      return _cache;
+    } finally {
+      _inflight = null;
+    }
+  })();
+
+  return _inflight;
 }
 
 /** Clear the cache (call on sign-out). */
 export function clearOrgContextCache() {
   _cache = null;
   _cacheUserId = null;
+  _inflight = null;
 }
